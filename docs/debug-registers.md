@@ -7,9 +7,9 @@ return `0xdeadbeef`; unknown writes have no effect.
 | Address | Access | Meaning |
 |---:|:---:|---|
 | `0x0000` | R | Magic `0x54504830` (`TPH0`) |
-| `0x0004` | R | Register ABI, currently `0x00010003` (1.3) |
+| `0x0004` | R | Register ABI, currently `0x00010004` (1.4) |
 | `0x0008` | R | Build date in packed hexadecimal (`0x20260927`) |
-| `0x000c` | R | Core capabilities: bit 0 debug bank, bit 1 stream transport, bit 2 WAV playback, bit 3 tone fallback |
+| `0x000c` | R | Core capabilities: bit 0 debug bank, bit 1 stream transport, bit 2 WAV playback, bit 3 startup diagnostic tone, bit 4 FLAC playback |
 | `0x0010` | R | Logic-clock cycles since reset, wrapping at 32 bits |
 | `0x0014` | R | Video frames since reset |
 | `0x0018` | R | Valid debug requests seen by the register bank |
@@ -28,8 +28,8 @@ return `0xdeadbeef`; unknown writes have no effect.
 | `0x0050` | R | BL616-provided HID controller 1 state |
 | `0x0054` | R | BL616-provided HID controller 2 state |
 | `0x0058` | R | USB status: `{usb2_error, usb2_type[1:0], usb1_error, usb1_type[1:0]}` |
-| `0x005c` | R | Audio status: error `[13:6]`, playback active `[5]`, WAV format valid `[4]`, state `[3:0]` |
-| `0x0060` | R | Detected WAV sample rate in hertz |
+| `0x005c` | R | Audio status: error `[13:6]`, playback active `[5]`, selected decoder format valid `[4]`, state `[3:0]` |
+| `0x0060` | R | Detected audio sample rate in hertz |
 | `0x0064` | R | PCM FIFO fill level in stereo samples |
 | `0x0068` | R | PCM samples presented for playback in the current stream |
 | `0x006c` | R | PCM FIFO underruns in the current stream |
@@ -42,12 +42,13 @@ RIFF/WAVE header, `2` missing or unsupported `fmt ` data, `3` a partial stereo
 PCM sample in the data chunk, and `4` premature transport end.
 Content-front-end error `0x10` means the stream was recognized but its decoder
 is not implemented, and `0x11` means the content signature was unknown or
-ended before it could be classified. FLAC currently produces `0x10`; format
-recognition does not advertise FLAC decode capability.
+ended before it could be classified. FLAC errors are `0x21` unsupported
+profile, `0x22` invalid frame header, `0x23` CRC failure, `0x24` invalid
+subframe, `0x25` truncated stream, and `0x26` internal range failure.
 
 Examples use the authoritative host client from the sibling Tang-Control
-repository. Check out its `feature/usb-cdc-file-transfer` branch at `e3aa4f9`,
-then run these commands from the Tang-Phosphor repository root:
+repository. Check out its `feature/usb-cdc-file-transfer` branch at `10c5761`, then run
+these commands from the Tang-Phosphor repository root:
 
 ```bash
 python3 ../Tang-Control/scripts/tangctl.py caps

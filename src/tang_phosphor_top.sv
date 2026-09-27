@@ -151,18 +151,29 @@ wire [31:0] stream_cancels;
 wire [31:0] stream_last_offset;
 wire [31:0] stream_crc32;
 wire [3:0] player_state;
-wire wav_format_valid;
-wire [31:0] wav_sample_rate;
+wire audio_format_valid;
+wire [31:0] audio_sample_rate;
 wire [11:0] pcm_fifo_level;
 wire [31:0] samples_played;
 wire [31:0] audio_underruns;
 wire [7:0] audio_error;
 wire [2:0] detected_format;
 
-// Remain at the proven 48 kHz rate until a supported WAV header is complete.
-// The timebase latches and restarts on a change before FIFO prefill can finish.
-assign requested_audio_rate_48k = !wav_format_valid ||
-    wav_sample_rate == 32'd48_000;
+audio_output_policy output_policy (
+    .clk(clk_pixel),
+    .resetn(resetn),
+    .stream_start(stream_start),
+    .format_valid(audio_format_valid),
+    .sample_rate(audio_sample_rate),
+    .playback_active(playback_active),
+    .player_left(player_audio_left),
+    .player_right(player_audio_right),
+    .diagnostic_left(tone_sample_word[0]),
+    .diagnostic_right(tone_sample_word[1]),
+    .rate_48k(requested_audio_rate_48k),
+    .output_left(audio_sample_word[0]),
+    .output_right(audio_sample_word[1])
+);
 
 audio_test_source audio_timebase (
     .clk_pixel(clk_pixel),
@@ -173,9 +184,6 @@ audio_test_source audio_timebase (
     .active_sample_rate(hdmi_audio_rate),
     .audio_sample_word(tone_sample_word)
 );
-
-assign audio_sample_word[0] = playback_active ? player_audio_left : tone_sample_word[0];
-assign audio_sample_word[1] = playback_active ? player_audio_right : tone_sample_word[1];
 
 phosphor_video video (
     .resetn(resetn),
@@ -234,15 +242,15 @@ iosys_bl616 #(
     .uart_tx(UART_TXD)
 );
 
-wav_stream_player wav_player (
+wav_stream_player audio_player (
     .clk(clk_pixel), .resetn(resetn),
     .stream_start(stream_start), .stream_end(stream_end),
     .stream_cancel(stream_cancel), .stream_data(stream_data),
     .stream_valid(stream_valid), .stream_ready(stream_ready),
     .sample_tick(sample_tick), .audio_left(player_audio_left),
     .audio_right(player_audio_right), .playback_active(playback_active),
-    .player_state(player_state), .format_valid(wav_format_valid),
-    .sample_rate(wav_sample_rate), .fifo_level(pcm_fifo_level),
+    .player_state(player_state), .format_valid(audio_format_valid),
+    .sample_rate(audio_sample_rate), .fifo_level(pcm_fifo_level),
     .samples_played(samples_played), .underrun_count(audio_underruns),
     .error_code(audio_error), .detected_format(detected_format)
 );
@@ -280,9 +288,9 @@ debug_regs debug_registers (
     .hid2(hid2),
     .controller_status(controller_status),
     .player_state(player_state),
-    .wav_format_valid(wav_format_valid),
+    .audio_format_valid(audio_format_valid),
     .playback_active(playback_active),
-    .wav_sample_rate(wav_sample_rate),
+    .audio_sample_rate(audio_sample_rate),
     .pcm_fifo_level(pcm_fifo_level),
     .samples_played(samples_played),
     .audio_underruns(audio_underruns),

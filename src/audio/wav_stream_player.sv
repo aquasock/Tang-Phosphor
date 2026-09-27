@@ -1,6 +1,6 @@
-// Stream-to-HDMI WAV playback shell. The UART receiver provides byte-level
-// backpressure; this module adds decoded-PCM buffering and waits for a useful
-// prefill before replacing the diagnostic tones.
+// Stream-to-HDMI audio playback shell. The UART receiver provides byte-level
+// backpressure; this module selects the detected decoder, adds decoded-PCM
+// buffering, and waits for a useful prefill before replacing diagnostic tones.
 
 module wav_stream_player #(
     parameter integer FIFO_ADDRESS_WIDTH = 11,
@@ -41,6 +41,11 @@ localparam logic [FIFO_ADDRESS_WIDTH:0] PREFILL_LEVEL =
 
 logic session_active;
 logic decoder_reset;
+logic [7:0] ingress_data [0:1];
+logic ingress_read_pointer;
+logic ingress_write_pointer;
+logic [1:0] ingress_count;
+logic ingress_end_pending;
 logic detector_ready;
 logic [7:0] detector_data;
 logic detector_valid;
@@ -48,16 +53,38 @@ logic detector_output_ready;
 logic detector_end;
 logic detector_format_valid;
 logic detector_format_error;
-logic decoder_ready;
-logic decoder_pcm_valid;
+logic [7:0] decoder_ingress_data [0:1];
+logic decoder_ingress_read_pointer;
+logic decoder_ingress_write_pointer;
+logic [1:0] decoder_ingress_count;
+logic decoder_end_pending;
+logic wav_ready;
+logic wav_pcm_valid;
+logic wav_pcm_ready;
+logic signed [15:0] wav_pcm_left;
+logic signed [15:0] wav_pcm_right;
+logic wav_pcm_eof;
+logic wav_format_valid;
+logic [31:0] wav_sample_rate;
+logic wav_format_error;
+logic [7:0] wav_error_code;
+logic flac_ready;
+logic flac_pcm_valid;
+logic flac_pcm_ready;
+logic signed [15:0] flac_pcm_left;
+logic signed [15:0] flac_pcm_right;
+logic flac_pcm_eof;
+logic flac_format_valid;
+logic [31:0] flac_sample_rate;
+logic flac_format_error;
+logic [7:0] flac_error_code;
+logic selected_pcm_valid;
 logic decoder_pcm_ready;
-logic signed [15:0] decoder_pcm_left;
-logic signed [15:0] decoder_pcm_right;
-logic decoder_pcm_eof;
-logic decoder_metadata_valid;
-logic [31:0] decoder_total_samples;
-logic decoder_format_error;
-logic [7:0] decoder_error_code;
+logic signed [15:0] selected_pcm_left;
+logic signed [15:0] selected_pcm_right;
+logic selected_pcm_eof;
+logic selected_format_error;
+logic [7:0] selected_error_code;
 
 logic [32:0] fifo_input_data;
 logic fifo_input_ready;
@@ -70,45 +97,130 @@ logic finish_pending;
 logic playback_complete;
 
 assign decoder_reset = !resetn || stream_start || stream_cancel;
-assign stream_ready = session_active && detector_ready;
+assign stream_ready = session_active && ingress_count != 2;
+
+wire ingress_push = stream_valid && stream_ready;
+wire ingress_pop = ingress_count != 0 && detector_ready;
+
+always_ff @(posedge clk) begin
+    if (!resetn || stream_start || stream_cancel) begin
+        ingress_read_pointer <= 1'b0;
+        ingress_write_pointer <= 1'b0;
+        ingress_count <= 0;
+        ingress_end_pending <= 1'b0;
+    end else begin
+        if (stream_end && session_active)
+            ingress_end_pending <= 1'b1;
+
+        if (ingress_push) begin
+            ingress_data[ingress_write_pointer] <= stream_data;
+            ingress_write_pointer <= !ingress_write_pointer;
+        end
+        if (ingress_pop)
+            ingress_read_pointer <= !ingress_read_pointer;
+
+        case ({ingress_push, ingress_pop})
+            2'b10: ingress_count <= ingress_count + 1'b1;
+            2'b01: ingress_count <= ingress_count - 1'b1;
+            default: ;
+        endcase
+    end
+end
 
 stream_format_detector detector (
     .clk(clk), .reset(decoder_reset),
-    .input_data(stream_data),
-    .input_valid(stream_valid && session_active),
+    .input_data(ingress_data[ingress_read_pointer]),
+    .input_valid(ingress_count != 0),
     .input_ready(detector_ready),
-    .input_end(stream_end && session_active),
+    .input_end(ingress_end_pending && ingress_count == 0),
     .output_data(detector_data), .output_valid(detector_valid),
     .output_ready(detector_output_ready), .output_end(detector_end),
     .detected_format(detected_format), .format_valid(detector_format_valid),
     .format_error(detector_format_error)
 );
 
-// WAV currently owns the only implemented decoder. Recognized future formats
-// and unknown input remain drainable so the transport can close cleanly.
-assign detector_output_ready = detected_format == 3'd1 ? decoder_ready : 1'b1;
+wire selected_decoder_ready = detected_format == 3'd1 ? wav_ready :
+    detected_format == 3'd2 ? flac_ready : 1'b1;
+wire decoder_ingress_push = detector_valid && detector_output_ready;
+wire decoder_ingress_pop = decoder_ingress_count != 0 && selected_decoder_ready;
 
-wav_decoder decoder (
+assign detector_output_ready = decoder_ingress_count != 2;
+
+always_ff @(posedge clk) begin
+    if (decoder_reset) begin
+        decoder_ingress_read_pointer <= 1'b0;
+        decoder_ingress_write_pointer <= 1'b0;
+        decoder_ingress_count <= 0;
+        decoder_end_pending <= 1'b0;
+    end else begin
+        if (detector_end)
+            decoder_end_pending <= 1'b1;
+
+        if (decoder_ingress_push) begin
+            decoder_ingress_data[decoder_ingress_write_pointer] <= detector_data;
+            decoder_ingress_write_pointer <= !decoder_ingress_write_pointer;
+        end
+        if (decoder_ingress_pop)
+            decoder_ingress_read_pointer <= !decoder_ingress_read_pointer;
+
+        case ({decoder_ingress_push, decoder_ingress_pop})
+            2'b10: decoder_ingress_count <= decoder_ingress_count + 1'b1;
+            2'b01: decoder_ingress_count <= decoder_ingress_count - 1'b1;
+            default: ;
+        endcase
+    end
+end
+
+wav_decoder wav_decoder_instance (
     .clk(clk), .reset(decoder_reset),
-    .input_data(detector_data),
-    .input_valid(detector_valid && detected_format == 3'd1),
-    .input_ready(decoder_ready),
-    .input_end(detector_end && detected_format == 3'd1),
-    .pcm_valid(decoder_pcm_valid), .pcm_ready(decoder_pcm_ready),
-    .pcm_left(decoder_pcm_left), .pcm_right(decoder_pcm_right),
-    .pcm_eof(decoder_pcm_eof), .format_valid(format_valid),
-    .metadata_valid(decoder_metadata_valid), .sample_rate(sample_rate),
-    .total_samples(decoder_total_samples),
-    .format_error(decoder_format_error), .error_code(decoder_error_code)
+    .input_data(decoder_ingress_data[decoder_ingress_read_pointer]),
+    .input_valid(decoder_ingress_count != 0 && detected_format == 3'd1),
+    .input_ready(wav_ready),
+    .input_end(decoder_end_pending && decoder_ingress_count == 0 &&
+        detected_format == 3'd1),
+    .pcm_valid(wav_pcm_valid), .pcm_ready(wav_pcm_ready),
+    .pcm_left(wav_pcm_left), .pcm_right(wav_pcm_right),
+    .pcm_eof(wav_pcm_eof), .format_valid(wav_format_valid),
+    .metadata_valid(), .sample_rate(wav_sample_rate), .total_samples(),
+    .format_error(wav_format_error), .error_code(wav_error_code)
 );
 
-assign fifo_input_data = {decoder_pcm_eof, decoder_pcm_left, decoder_pcm_right};
+flac_decoder flac_decoder_instance (
+    .clk(clk), .reset(decoder_reset),
+    .input_data(decoder_ingress_data[decoder_ingress_read_pointer]),
+    .input_valid(decoder_ingress_count != 0 && detected_format == 3'd2),
+    .input_ready(flac_ready),
+    .input_end(decoder_end_pending && decoder_ingress_count == 0 &&
+        detected_format == 3'd2),
+    .pcm_valid(flac_pcm_valid), .pcm_ready(flac_pcm_ready),
+    .pcm_left(flac_pcm_left), .pcm_right(flac_pcm_right),
+    .pcm_eof(flac_pcm_eof), .format_valid(flac_format_valid),
+    .metadata_valid(), .sample_rate(flac_sample_rate), .total_samples(),
+    .format_error(flac_format_error), .error_code(flac_error_code)
+);
+
+assign format_valid = detected_format == 3'd1 ? wav_format_valid :
+    detected_format == 3'd2 ? flac_format_valid : 1'b0;
+assign sample_rate = detected_format == 3'd1 ? wav_sample_rate :
+    detected_format == 3'd2 ? flac_sample_rate : 32'b0;
+assign selected_pcm_valid = detected_format == 3'd1 ? wav_pcm_valid :
+    detected_format == 3'd2 ? flac_pcm_valid : 1'b0;
+assign selected_pcm_left = detected_format == 3'd1 ? wav_pcm_left : flac_pcm_left;
+assign selected_pcm_right = detected_format == 3'd1 ? wav_pcm_right : flac_pcm_right;
+assign selected_pcm_eof = detected_format == 3'd1 ? wav_pcm_eof : flac_pcm_eof;
+assign selected_format_error = detected_format == 3'd1 ? wav_format_error :
+    detected_format == 3'd2 ? flac_format_error : 1'b0;
+assign selected_error_code = detected_format == 3'd1 ? wav_error_code : flac_error_code;
+
+assign fifo_input_data = {selected_pcm_eof, selected_pcm_left, selected_pcm_right};
 assign decoder_pcm_ready = fifo_input_ready;
+assign wav_pcm_ready = decoder_pcm_ready && detected_format == 3'd1;
+assign flac_pcm_ready = decoder_pcm_ready && detected_format == 3'd2;
 assign fifo_output_ready = sample_tick && playback_started && fifo_output_valid;
 
 pcm_sample_fifo #(.ADDRESS_WIDTH(FIFO_ADDRESS_WIDTH)) pcm_fifo (
     .clk(clk), .reset(!resetn), .clear(stream_start || stream_cancel),
-    .input_data(fifo_input_data), .input_valid(decoder_pcm_valid),
+    .input_data(fifo_input_data), .input_valid(selected_pcm_valid),
     .input_ready(fifo_input_ready), .output_data(fifo_output_data),
     .output_valid(fifo_output_valid), .output_ready(fifo_output_ready),
     .level(fifo_level)
@@ -163,13 +275,14 @@ always_ff @(posedge clk) begin
             player_state <= PLAYER_ERROR;
             playback_started <= 1'b0;
             playback_active <= 1'b0;
-        end else if (detector_format_valid && detected_format != 3'd1) begin
+        end else if (detector_format_valid &&
+                detected_format != 3'd1 && detected_format != 3'd2) begin
             error_code <= 8'h10; // Recognized format has no decoder yet.
             player_state <= PLAYER_ERROR;
             playback_started <= 1'b0;
             playback_active <= 1'b0;
-        end else if (decoder_format_error) begin
-            error_code <= decoder_error_code;
+        end else if (selected_format_error) begin
+            error_code <= selected_error_code;
             player_state <= PLAYER_ERROR;
             playback_started <= 1'b0;
             playback_active <= 1'b0;
@@ -178,7 +291,7 @@ always_ff @(posedge clk) begin
                     !finish_pending && !playback_complete)
                 player_state <= PLAYER_PREFILL;
 
-            if (decoder_pcm_valid && decoder_pcm_ready && decoder_pcm_eof)
+            if (selected_pcm_valid && decoder_pcm_ready && selected_pcm_eof)
                 eof_queued <= 1'b1;
 
             if (!playback_started && !finish_pending && !playback_complete && format_valid &&

@@ -49,7 +49,7 @@ supported profile. Project-specific limits remain implementation limits.
 - Source: https://www.rfc-editor.org/rfc/rfc9639.html
 - Authority: IETF Standards Track specification for the FLAC format and streamable subset, published December 2024.
 - Relevant rule: A native FLAC bitstream begins with the four-byte `fLaC` marker (`0x664c6143`), followed by the mandatory STREAMINFO metadata block.
-- Tang-Phosphor use: Classify native FLAC after exactly four prefix bytes, replay those bytes to the future decoder, and do not interpret recognition alone as decoder capability.
+- Tang-Phosphor use: Classify native FLAC after exactly four prefix bytes and replay those bytes to the decoder. The implemented RFC 9639 streamable-subset profile is bounded to signed 16-bit stereo at 44.1 or 48 kHz, a maximum 4,608-sample block, fixed predictors 0–4, LPC orders 1–12, Rice methods 0 and 1, escape residuals, wasted bits, all stereo channel assignments, and mandatory header CRC-8 and frame CRC-16 validation.
 
 ### Resource Interchange File Format (RIFF)
 

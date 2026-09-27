@@ -294,3 +294,49 @@ Design the bounded CD-quality FLAC subset against RFC 9639, then implement and i
 - User Test: PASS
 
 ---
+
+## 9 COMMIT Unreleased 2026-09-27T14:36:48-07:00
+
+#### Coming From:
+
+Unreleased 3380012
+
+#### Purpose:
+
+Implement and hardware-qualify FPGA-native CD-quality FLAC playback through the existing content detector, PCM boundary, Tang-Control loader, and VLC-style playlist workflow.
+
+#### Outcome:
+
+The core now decodes the RFC 9639 streamable subset for signed 16-bit stereo 44.1/48 kHz FLAC, including STREAMINFO and metadata handling, constant, verbatim, fixed 0–4, and LPC 1–12 subframes, Rice4/Rice5 and escape residuals, wasted bits, all stereo channel assignments, header CRC-8, and frame CRC-16 admission through two 4,608-sample block-RAM banks. The shared player gained timing-isolation FIFOs, content-neutral diagnostics, debug ABI 1.4, FLAC capability bit 4, and a boundary policy that permanently silences startup tones after the first stream while retaining the last valid HDMI rate across independent playlist sessions. Real libFLAC vectors, rejection and corruption cases, backpressure, WAV/FLAC integration, native cadence, HDMI metadata, transport, and the new silent-boundary policy passed the complete regression. The final eight-core Gowin EDA 1.9.11.03 build for `GW5AST-LV138PG484AC1/I0` revision B had zero setup or hold violations, worst setup slack of `+0.722 ns`, worst hold slack of `+0.143 ns`, and artifact SHA-256 `ac2531e016cffeee570abf4c3ebbfdbaf1d03055a3f74388a21603005de37254`; its `4640660`-byte upload to `cores/console138k/tang-phosphor.bin` passed controller CRC-32 `f01ae6c8` and byte-identical SD readback. Tang-Control `feature/usb-cdc-file-transfer` commit `10c5761` adds direct and playlist FLAC selection; its `233441`-byte firmware with SHA-256 `6c9eaed0a9af6a9c42e39edcc68a0d974d38b1d55f3c0d334204eb733a198302` was application-only flashed at `0x40000` and passed device SHA verification. The user confirmed perfect direct FLAC playback, a four-entry WAV playlist, and a mixed WAV/FLAC playlist with no audible gap or diagnostic tone at completion; final probes reported exact `1322253`-sample completion at 44.1 kHz, zero underruns, and zero USB drops, timeouts, CRC errors, malformed packets, or unexpected responses. The current codec scope is intentionally limited to WAV and FLAC, and the required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Define a bounded PCM-driven visualization milestone that replaces the static bring-up animation with audio-responsive behavior while preserving the hardware-qualified WAV/FLAC decoder, playlist, timing, and HDMI boundaries.
+
+#### Files Modified:
+
+- README.md
+- build.tcl
+- docs/audio-pipeline.md
+- docs/debug-registers.md
+- src/audio/audio_output_policy.sv
+- src/audio/flac_decoder.sv
+- src/audio/flac_frame_ram.sv
+- src/audio/flac_subframe_decoder.sv
+- src/audio/wav_stream_player.sv
+- src/debug/debug_regs.sv
+- src/tang_phosphor_top.sv
+- tang_phosphor_console138k.gprj
+- tests/audio_output_policy_tb.sv
+- tests/flac_decoder_tb.sv
+- tests/run.sh
+- tests/wav_stream_player_tb.sv
+- tools/generate_flac_test_vectors.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

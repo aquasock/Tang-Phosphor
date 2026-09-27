@@ -12,6 +12,7 @@ The first bring-up core provides:
 - 1280x720p60 video over the HDMI connector
 - deterministic native 44.1/48 kHz HDMI audio with distinct 1 kHz left and 2 kHz right test tones
 - streamed 16-bit stereo 44.1/48 kHz PCM WAV parsing and playback with buffered backpressure
+- streamed 16-bit stereo 44.1/48 kHz native FLAC decoding with CRC-gated frame admission
 - content-based WAV/FLAC identification with bounded, byte-exact prefix replay
 - a distinctive animated test pattern
 - the standard TangCore BL616 UART interface and OSD
@@ -19,23 +20,23 @@ The first bring-up core provides:
 - a credit-based SD-to-FPGA test stream with negotiated 5 Mbps transport
 - experimental core ID `0x50`
 
-The test tones remain the idle and error fallback, while a valid WAV stream
-automatically takes over HDMI audio after its PCM FIFO has prefetched enough
-samples to cover transport turnaround. The sample cadence, HDMI clock
-regeneration packet, and IEC channel status switch together at the WAV's native
-44.1 or 48 kHz rate. FLAC content is recognized and drained with an explicit
-unsupported-decoder status; FLAC decoding, MP3, Ogg Vorbis, DDR3, and the AE350
-are not enabled yet.
+The test tones provide a startup diagnostic until the first audio stream begins.
+Stream prefill, playlist boundaries, completion, cancellation, and errors are
+silent so the diagnostic source cannot leak into file playback. The last valid
+sample rate is retained between tracks; the sample cadence, HDMI clock
+regeneration packet, and IEC channel status switch together only when the next
+source has valid native-rate metadata. MP3 and Ogg Vorbis are outside the
+current project scope; DDR3 and the AE350 are not enabled.
 
 The current register map is documented in
 [`docs/debug-registers.md`](docs/debug-registers.md).
 The bounded audio architecture is documented in
 [`docs/audio-pipeline.md`](docs/audio-pipeline.md).
 
-Tang-Control's `feature/usb-cdc-file-transfer` branch at `e3aa4f9` supplies the
+Tang-Control's `feature/usb-cdc-file-transfer` branch at `10c5761` supplies the
 SD-card file loader for core ID `0x50`. Its Phosphor menu can open standalone
-WAV files or VLC-style M3U/M3U8 playlists whose entries remain separate SD
-files; no TAR container is required.
+WAV/FLAC files or VLC-style M3U/M3U8 playlists whose entries remain separate
+SD files; no TAR container is required.
 
 ## Build
 

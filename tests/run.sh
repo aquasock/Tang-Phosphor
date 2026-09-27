@@ -6,10 +6,14 @@ project_dir="$(dirname -- "$test_dir")"
 output_dir="$(mktemp -d)"
 iosys_output_dir="$output_dir/iosys"
 audio_output_dir="$output_dir/audio"
+audio_policy_output_dir="$output_dir/audio_policy"
 wav_output_dir="$output_dir/wav"
 detector_output_dir="$output_dir/detector"
+flac_output_dir="$output_dir/flac"
+flac_vector_dir="$output_dir/flac_vectors"
 hdmi_audio_output_dir="$output_dir/hdmi_audio"
-mkdir "$iosys_output_dir" "$audio_output_dir" "$wav_output_dir" "$detector_output_dir" "$hdmi_audio_output_dir"
+mkdir "$iosys_output_dir" "$audio_output_dir" "$audio_policy_output_dir" "$wav_output_dir" "$detector_output_dir" \
+    "$flac_output_dir" "$flac_vector_dir" "$hdmi_audio_output_dir"
 trap 'find "$output_dir" -depth -delete' EXIT
 
 verilator --binary --timing -Wno-fatal -DSIM \
@@ -23,6 +27,12 @@ verilator --binary --timing -Wno-fatal \
     "$test_dir/audio_test_source_tb.sv" \
     "$project_dir/src/audio_test_source.sv"
 "$audio_output_dir/Vaudio_test_source_tb"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module audio_output_policy_tb --Mdir "$audio_policy_output_dir" \
+    "$test_dir/audio_output_policy_tb.sv" \
+    "$project_dir/src/audio/audio_output_policy.sv"
+"$audio_policy_output_dir/Vaudio_output_policy_tb"
 
 verilator --binary --timing -Wno-fatal \
     --top-module hdmi_audio_rate_tb --Mdir "$hdmi_audio_output_dir" \
@@ -42,11 +52,24 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/audio/stream_format_detector.sv"
 "$detector_output_dir/Vstream_format_detector_tb"
 
+python3 "$project_dir/tools/generate_flac_test_vectors.py" "$flac_vector_dir"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module flac_decoder_tb --Mdir "$flac_output_dir" \
+    "$test_dir/flac_decoder_tb.sv" \
+    "$project_dir/src/audio/flac_decoder.sv" \
+    "$project_dir/src/audio/flac_subframe_decoder.sv" \
+    "$project_dir/src/audio/flac_frame_ram.sv"
+"$flac_output_dir/Vflac_decoder_tb" +VECTOR_DIR="$flac_vector_dir"
+
 verilator --binary --timing -Wno-fatal \
     --top-module wav_stream_player_tb --Mdir "$wav_output_dir" \
     "$test_dir/wav_stream_player_tb.sv" \
     "$project_dir/src/audio/wav_stream_player.sv" \
     "$project_dir/src/audio/stream_format_detector.sv" \
     "$project_dir/src/audio/wav_decoder.sv" \
+    "$project_dir/src/audio/flac_decoder.sv" \
+    "$project_dir/src/audio/flac_subframe_decoder.sv" \
+    "$project_dir/src/audio/flac_frame_ram.sv" \
     "$project_dir/src/audio/pcm_sample_fifo.sv"
-"$wav_output_dir/Vwav_stream_player_tb"
+"$wav_output_dir/Vwav_stream_player_tb" +VECTOR_DIR="$flac_vector_dir"

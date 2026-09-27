@@ -22,6 +22,9 @@ logic [31:0] samples_played;
 logic [31:0] underrun_count;
 logic [7:0] error_code;
 logic [2:0] detected_format;
+logic [7:0] flac_bytes [0:262143];
+integer flac_size;
+string vector_dir;
 
 always #5 clk = ~clk;
 
@@ -70,6 +73,15 @@ begin
 end
 endtask
 
+task automatic pulse_end_unconditional;
+begin
+    @(negedge clk);
+    stream_end = 1'b1;
+    @(negedge clk);
+    stream_end = 1'b0;
+end
+endtask
+
 task automatic send_byte(input logic [7:0] value);
 begin
     @(negedge clk);
@@ -79,6 +91,25 @@ begin
         @(negedge clk);
     @(negedge clk);
     stream_valid = 1'b0;
+end
+endtask
+
+task automatic load_flac(input string path);
+    integer descriptor;
+begin
+    descriptor = $fopen(path, "rb");
+    if (descriptor == 0)
+        $fatal(1, "cannot open %s", path);
+    flac_size = $fread(flac_bytes, descriptor);
+    $fclose(descriptor);
+end
+endtask
+
+task automatic send_loaded_flac;
+begin
+    for (integer i = 0; i < flac_size; i = i + 1)
+        send_byte(flac_bytes[i]);
+    pulse_end_unconditional();
 end
 endtask
 
@@ -143,6 +174,9 @@ end
 endtask
 
 initial begin
+    if (!$value$plusargs("VECTOR_DIR=%s", vector_dir))
+        $fatal(1, "VECTOR_DIR plusarg is required");
+
     repeat (4) @(posedge clk);
     resetn = 1'b1;
 
@@ -262,16 +296,29 @@ initial begin
     if (player_state !== 4'd5 || error_code !== 8'h11 || detected_format !== 0)
         $fatal(1, "truncated signature was not reported");
 
-    // FLAC is recognized and fully drained, but decoder support is not
-    // advertised or implied by this detector-only milestone.
+    // A real encoder-generated FLAC passes through detection, frame admission,
+    // the shared PCM FIFO, native-rate playback, and the EOF transition.
+    load_flac({vector_dir, "/constant44.flac"});
     pulse_start();
-    send_fourcc("f", "L", "a", "C");
-    send_fourcc(8'h00, 8'h00, 8'h00, 8'h22);
-    pulse_end();
+    fork
+        send_loaded_flac();
+        begin : flac_consumer
+            wait (playback_active);
+            for (integer i = 0; i < 192; i++) begin
+                repeat (8) @(posedge clk);
+                pulse_sample();
+                if (audio_left !== 16'h1234 || audio_right !== -16'sh2345)
+                    $fatal(1, "FLAC PCM sample %0d was %h/%h", i,
+                        audio_left, audio_right);
+            end
+            pulse_sample();
+        end
+    join
     repeat (4) @(posedge clk);
-    if (player_state !== 4'd5 || error_code !== 8'h10 ||
-            detected_format !== 3'd2 || playback_active || format_valid)
-        $fatal(1, "recognized but unsupported FLAC was not drained and rejected");
+    if (player_state !== 4'd4 || error_code !== 0 ||
+            detected_format !== 3'd2 || playback_active || !format_valid ||
+            sample_rate !== 32'd44100 || samples_played !== 192)
+        $fatal(1, "valid FLAC did not complete cleanly");
 
     pulse_start();
     send_fourcc("N", "O", "P", "E");
@@ -291,7 +338,7 @@ initial begin
             format_valid || error_code !== 0 || detected_format !== 0)
         $fatal(1, "cancel did not clear the active playback session");
 
-    $display("PASS detected WAV playback, prefix replay, FLAC/unknown rejection, EOF, and cancellation");
+    $display("PASS detected WAV/FLAC playback, prefix replay, unknown rejection, EOF, and cancellation");
     $finish;
 end
 
