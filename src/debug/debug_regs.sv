@@ -17,6 +17,11 @@ module debug_regs (
     input  [31:0] stream_cancels,
     input  [31:0] stream_last_offset,
     input  [31:0] stream_crc32,
+    input  [11:0] controller1,
+    input  [11:0] controller2,
+    input  [15:0] hid1,
+    input  [15:0] hid2,
+    input   [5:0] controller_status,
     output reg [31:0] request_rdata
 );
 
@@ -70,6 +75,11 @@ always @* begin
         32'h0000_003c: request_rdata = stream_cancels;
         32'h0000_0040: request_rdata = stream_last_offset;
         32'h0000_0044: request_rdata = stream_crc32;
+        32'h0000_0048: request_rdata = {20'b0, controller1};
+        32'h0000_004c: request_rdata = {20'b0, controller2};
+        32'h0000_0050: request_rdata = {16'b0, hid1};
+        32'h0000_0054: request_rdata = {16'b0, hid2};
+        32'h0000_0058: request_rdata = {26'b0, controller_status};
         default:       request_rdata = 32'hdead_beef;
     endcase
 end

@@ -6,6 +6,11 @@ module tang_phosphor_top (
     input        UART_RXD,
     output       UART_TXD,
 
+    inout        usb1_dp,
+    inout        usb1_dn,
+    inout        usb2_dp,
+    inout        usb2_dn,
+
     output       tmds_clk_p,
     output       tmds_clk_n,
     output [2:0] tmds_d_p,
@@ -44,9 +49,75 @@ wire overlay;
 wire [7:0] overlay_x;
 wire [7:0] overlay_y;
 wire [14:0] overlay_color;
-wire [15:0] hid1_unused;
-wire [15:0] hid2_unused;
+wire [15:0] hid1;
+wire [15:0] hid2;
 wire frame_tick;
+
+// The two controller-facing USB ports are wired directly to FPGA pins. Use
+// the same compact low-speed HID host as the stock Console 138K cores.
+wire clk12;
+wire pll_lock_12;
+wire [11:0] joy_usb1_raw;
+wire [11:0] joy_usb2_raw;
+wire [1:0] usb_type1_raw;
+wire [1:0] usb_type2_raw;
+wire usb_error1_raw;
+wire usb_error2_raw;
+wire [5:0] controller_status_raw = {
+    usb_error2_raw, usb_type2_raw, usb_error1_raw, usb_type1_raw
+};
+reg [11:0] joy_usb1_meta;
+reg [11:0] joy_usb1;
+reg [11:0] joy_usb2_meta;
+reg [11:0] joy_usb2;
+reg [5:0] controller_status_meta;
+reg [5:0] controller_status;
+
+// Controller reports change many orders of magnitude more slowly than either
+// clock. Synchronize them before the 74.25 MHz control/OSD domain uses them.
+always @(posedge clk_pixel) begin
+    if (!resetn) begin
+        joy_usb1_meta <= 0;
+        joy_usb1 <= 0;
+        joy_usb2_meta <= 0;
+        joy_usb2 <= 0;
+        controller_status_meta <= 0;
+        controller_status <= 0;
+    end else begin
+        joy_usb1_meta <= joy_usb1_raw;
+        joy_usb1 <= joy_usb1_meta;
+        joy_usb2_meta <= joy_usb2_raw;
+        joy_usb2 <= joy_usb2_meta;
+        controller_status_meta <= controller_status_raw;
+        controller_status <= controller_status_meta;
+    end
+end
+
+pll_12 controller_clock (
+    .clkin(sys_clk),
+    .clkout0(clk12),
+    .lock(pll_lock_12)
+);
+
+usb_hid_host controller_usb1 (
+    .usbclk(clk12),
+    .usbrst_n(pll_lock_12),
+    .usb_dm(usb1_dn),
+    .usb_dp(usb1_dp),
+    .game_snes(joy_usb1_raw),
+    .typ(usb_type1_raw),
+    .conerr(usb_error1_raw)
+);
+
+usb_hid_host controller_usb2 (
+    .usbclk(clk12),
+    .usbrst_n(pll_lock_12),
+    .usb_dm(usb2_dn),
+    .usb_dp(usb2_dp),
+    .game_snes(joy_usb2_raw),
+    .typ(usb_type2_raw),
+    .conerr(usb_error2_raw)
+);
 
 wire debug_valid;
 wire debug_write;
@@ -99,10 +170,10 @@ iosys_bl616 #(
     .overlay_x(overlay_x),
     .overlay_y(overlay_y),
     .overlay_color(overlay_color),
-    .joy1(12'b0),
-    .joy2(12'b0),
-    .hid1(hid1_unused),
-    .hid2(hid2_unused),
+    .joy1(joy_usb1),
+    .joy2(joy_usb2),
+    .hid1(hid1),
+    .hid2(hid2),
     .debug_valid(debug_valid),
     .debug_write(debug_write),
     .debug_address(debug_address),
@@ -151,6 +222,11 @@ debug_regs debug_registers (
     .stream_cancels(stream_cancels),
     .stream_last_offset(stream_last_offset),
     .stream_crc32(stream_crc32),
+    .controller1(joy_usb1),
+    .controller2(joy_usb2),
+    .hid1(hid1),
+    .hid2(hid2),
+    .controller_status(controller_status),
     .request_rdata(debug_rdata)
 );
 

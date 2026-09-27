@@ -4,6 +4,7 @@ add_file -type verilog "src/tang_phosphor_top.sv"
 add_file -type verilog "src/phosphor_video.sv"
 add_file -type verilog "src/debug/debug_regs.sv"
 add_file -type verilog "src/stream/stream_debug_sink.sv"
+add_file -type verilog "src/usb_hid_host.v"
 
 add_file -type verilog "src/hdmi/audio_clock_regeneration_packet.sv"
 add_file -type verilog "src/hdmi/audio_info_frame.sv"
@@ -23,7 +24,9 @@ add_file -type verilog "src/iosys/uart_fixed.v"
 
 add_file -type verilog "src/pll/pll_27.v"
 add_file -type verilog "src/pll/pll_74.v"
+add_file -type verilog "src/pll/pll_12.v"
 add_file -type cst "src/boards/console138k.cst"
+add_file -type sdc "src/boards/console138k.sdc"
 
 set_option -output_base_name tang_phosphor_console138k
 set_option -synthesis_tool gowinsynthesis
