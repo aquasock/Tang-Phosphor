@@ -19,6 +19,21 @@ input to output, matching the signal's actual use inside the upstream module.
 configuration initializes the serializers, and this avoids driving an
 asynchronous reset across the pixel and x5 pixel-clock domains.
 
+## NESTang USB HID host
+
+The following files are taken from nand2mario's NESTang repository at commit
+`c2450818e1f0c858e13c5dd16746ee5221a5c760`:
+
+- `src/usb_hid_host.v`
+- `src/usb_hid_host_rom.hex`
+
+- Project: https://github.com/nand2mario/nestang
+- USB host project: https://github.com/nand2mario/usb_hid_host
+- Author: nand2mario, based on work by hi631
+- License: GNU General Public License v3.0
+
+The GPL-3.0 text is provided in `LICENSE`.
+
 ## hdl-util HDMI
 
 The files under `src/hdmi/` originated in:
