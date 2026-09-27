@@ -33,7 +33,7 @@ The current register map is documented in
 The bounded audio architecture is documented in
 [`docs/audio-pipeline.md`](docs/audio-pipeline.md).
 
-Tang-Control's `feature/usb-cdc-file-transfer` branch at `10c5761` supplies the
+Tang-Control's `feature/usb-cdc-file-transfer` branch at `cbbfcc8` supplies the
 SD-card file loader for core ID `0x50`. Its Phosphor menu can open standalone
 WAV/FLAC files or VLC-style M3U/M3U8 playlists whose entries remain separate
 SD files; no TAR container is required.

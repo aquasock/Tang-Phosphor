@@ -340,3 +340,34 @@ Define a bounded PCM-driven visualization milestone that replaces the static bri
 - User Test: PASS
 
 ---
+
+## 10 COMMIT Unreleased 2026-09-27T14:59:24-07:00
+
+#### Coming From:
+
+Unreleased 7342765
+
+#### Purpose:
+
+Eliminate false Tang-Control upload failures when post-transfer SD verification of large audio files exceeds the generic command timeout.
+
+#### Outcome:
+
+Tang-Control `feature/usb-cdc-file-transfer` commit `cbbfcc8` now computes the post-upload CRC-command timeout from file size using a conservative one-MiB-per-second scan allowance plus fixed overhead while retaining a 30-second minimum. A deterministic Python regression verifies the timeout floor, scaling, and rounding, and the complete Tang-Control test runner passed. Re-uploading the previously affected `42,196,260`-byte `19 - Comfortably Numb.flac` file completed at 2.20 MiB/s and returned the full device SD reread result with matching CRC-32 `c81f5d90`, proving that the earlier reports were host patience failures rather than USB disconnects or interrupted writes. No FPGA or BL616 firmware change was required, Tang-Phosphor documentation now pins the corrected authoritative client, and the required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Run the uploaded 26-track `The Wall - Phosphor.m3u8` playlist to evaluate independent-session transitions with gap-sensitive source material, then proceed to the bounded PCM-driven waveform visualizer cycle after recording any playback findings.
+
+#### Files Modified:
+
+- README.md
+- docs/debug-registers.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---
