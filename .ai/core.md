@@ -22,6 +22,8 @@ Tang-Phosphor is a re-implementation of the MiSTer-Phosphor project by aquasock 
 
 - Respect all standard licensing and attribution conventions.
 
+- Use the local cloned repository of the MIT "colibri" project as a "good-practices" reference when designing or modifying FPGA logic. 
+
 ---
 
 ## AI Agent Recovery Policy
