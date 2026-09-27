@@ -34,11 +34,6 @@ module hdmi
     // Specify the refresh rate in Hz you are using for audio calculations
     parameter real VIDEO_REFRESH_RATE = 59.94,
 
-    // As specified in Section 7.3, the minimal audio requirements are met: 16-bit or more L-PCM audio at 32 kHz, 44.1 kHz, or 48 kHz.
-    // See Table 7-4 or README.md for an enumeration of sampling frequencies supported by HDMI.
-    // Note that sinks may not support rates above 48 kHz.
-    parameter int AUDIO_RATE = 44100,
-
     // Defaults to 16-bit audio, the minmimum supported by HDMI sinks. Can be anywhere from 16-bit to 24-bit.
     parameter int AUDIO_BIT_WIDTH = 16,
 
@@ -66,6 +61,8 @@ module hdmi
     input logic clk_pixel_x5,
     input logic clk_pixel,
     input logic clk_audio,
+    // Tang-Phosphor's bounded runtime selector: 0 = 44.1 kHz, 1 = 48 kHz.
+    input logic audio_rate_48k,
     // synchronous reset back to 0,0
     input logic reset,
     input logic [23:0] rgb,
@@ -306,14 +303,18 @@ generate
         logic [4:0] packet_pixel_counter;
         packet_picker #(
             .VIDEO_ID_CODE(VIDEO_ID_CODE),
-            .VIDEO_RATE(VIDEO_RATE),
             .IT_CONTENT(IT_CONTENT),
-            .AUDIO_RATE(AUDIO_RATE),
             .AUDIO_BIT_WIDTH(AUDIO_BIT_WIDTH),
             .VENDOR_NAME(VENDOR_NAME),
             .PRODUCT_DESCRIPTION(PRODUCT_DESCRIPTION),
             .SOURCE_DEVICE_INFORMATION(SOURCE_DEVICE_INFORMATION)
-        ) packet_picker (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .reset(reset), .video_field_end(video_field_end), .packet_enable(packet_enable), .packet_pixel_counter(packet_pixel_counter), .audio_sample_word(audio_sample_word), .header(header), .sub(sub));
+        ) packet_picker (
+            .clk_pixel(clk_pixel), .clk_audio(clk_audio),
+            .audio_rate_48k(audio_rate_48k), .reset(reset),
+            .video_field_end(video_field_end), .packet_enable(packet_enable),
+            .packet_pixel_counter(packet_pixel_counter),
+            .audio_sample_word(audio_sample_word), .header(header), .sub(sub)
+        );
         logic [8:0] packet_data;
         packet_assembler packet_assembler (.clk_pixel(clk_pixel), .reset(reset), .data_island_period(data_island_period), .header(header), .sub(sub), .packet_data(packet_data), .counter(packet_pixel_counter));
 

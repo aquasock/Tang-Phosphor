@@ -18,9 +18,9 @@ MiSTer-Phosphor:
 | Ogg | Stereo Vorbis, 44.1 or 48 kHz, within the bounded hardware setup limits |
 
 High-resolution PCM, MPEG-2/2.5, Opus, and other Ogg codecs are outside this
-profile. The first WAV playback milestone accepts only 48 kHz so byte parsing,
-buffering, and transport pacing can be qualified against the already-proven
-HDMI rate. Runtime 44.1/48 kHz HDMI selection is the next isolated milestone.
+profile. WAV playback accepts both native rates. A rate change restarts the
+fractional sample timebase and the HDMI ACR measurement while playback is still
+prefilling, then transmits matching ACR and IEC 60958 channel-status values.
 
 ## Stream boundary
 
@@ -80,5 +80,5 @@ observation-only and count only accepted bytes. See
 [`debug-registers.md`](debug-registers.md) for the register ABI.
 
 The deterministic 1 kHz left and 2 kHz right tones remain the idle and error
-fallback. Valid, prefetched PCM overrides them only for the duration of active
-playback.
+fallback at the selected native rate. Valid, prefetched PCM overrides them only
+for the duration of active playback.

@@ -31,9 +31,6 @@ module audio_sample_packet
     // 0 = "Do no take into account"
     parameter bit [3:0] SOURCE_NUMBER = 4'd0,
 
-    // 0000 = 44.1 kHz
-    parameter bit [3:0] SAMPLING_FREQUENCY = 4'b0000,
-
     // Normal accuracy: +/- 1000 * 10E-6 (00), High accuracy +/- 50 * 10E-6 (01)
     parameter bit [1:0] CLOCK_ACCURACY = 2'b00,
 
@@ -49,6 +46,8 @@ module audio_sample_packet
 )
 (
     input logic [7:0] frame_counter,
+    // IEC 60958 consumer channel-status sampling-frequency code.
+    input logic [3:0] sampling_frequency,
     // See IEC 60958-1 4.4 and Annex A. 0 indicates the signal is suitable for decoding to an analog audio signal.
     input logic [1:0] valid_bit [3:0],
     // See IEC 60958-3 Section 6. 0 indicates that no user data is being sent
@@ -66,9 +65,9 @@ localparam bit [3:0] CHANNEL_RIGHT = 4'd2;
 localparam bit [7:0] CHANNEL_STATUS_LENGTH = 8'd192;
 // See IEC 60958-1 5.1, Table 2
 logic [192-1:0] channel_status_left;
-assign channel_status_left = {152'd0, ORIGINAL_SAMPLING_FREQUENCY, WORD_LENGTH, 2'b00, CLOCK_ACCURACY, SAMPLING_FREQUENCY, CHANNEL_LEFT, SOURCE_NUMBER, CATEGORY_CODE, MODE, PRE_EMPHASIS, COPYRIGHT_NOT_ASSERTED, SAMPLE_WORD_TYPE, GRADE};
+assign channel_status_left = {152'd0, ORIGINAL_SAMPLING_FREQUENCY, WORD_LENGTH, 2'b00, CLOCK_ACCURACY, sampling_frequency, CHANNEL_LEFT, SOURCE_NUMBER, CATEGORY_CODE, MODE, PRE_EMPHASIS, COPYRIGHT_NOT_ASSERTED, SAMPLE_WORD_TYPE, GRADE};
 logic [CHANNEL_STATUS_LENGTH-1:0] channel_status_right;
-assign channel_status_right = {152'd0, ORIGINAL_SAMPLING_FREQUENCY, WORD_LENGTH, 2'b00, CLOCK_ACCURACY, SAMPLING_FREQUENCY, CHANNEL_RIGHT, SOURCE_NUMBER, CATEGORY_CODE, MODE, PRE_EMPHASIS, COPYRIGHT_NOT_ASSERTED, SAMPLE_WORD_TYPE, GRADE};
+assign channel_status_right = {152'd0, ORIGINAL_SAMPLING_FREQUENCY, WORD_LENGTH, 2'b00, CLOCK_ACCURACY, sampling_frequency, CHANNEL_RIGHT, SOURCE_NUMBER, CATEGORY_CODE, MODE, PRE_EMPHASIS, COPYRIGHT_NOT_ASSERTED, SAMPLE_WORD_TYPE, GRADE};
 
 
 // See HDMI 1.4a Table 5-12: Audio Sample Packet Header.

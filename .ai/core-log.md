@@ -145,3 +145,49 @@ Implement and independently qualify native 44.1/48 kHz HDMI rate selection, then
 - User Test: PASS
 
 ---
+
+## 5 COMMIT Unreleased 2026-09-27T11:50:47-07:00
+
+#### Coming From:
+
+Unreleased 813230d
+
+#### Purpose:
+
+Add hardware-qualified native 44.1/48 kHz HDMI rate selection and enable 44.1 kHz PCM WAV playback through the existing streamed audio path.
+
+#### Outcome:
+
+The WAV parser now accepts the bounded 16-bit stereo 44.1/48 kHz profile, while a runtime fractional timebase switches the sample cadence during FIFO prefill and drives matching HDMI Audio Clock Regeneration and IEC 60958 channel-status metadata. Rate changes are adopted only at a 32-pixel HDMI packet boundary, discard partial audio-packet state, and restart ACR measurement so old- and new-rate values cannot mix. Self-checking regressions verified exact 44.1/48 kHz cadence, deterministic fallback tones, packet-boundary switching, ACR pairs `N=6272/CTS=82500` and `N=6144/CTS=74250`, both channel-status codes, 44.1/48 kHz WAV completion, and rejection outside the supported WAV rates; all regressions passed. Gowin EDA 1.9.11.03 built the `GW5AST-LV138PG484AC1/I0` revision B target with the agreed eight-core constraint, zero setup or hold violations, worst setup slack of `+1.826 ns`, worst hold slack of `+0.246 ns`, and artifact SHA-256 `0eaeaeeb40cfbe5bfa529e566397d450509028b89cba062ab7efaa80f8eda482`. The `4466068`-byte artifact was uploaded as `cores/console138k/tang-phosphor-native-rate-20260927.bin`, and its SD readback matched CRC-32 `3456d4e2`. A deterministic six-second 44.1 kHz WAV streamed all `1058444` bytes with CRC-32 `016f404b`; diagnostics reported an active HDMI rate of `44100`, exactly `264600` samples played, zero underruns, and zero transport errors, while the user confirmed the correct left-only, right-only, then stereo sequence followed by the fallback tones. Primary HDMI ACR and IEC consumer-audio references were added to `.ai/core-reference.md`, and the required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Design and verify content-based stream identification with a bounded prefix replay buffer, then use that shared front end to introduce the first FLAC decode stage without changing the proven native-rate PCM and HDMI boundary.
+
+#### Files Modified:
+
+- README.md
+- docs/audio-pipeline.md
+- docs/debug-registers.md
+- src/audio/wav_decoder.sv
+- src/audio_test_source.sv
+- src/debug/debug_regs.sv
+- src/hdmi/audio_clock_regeneration_packet.sv
+- src/hdmi/audio_sample_packet.sv
+- src/hdmi/hdmi.sv
+- src/hdmi/packet_picker.sv
+- src/phosphor_video.sv
+- src/tang_phosphor_top.sv
+- tests/audio_test_source_tb.sv
+- tests/hdmi_audio_rate_tb.sv
+- tests/run.sh
+- tests/wav_stream_player_tb.sv
+- tools/generate_wav_test.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

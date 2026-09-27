@@ -7,7 +7,7 @@ return `0xdeadbeef`; unknown writes have no effect.
 | Address | Access | Meaning |
 |---:|:---:|---|
 | `0x0000` | R | Magic `0x54504830` (`TPH0`) |
-| `0x0004` | R | Register ABI, currently `0x00010001` (1.1) |
+| `0x0004` | R | Register ABI, currently `0x00010002` (1.2) |
 | `0x0008` | R | Build date in packed hexadecimal (`0x20260927`) |
 | `0x000c` | R | Core capabilities: bit 0 debug bank, bit 1 stream transport, bit 2 WAV playback, bit 3 tone fallback |
 | `0x0010` | R | Logic-clock cycles since reset, wrapping at 32 bits |
@@ -33,6 +33,7 @@ return `0xdeadbeef`; unknown writes have no effect.
 | `0x0064` | R | PCM FIFO fill level in stereo samples |
 | `0x0068` | R | PCM samples presented for playback in the current stream |
 | `0x006c` | R | PCM FIFO underruns in the current stream |
+| `0x0070` | R | Active HDMI audio sample rate in hertz |
 
 Audio player states are `0` idle, `1` receiving, `2` prefilling, `3` playing,
 `4` complete, `5` error, and `6` cancelled. Audio error codes are `1` invalid

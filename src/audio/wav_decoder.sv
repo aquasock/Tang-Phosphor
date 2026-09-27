@@ -1,5 +1,5 @@
 // Bounded RIFF/WAVE PCM parser for Tang-Phosphor's first playback profile:
-// signed 16-bit stereo at 48 kHz. The byte and PCM sides both use valid/ready
+// signed 16-bit stereo at 44.1 or 48 kHz. The byte and PCM sides both use valid/ready
 // handshakes, allowing the downstream PCM FIFO to pace the UART stream.
 
 module wav_decoder (
@@ -234,7 +234,8 @@ always_ff @(posedge clk) begin
             VALIDATE_FMT: begin
                 sample_rate <= fmt_rate;
                 if (fmt_size >= 16 && fmt_tag == 1 && fmt_channels == 2 &&
-                        fmt_rate == 48000 && fmt_alignment == 4 && fmt_bits == 16) begin
+                        (fmt_rate == 44100 || fmt_rate == 48000) &&
+                        fmt_alignment == 4 && fmt_bits == 16) begin
                     format_valid <= 1'b1;
                     state <= chunk_odd ? CHUNK_PAD : CHUNK_ID;
                 end else

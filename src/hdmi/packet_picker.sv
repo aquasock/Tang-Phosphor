@@ -4,10 +4,8 @@
 module packet_picker
 #(
     parameter int VIDEO_ID_CODE = 4,
-    parameter real VIDEO_RATE = 0,
     parameter bit IT_CONTENT = 1'b0,
     parameter int AUDIO_BIT_WIDTH = 0,
-    parameter int AUDIO_RATE = 0,
     parameter bit [8*8-1:0] VENDOR_NAME = 0,
     parameter bit [8*16-1:0] PRODUCT_DESCRIPTION = 0,
     parameter bit [7:0] SOURCE_DEVICE_INFORMATION = 0
@@ -15,6 +13,7 @@ module packet_picker
 (
     input logic clk_pixel,
     input logic clk_audio,
+    input logic audio_rate_48k,
     input logic reset,
     input logic video_field_end,
     input logic packet_enable,
@@ -34,6 +33,18 @@ assign sub[1] = subs[packet_type][1];
 assign sub[2] = subs[packet_type][2];
 assign sub[3] = subs[packet_type][3];
 
+// Hold the selected rate constant for a complete 32-pixel HDMI packet. A new
+// decoder rate is adopted only at a packet boundary, where partial audio packet
+// state can also be discarded without mixing old- and new-rate metadata.
+logic packet_audio_rate_48k;
+wire audio_rate_change_pending = audio_rate_48k != packet_audio_rate_48k;
+always_ff @(posedge clk_pixel) begin
+    if (reset)
+        packet_audio_rate_48k <= 1'b1;
+    else if (packet_enable && audio_rate_change_pending)
+        packet_audio_rate_48k <= audio_rate_48k;
+end
+
 // NULL packet
 // "An HDMI Sink shall ignore bytes HB1 and HB2 of the Null Packet Header and all bytes of the Null Packet Body."
 `ifdef MODEL_TECH
@@ -48,17 +59,15 @@ assign subs[0][3] = 56'dX;
 
 // Audio Clock Regeneration Packet
 logic clk_audio_counter_wrap;
-audio_clock_regeneration_packet #(.VIDEO_RATE(VIDEO_RATE), .AUDIO_RATE(AUDIO_RATE)) audio_clock_regeneration_packet (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .reset(reset), .clk_audio_counter_wrap(clk_audio_counter_wrap), .header(headers[1]), .sub(subs[1]));
+audio_clock_regeneration_packet audio_clock_regeneration_packet (
+    .clk_pixel(clk_pixel), .clk_audio(clk_audio),
+    .audio_rate_48k(packet_audio_rate_48k), .reset(reset),
+    .clk_audio_counter_wrap(clk_audio_counter_wrap),
+    .header(headers[1]), .sub(subs[1])
+);
 
 // Audio Sample packet
-localparam bit [3:0] SAMPLING_FREQUENCY = AUDIO_RATE == 32000 ? 4'b0011
-    : AUDIO_RATE == 44100 ? 4'b0000
-    : AUDIO_RATE == 88200 ? 4'b1000
-    : AUDIO_RATE == 176400 ? 4'b1100
-    : AUDIO_RATE == 48000 ? 4'b0010
-    : AUDIO_RATE == 96000 ? 4'b1010
-    : AUDIO_RATE == 192000 ? 4'b1110
-    : 4'bXXXX;
+wire [3:0] sampling_frequency = packet_audio_rate_48k ? 4'b0010 : 4'b0000;
 localparam int AUDIO_BIT_WIDTH_COMPARATOR = AUDIO_BIT_WIDTH < 20 ? 20 : AUDIO_BIT_WIDTH == 20 ? 25 : AUDIO_BIT_WIDTH < 24 ? 24 : AUDIO_BIT_WIDTH == 24 ? 29 : -1;
 localparam bit [2:0] WORD_LENGTH = 3'(AUDIO_BIT_WIDTH_COMPARATOR - AUDIO_BIT_WIDTH);
 localparam bit WORD_LENGTH_LIMIT = AUDIO_BIT_WIDTH <= 20 ? 1'b0 : 1'b1;
@@ -70,6 +79,9 @@ always_ff @(posedge clk_pixel)
 begin
     if (reset) begin
         clk_audio_old <= 1'b0;
+        audio_sample_word_transfer_control <= 1'b0;
+    end else if (packet_enable && audio_rate_change_pending) begin
+        clk_audio_old <= clk_audio;
         audio_sample_word_transfer_control <= 1'b0;
     end else begin
         clk_audio_old <= clk_audio;
@@ -84,6 +96,8 @@ logic [1:0] audio_sample_word_transfer_control_synchronizer_chain;
 always_ff @(posedge clk_pixel)
 begin
     if (reset)
+        audio_sample_word_transfer_control_synchronizer_chain <= 2'd0;
+    else if (packet_enable && audio_rate_change_pending)
         audio_sample_word_transfer_control_synchronizer_chain <= 2'd0;
     else
         audio_sample_word_transfer_control_synchronizer_chain <= {audio_sample_word_transfer_control, audio_sample_word_transfer_control_synchronizer_chain[1]};
@@ -106,7 +120,7 @@ logic sample_buffer_ready;
 
 always_ff @(posedge clk_pixel)
 begin
-    if (reset) begin
+    if (reset || (packet_enable && audio_rate_change_pending)) begin
         sample_buffer_current <= 1'b0;
         samples_remaining <= 2'd0;
         sample_buffer_ready <= 1'b0;
@@ -137,7 +151,7 @@ logic [7:0] frame_counter;
 int k;
 always_ff @(posedge clk_pixel)
 begin
-    if (reset)
+    if (reset || (packet_enable && audio_rate_change_pending))
     begin
         frame_counter <= 8'd0;
     end
@@ -148,7 +162,16 @@ begin
             frame_counter = frame_counter - 8'd192;
     end
 end
-audio_sample_packet #(.SAMPLING_FREQUENCY(SAMPLING_FREQUENCY), .WORD_LENGTH({{WORD_LENGTH[0], WORD_LENGTH[1], WORD_LENGTH[2]}, WORD_LENGTH_LIMIT})) audio_sample_packet (.frame_counter(frame_counter), .valid_bit('{2'b00, 2'b00, 2'b00, 2'b00}), .user_data_bit('{2'b00, 2'b00, 2'b00, 2'b00}), .audio_sample_word(audio_sample_word_packet), .audio_sample_word_present(audio_sample_word_present_packet), .header(headers[2]), .sub(subs[2]));
+audio_sample_packet #(
+    .WORD_LENGTH({{WORD_LENGTH[0], WORD_LENGTH[1], WORD_LENGTH[2]}, WORD_LENGTH_LIMIT})
+) audio_sample_packet (
+    .frame_counter(frame_counter), .sampling_frequency(sampling_frequency),
+    .valid_bit('{2'b00, 2'b00, 2'b00, 2'b00}),
+    .user_data_bit('{2'b00, 2'b00, 2'b00, 2'b00}),
+    .audio_sample_word(audio_sample_word_packet),
+    .audio_sample_word_present(audio_sample_word_present_packet),
+    .header(headers[2]), .sub(subs[2])
+);
 
 
 auxiliary_video_information_info_frame #(
@@ -184,7 +207,14 @@ begin
         if (sample_buffer_used)
             sample_buffer_used <= 1'b0;
 
-        if (video_field_end)
+        if (packet_enable && audio_rate_change_pending)
+        begin
+            sample_buffer_used <= 1'b0;
+            audio_sample_word_present_packet <= 4'b0000;
+            last_clk_audio_counter_wrap <= clk_audio_counter_wrap;
+            packet_type <= 8'd0;
+        end
+        else if (video_field_end)
         begin
             audio_info_frame_sent <= 1'b0;
             auxiliary_video_information_info_frame_sent <= 1'b0;

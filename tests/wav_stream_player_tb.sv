@@ -226,10 +226,26 @@ initial begin
     if (player_state !== 4'd4 || samples_played !== 6 || underrun_count !== 1)
         $fatal(1, "underrun recovery did not complete cleanly");
 
-    // The first milestone deliberately rejects 44.1 kHz until dynamic HDMI
-    // rate selection is qualified in its own hardware cycle.
+    // The native-rate path accepts a short 44.1 kHz file without changing the
+    // parser, FIFO, or PCM boundary.
     pulse_start();
     send_wave_header(32'd44100, 1);
+    send_u16_le(16'h1234);
+    send_u16_le(16'h5678);
+    pulse_end();
+    wait (playback_active);
+    pulse_sample();
+    if (audio_left !== 16'h1234 || audio_right !== 16'h5678)
+        $fatal(1, "44.1 kHz PCM sample was incorrect");
+    pulse_sample();
+    repeat (4) @(posedge clk);
+    if (player_state !== 4'd4 || error_code !== 0 || playback_active ||
+            !format_valid || sample_rate !== 32'd44100 || samples_played !== 1)
+        $fatal(1, "44.1 kHz WAV did not complete cleanly");
+
+    // Rates outside the bounded CD-quality WAV profile remain unsupported.
+    pulse_start();
+    send_wave_header(32'd32000, 1);
     send_u16_le(16'h1234);
     send_u16_le(16'h5678);
     pulse_end();
@@ -254,7 +270,7 @@ initial begin
             format_valid || error_code !== 0)
         $fatal(1, "cancel did not clear the active playback session");
 
-    $display("PASS WAV parsing, PCM order, backpressure, underrun recovery, EOF, rejection, and cancellation");
+    $display("PASS WAV 44.1/48 kHz parsing, PCM order, backpressure, underrun recovery, EOF, rejection, and cancellation");
     $finish;
 end
 

@@ -5,6 +5,7 @@ module phosphor_video (
     input clk_pixel,
     input clk_pixel_x5,
     input clk_audio,
+    input audio_rate_48k,
     input logic [15:0] audio_sample_word [1:0],
 
     input overlay,
@@ -114,7 +115,6 @@ hdmi #(
     .DVI_OUTPUT(1'b0),
     .VIDEO_REFRESH_RATE(60.0),
     .IT_CONTENT(1'b1),
-    .AUDIO_RATE(48000),
     .AUDIO_BIT_WIDTH(16),
     .VENDOR_NAME("aquasock"),
     .PRODUCT_DESCRIPTION("Tang-Phosphor")
@@ -122,6 +122,7 @@ hdmi #(
     .clk_pixel_x5(clk_pixel_x5),
     .clk_pixel(clk_pixel),
     .clk_audio(clk_audio),
+    .audio_rate_48k(audio_rate_48k),
     .rgb(rgb),
     .reset(~resetn),
     .audio_sample_word(audio_sample_word),

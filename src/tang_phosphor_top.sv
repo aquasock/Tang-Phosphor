@@ -54,6 +54,9 @@ wire [15:0] hid2;
 wire frame_tick;
 wire clk_audio;
 wire sample_tick;
+wire requested_audio_rate_48k;
+wire [31:0] hdmi_audio_rate;
+wire hdmi_audio_rate_48k = hdmi_audio_rate == 32'd48_000;
 wire [15:0] tone_sample_word [1:0];
 wire [15:0] player_audio_left;
 wire [15:0] player_audio_right;
@@ -155,11 +158,18 @@ wire [31:0] samples_played;
 wire [31:0] audio_underruns;
 wire [7:0] audio_error;
 
+// Remain at the proven 48 kHz rate until a supported WAV header is complete.
+// The timebase latches and restarts on a change before FIFO prefill can finish.
+assign requested_audio_rate_48k = !wav_format_valid ||
+    wav_sample_rate == 32'd48_000;
+
 audio_test_source audio_timebase (
     .clk_pixel(clk_pixel),
     .resetn(resetn),
+    .rate_48k(requested_audio_rate_48k),
     .clk_audio(clk_audio),
     .sample_tick(sample_tick),
+    .active_sample_rate(hdmi_audio_rate),
     .audio_sample_word(tone_sample_word)
 );
 
@@ -171,6 +181,7 @@ phosphor_video video (
     .clk_pixel(clk_pixel),
     .clk_pixel_x5(clk_pixel_x5),
     .clk_audio(clk_audio),
+    .audio_rate_48k(hdmi_audio_rate_48k),
     .audio_sample_word(audio_sample_word),
     .overlay(overlay),
     .overlay_x(overlay_x),
@@ -275,6 +286,7 @@ debug_regs debug_registers (
     .samples_played(samples_played),
     .audio_underruns(audio_underruns),
     .audio_error(audio_error),
+    .hdmi_audio_rate(hdmi_audio_rate),
     .request_rdata(debug_rdata)
 );
 
