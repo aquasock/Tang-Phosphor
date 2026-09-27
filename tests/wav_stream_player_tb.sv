@@ -21,6 +21,7 @@ logic [3:0] fifo_level;
 logic [31:0] samples_played;
 logic [31:0] underrun_count;
 logic [7:0] error_code;
+logic [2:0] detected_format;
 
 always #5 clk = ~clk;
 
@@ -37,7 +38,7 @@ wav_stream_player #(
     .player_state(player_state), .format_valid(format_valid),
     .sample_rate(sample_rate), .fifo_level(fifo_level),
     .samples_played(samples_played), .underrun_count(underrun_count),
-    .error_code(error_code)
+    .error_code(error_code), .detected_format(detected_format)
 );
 
 task automatic pulse_start;
@@ -181,7 +182,7 @@ initial begin
             player_state, playback_active, samples_played, underrun_count, error_code, fifo_level);
         $fatal(1, "valid WAV did not finish cleanly");
     end
-    if (!format_valid || sample_rate !== 48000)
+    if (!format_valid || sample_rate !== 48000 || detected_format !== 3'd1)
         $fatal(1, "valid WAV metadata was not retained");
 
     // Once playback has started, an empty FIFO must produce a counted silent
@@ -253,13 +254,33 @@ initial begin
     if (player_state !== 4'd5 || error_code !== 8'h02 || playback_active)
         $fatal(1, "unsupported WAV format was not rejected");
 
-    // Premature transport EOF is distinct from an unsupported format.
+    // A stream too short for content classification is explicitly unknown.
     pulse_start();
     send_fourcc("R", "I", "F", "F");
     pulse_end();
     repeat (4) @(posedge clk);
-    if (player_state !== 4'd5 || error_code !== 8'h04)
-        $fatal(1, "truncated WAV was not reported");
+    if (player_state !== 4'd5 || error_code !== 8'h11 || detected_format !== 0)
+        $fatal(1, "truncated signature was not reported");
+
+    // FLAC is recognized and fully drained, but decoder support is not
+    // advertised or implied by this detector-only milestone.
+    pulse_start();
+    send_fourcc("f", "L", "a", "C");
+    send_fourcc(8'h00, 8'h00, 8'h00, 8'h22);
+    pulse_end();
+    repeat (4) @(posedge clk);
+    if (player_state !== 4'd5 || error_code !== 8'h10 ||
+            detected_format !== 3'd2 || playback_active || format_valid)
+        $fatal(1, "recognized but unsupported FLAC was not drained and rejected");
+
+    pulse_start();
+    send_fourcc("N", "O", "P", "E");
+    send_byte(8'h55);
+    pulse_end();
+    repeat (4) @(posedge clk);
+    if (player_state !== 4'd5 || error_code !== 8'h11 ||
+            detected_format !== 0 || playback_active)
+        $fatal(1, "unknown content was not drained and rejected");
 
     // Cancellation resets parsing and buffering without reporting corruption.
     pulse_start();
@@ -267,10 +288,10 @@ initial begin
     pulse_cancel();
     repeat (2) @(posedge clk);
     if (player_state !== 4'd6 || playback_active || fifo_level !== 0 ||
-            format_valid || error_code !== 0)
+            format_valid || error_code !== 0 || detected_format !== 0)
         $fatal(1, "cancel did not clear the active playback session");
 
-    $display("PASS WAV 44.1/48 kHz parsing, PCM order, backpressure, underrun recovery, EOF, rejection, and cancellation");
+    $display("PASS detected WAV playback, prefix replay, FLAC/unknown rejection, EOF, and cancellation");
     $finish;
 end
 

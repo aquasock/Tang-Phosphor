@@ -157,6 +157,7 @@ wire [11:0] pcm_fifo_level;
 wire [31:0] samples_played;
 wire [31:0] audio_underruns;
 wire [7:0] audio_error;
+wire [2:0] detected_format;
 
 // Remain at the proven 48 kHz rate until a supported WAV header is complete.
 // The timebase latches and restarts on a change before FIFO prefill can finish.
@@ -243,7 +244,7 @@ wav_stream_player wav_player (
     .player_state(player_state), .format_valid(wav_format_valid),
     .sample_rate(wav_sample_rate), .fifo_level(pcm_fifo_level),
     .samples_played(samples_played), .underrun_count(audio_underruns),
-    .error_code(audio_error)
+    .error_code(audio_error), .detected_format(detected_format)
 );
 
 stream_debug_sink stream_monitor (
@@ -287,6 +288,7 @@ debug_regs debug_registers (
     .audio_underruns(audio_underruns),
     .audio_error(audio_error),
     .hdmi_audio_rate(hdmi_audio_rate),
+    .detected_format(detected_format),
     .request_rdata(debug_rdata)
 );
 

@@ -7,7 +7,7 @@ return `0xdeadbeef`; unknown writes have no effect.
 | Address | Access | Meaning |
 |---:|:---:|---|
 | `0x0000` | R | Magic `0x54504830` (`TPH0`) |
-| `0x0004` | R | Register ABI, currently `0x00010002` (1.2) |
+| `0x0004` | R | Register ABI, currently `0x00010003` (1.3) |
 | `0x0008` | R | Build date in packed hexadecimal (`0x20260927`) |
 | `0x000c` | R | Core capabilities: bit 0 debug bank, bit 1 stream transport, bit 2 WAV playback, bit 3 tone fallback |
 | `0x0010` | R | Logic-clock cycles since reset, wrapping at 32 bits |
@@ -34,11 +34,16 @@ return `0xdeadbeef`; unknown writes have no effect.
 | `0x0068` | R | PCM samples presented for playback in the current stream |
 | `0x006c` | R | PCM FIFO underruns in the current stream |
 | `0x0070` | R | Active HDMI audio sample rate in hertz |
+| `0x0074` | R | Content format: `0` undetected/unknown, `1` WAV, `2` FLAC; `3` MP3 and `4` Ogg Vorbis are reserved |
 
 Audio player states are `0` idle, `1` receiving, `2` prefilling, `3` playing,
 `4` complete, `5` error, and `6` cancelled. Audio error codes are `1` invalid
 RIFF/WAVE header, `2` missing or unsupported `fmt ` data, `3` a partial stereo
 PCM sample in the data chunk, and `4` premature transport end.
+Content-front-end error `0x10` means the stream was recognized but its decoder
+is not implemented, and `0x11` means the content signature was unknown or
+ended before it could be classified. FLAC currently produces `0x10`; format
+recognition does not advertise FLAC decode capability.
 
 Examples use the authoritative host client from the sibling Tang-Control
 repository. Check out its `feature/usb-cdc-file-transfer` branch at `e3aa4f9`,
@@ -51,5 +56,5 @@ python3 ../Tang-Control/scripts/tangctl.py poke 0x20 0x12345678
 python3 ../Tang-Control/scripts/tangctl.py peek 0x20
 python3 ../Tang-Control/scripts/tangctl.py stream music/test.wav
 python3 ../Tang-Control/scripts/tangctl.py peek 0x30 6
-python3 ../Tang-Control/scripts/tangctl.py peek 0x5c 5
+python3 ../Tang-Control/scripts/tangctl.py peek 0x5c 7
 ```

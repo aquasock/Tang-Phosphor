@@ -47,9 +47,14 @@ are resolved against the playlist directory, so separately stored files do not
 need a TAR wrapper. `#EXTINF` duration is metadata and never controls the audio
 transition.
 
-Future content detection will buffer and replay the bytes it inspects so every
-selected decoder sees its file beginning at offset zero. Format selection is
-based on contents rather than the filename extension.
+The content detector buffers at most 12 bytes: four bytes identify the FLAC
+`fLaC` marker, while RIFF/WAVE identification also checks `RIFF` at byte zero
+and `WAVE` at byte eight. A recognized prefix is replayed byte-for-byte from
+offset zero before the remaining stream passes through. Replay applies normal
+`valid/ready` backpressure, and stream end is retained until replay finishes.
+Unknown or truncated signatures are drained with error `0x11`. Recognized FLAC
+is also drained, reports format ID `2` and error `0x10`, and does not claim
+decoder support yet. MP3 and Ogg Vorbis IDs are reserved without detection.
 
 ## PCM boundary
 
@@ -80,8 +85,9 @@ restarting an empty player.
 
 ## Diagnostics
 
-The debug register bank reports the player state, format validity, detected
-rate, FIFO level, played-sample count, underrun count, and parser error code.
+The debug register bank reports the player state, content format ID, WAV format
+validity, detected rate, FIFO level, played-sample count, underrun count, and
+parser or content-front-end error code.
 The original stream byte count, offset, CRC, end, and cancel counters remain
 observation-only and count only accepted bytes. See
 [`debug-registers.md`](debug-registers.md) for the register ABI.

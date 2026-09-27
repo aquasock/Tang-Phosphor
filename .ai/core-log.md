@@ -253,3 +253,44 @@ Insert the bounded content detector and byte-exact prefix replay stage ahead of 
 - User Test: PASS
 
 ---
+
+## 8 COMMIT Unreleased 2026-09-27T13:29:17-07:00
+
+#### Coming From:
+
+Unreleased b60e79c
+
+#### Purpose:
+
+Insert a bounded content detector with byte-exact prefix replay ahead of the proven WAV decoder while establishing the shared entry point for future FLAC decoding.
+
+#### Outcome:
+
+The audio front end now recognizes RIFF/WAVE from its 12-byte container prefix and native FLAC from its four-byte `fLaC` marker, replays every inspected byte under `valid/ready` backpressure, retains stream end until replay completes, and drains unknown, truncated, or recognized-but-unsupported content with explicit errors. MP3 and Ogg Vorbis format IDs are reserved without claiming detection or decode support, the debug ABI is now 1.3 with detected-format register `0x74`, and primary RIFF and IETF FLAC references were added to project memory. Self-checking regressions passed exact WAV and FLAC replay under forced stalls, short and unknown inputs, reset and cancellation, FLAC rejection, and unchanged 44.1/48 kHz WAV playback. The eight-core Gowin EDA 1.9.11.03 build for `GW5AST-LV138PG484AC1/I0` revision B had zero setup or hold violations, worst setup slack of `+1.670 ns`, worst hold slack of `+0.147 ns`, and artifact SHA-256 `c3f92701a3dcf9bce7c4dfb3203ae527c128940403bfb9abdd6a7fc1e1205efc`. The `4466068`-byte artifact was uploaded as `cores/console138k/tang-phosphor.bin`, and SD readback matched CRC-32 `4f966e46`. The user reported that the four-entry playlist ran perfectly; final diagnostics reported four completed sessions, WAV format ID `1`, player state complete, native `44100` Hz output, exactly `1322253` samples in the final track, zero underruns, no cancellations, and no transport CRC, malformed-request, or unexpected-response errors. The required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Design the bounded CD-quality FLAC subset against RFC 9639, then implement and independently verify STREAMINFO parsing, frame validation, subframe decoding, residual reconstruction, CRC handling, and delivery through the existing signed 16-bit stereo PCM boundary.
+
+#### Files Modified:
+
+- README.md
+- build.tcl
+- docs/audio-pipeline.md
+- docs/debug-registers.md
+- src/audio/stream_format_detector.sv
+- src/audio/wav_stream_player.sv
+- src/debug/debug_regs.sv
+- src/tang_phosphor_top.sv
+- tang_phosphor_console138k.gprj
+- tests/run.sh
+- tests/stream_format_detector_tb.sv
+- tests/wav_stream_player_tb.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

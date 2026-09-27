@@ -31,6 +31,7 @@ module debug_regs (
     input  [31:0] audio_underruns,
     input   [7:0] audio_error,
     input  [31:0] hdmi_audio_rate,
+    input   [2:0] detected_format,
     output reg [31:0] request_rdata
 );
 
@@ -68,7 +69,7 @@ end
 always @* begin
     case (request_address)
         32'h0000_0000: request_rdata = MAGIC;
-        32'h0000_0004: request_rdata = 32'h0001_0002; // register ABI 1.2
+        32'h0000_0004: request_rdata = 32'h0001_0003; // register ABI 1.3
         32'h0000_0008: request_rdata = BUILD_DATE;
         32'h0000_000c: request_rdata = 32'h0000_000f;
         32'h0000_0010: request_rdata = uptime_cycles;
@@ -96,6 +97,7 @@ always @* begin
         32'h0000_0068: request_rdata = samples_played;
         32'h0000_006c: request_rdata = audio_underruns;
         32'h0000_0070: request_rdata = hdmi_audio_rate;
+        32'h0000_0074: request_rdata = {29'b0, detected_format};
         default:       request_rdata = 32'hdead_beef;
     endcase
 end

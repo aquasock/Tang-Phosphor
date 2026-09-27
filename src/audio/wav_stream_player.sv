@@ -24,7 +24,8 @@ module wav_stream_player #(
     output logic [FIFO_ADDRESS_WIDTH:0] fifo_level,
     output logic  [31:0] samples_played,
     output logic  [31:0] underrun_count,
-    output logic   [7:0] error_code
+    output logic   [7:0] error_code,
+    output logic   [2:0] detected_format
 );
 
 localparam logic [3:0]
@@ -40,6 +41,13 @@ localparam logic [FIFO_ADDRESS_WIDTH:0] PREFILL_LEVEL =
 
 logic session_active;
 logic decoder_reset;
+logic detector_ready;
+logic [7:0] detector_data;
+logic detector_valid;
+logic detector_output_ready;
+logic detector_end;
+logic detector_format_valid;
+logic detector_format_error;
 logic decoder_ready;
 logic decoder_pcm_valid;
 logic decoder_pcm_ready;
@@ -62,14 +70,30 @@ logic finish_pending;
 logic playback_complete;
 
 assign decoder_reset = !resetn || stream_start || stream_cancel;
-assign stream_ready = session_active && decoder_ready;
+assign stream_ready = session_active && detector_ready;
 
-wav_decoder decoder (
+stream_format_detector detector (
     .clk(clk), .reset(decoder_reset),
     .input_data(stream_data),
     .input_valid(stream_valid && session_active),
-    .input_ready(decoder_ready),
+    .input_ready(detector_ready),
     .input_end(stream_end && session_active),
+    .output_data(detector_data), .output_valid(detector_valid),
+    .output_ready(detector_output_ready), .output_end(detector_end),
+    .detected_format(detected_format), .format_valid(detector_format_valid),
+    .format_error(detector_format_error)
+);
+
+// WAV currently owns the only implemented decoder. Recognized future formats
+// and unknown input remain drainable so the transport can close cleanly.
+assign detector_output_ready = detected_format == 3'd1 ? decoder_ready : 1'b1;
+
+wav_decoder decoder (
+    .clk(clk), .reset(decoder_reset),
+    .input_data(detector_data),
+    .input_valid(detector_valid && detected_format == 3'd1),
+    .input_ready(decoder_ready),
+    .input_end(detector_end && detected_format == 3'd1),
     .pcm_valid(decoder_pcm_valid), .pcm_ready(decoder_pcm_ready),
     .pcm_left(decoder_pcm_left), .pcm_right(decoder_pcm_right),
     .pcm_eof(decoder_pcm_eof), .format_valid(format_valid),
@@ -134,7 +158,17 @@ always_ff @(posedge clk) begin
         if (stream_end)
             session_active <= 1'b0;
 
-        if (decoder_format_error) begin
+        if (detector_format_error) begin
+            error_code <= 8'h11; // Unknown or truncated content signature.
+            player_state <= PLAYER_ERROR;
+            playback_started <= 1'b0;
+            playback_active <= 1'b0;
+        end else if (detector_format_valid && detected_format != 3'd1) begin
+            error_code <= 8'h10; // Recognized format has no decoder yet.
+            player_state <= PLAYER_ERROR;
+            playback_started <= 1'b0;
+            playback_active <= 1'b0;
+        end else if (decoder_format_error) begin
             error_code <= decoder_error_code;
             player_state <= PLAYER_ERROR;
             playback_started <= 1'b0;

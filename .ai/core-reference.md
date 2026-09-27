@@ -41,3 +41,21 @@ supported profile. Project-specific limits remain implementation limits.
 - Access note: The normative field tables are licensed material and are not reproduced in this repository. The local packetizer's existing 44.1 kHz code `0000` and 48 kHz code `0010` remain implementation mappings pending direct verification against a licensed copy if conformance questions arise.
 
 ---
+
+## Audio Container Signatures
+
+### RFC 9639: Free Lossless Audio Codec (FLAC)
+
+- Source: https://www.rfc-editor.org/rfc/rfc9639.html
+- Authority: IETF Standards Track specification for the FLAC format and streamable subset, published December 2024.
+- Relevant rule: A native FLAC bitstream begins with the four-byte `fLaC` marker (`0x664c6143`), followed by the mandatory STREAMINFO metadata block.
+- Tang-Phosphor use: Classify native FLAC after exactly four prefix bytes, replay those bytes to the future decoder, and do not interpret recognition alone as decoder capability.
+
+### Resource Interchange File Format (RIFF)
+
+- Source: https://learn.microsoft.com/en-us/windows/win32/xaudio2/resource-interchange-file-format--riff-
+- Authority: Microsoft primary documentation for the RIFF container used by waveform audio.
+- Relevant rule: A RIFF chunk begins with the literal `RIFF` FOURCC, a four-byte size, and a file-type FOURCC; waveform audio uses the file type `WAVE`.
+- Tang-Phosphor use: Require `RIFF` at byte zero and `WAVE` at byte eight, making 12 bytes the bounded WAV-classification prefix before byte-exact replay.
+
+---

@@ -12,6 +12,7 @@ The first bring-up core provides:
 - 1280x720p60 video over the HDMI connector
 - deterministic native 44.1/48 kHz HDMI audio with distinct 1 kHz left and 2 kHz right test tones
 - streamed 16-bit stereo 44.1/48 kHz PCM WAV parsing and playback with buffered backpressure
+- content-based WAV/FLAC identification with bounded, byte-exact prefix replay
 - a distinctive animated test pattern
 - the standard TangCore BL616 UART interface and OSD
 - a CRC-protected USB-to-FPGA debug register channel
@@ -22,8 +23,9 @@ The test tones remain the idle and error fallback, while a valid WAV stream
 automatically takes over HDMI audio after its PCM FIFO has prefetched enough
 samples to cover transport turnaround. The sample cadence, HDMI clock
 regeneration packet, and IEC channel status switch together at the WAV's native
-44.1 or 48 kHz rate. FLAC, MP3, Ogg Vorbis, DDR3, and the AE350 are not enabled
-yet.
+44.1 or 48 kHz rate. FLAC content is recognized and drained with an explicit
+unsupported-decoder status; FLAC decoding, MP3, Ogg Vorbis, DDR3, and the AE350
+are not enabled yet.
 
 The current register map is documented in
 [`docs/debug-registers.md`](docs/debug-registers.md).

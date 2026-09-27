@@ -7,8 +7,9 @@ output_dir="$(mktemp -d)"
 iosys_output_dir="$output_dir/iosys"
 audio_output_dir="$output_dir/audio"
 wav_output_dir="$output_dir/wav"
+detector_output_dir="$output_dir/detector"
 hdmi_audio_output_dir="$output_dir/hdmi_audio"
-mkdir "$iosys_output_dir" "$audio_output_dir" "$wav_output_dir" "$hdmi_audio_output_dir"
+mkdir "$iosys_output_dir" "$audio_output_dir" "$wav_output_dir" "$detector_output_dir" "$hdmi_audio_output_dir"
 trap 'find "$output_dir" -depth -delete' EXIT
 
 verilator --binary --timing -Wno-fatal -DSIM \
@@ -36,9 +37,16 @@ verilator --binary --timing -Wno-fatal \
 "$hdmi_audio_output_dir/Vhdmi_audio_rate_tb"
 
 verilator --binary --timing -Wno-fatal \
+    --top-module stream_format_detector_tb --Mdir "$detector_output_dir" \
+    "$test_dir/stream_format_detector_tb.sv" \
+    "$project_dir/src/audio/stream_format_detector.sv"
+"$detector_output_dir/Vstream_format_detector_tb"
+
+verilator --binary --timing -Wno-fatal \
     --top-module wav_stream_player_tb --Mdir "$wav_output_dir" \
     "$test_dir/wav_stream_player_tb.sv" \
     "$project_dir/src/audio/wav_stream_player.sv" \
+    "$project_dir/src/audio/stream_format_detector.sv" \
     "$project_dir/src/audio/wav_decoder.sv" \
     "$project_dir/src/audio/pcm_sample_fifo.sv"
 "$wav_output_dir/Vwav_stream_player_tb"
