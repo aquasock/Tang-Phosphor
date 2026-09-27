@@ -2,6 +2,7 @@ set_device GW5AST-LV138PG484AC1/I0 -device_version B
 
 add_file -type verilog "src/tang_phosphor_top.sv"
 add_file -type verilog "src/phosphor_video.sv"
+add_file -type verilog "src/audio_test_source.sv"
 add_file -type verilog "src/debug/debug_regs.sv"
 add_file -type verilog "src/stream/stream_debug_sink.sv"
 add_file -type verilog "src/usb_hid_host.v"

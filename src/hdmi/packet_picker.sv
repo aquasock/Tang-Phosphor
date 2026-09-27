@@ -25,7 +25,7 @@ module packet_picker
 );
 
 // Connect the current packet type's data to the output.
-logic [7:0] packet_type = 8'd0;
+logic [7:0] packet_type;
 logic [23:0] headers [255:0];
 logic [55:0] subs [255:0] [3:0];
 assign header = headers[packet_type];
@@ -48,7 +48,7 @@ assign subs[0][3] = 56'dX;
 
 // Audio Clock Regeneration Packet
 logic clk_audio_counter_wrap;
-audio_clock_regeneration_packet #(.VIDEO_RATE(VIDEO_RATE), .AUDIO_RATE(AUDIO_RATE)) audio_clock_regeneration_packet (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .clk_audio_counter_wrap(clk_audio_counter_wrap), .header(headers[1]), .sub(subs[1]));
+audio_clock_regeneration_packet #(.VIDEO_RATE(VIDEO_RATE), .AUDIO_RATE(AUDIO_RATE)) audio_clock_regeneration_packet (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .reset(reset), .clk_audio_counter_wrap(clk_audio_counter_wrap), .header(headers[1]), .sub(subs[1]));
 
 // Audio Sample packet
 localparam bit [3:0] SAMPLING_FREQUENCY = AUDIO_RATE == 32000 ? 4'b0011
@@ -64,23 +64,33 @@ localparam bit [2:0] WORD_LENGTH = 3'(AUDIO_BIT_WIDTH_COMPARATOR - AUDIO_BIT_WID
 localparam bit WORD_LENGTH_LIMIT = AUDIO_BIT_WIDTH <= 20 ? 1'b0 : 1'b1;
 
 logic [AUDIO_BIT_WIDTH-1:0] audio_sample_word_transfer [1:0];
-logic audio_sample_word_transfer_control = 1'd0;
+logic audio_sample_word_transfer_control;
 logic clk_audio_old;
 always_ff @(posedge clk_pixel)
 begin
-    clk_audio_old <= clk_audio;
-    if (clk_audio & ~clk_audio_old) begin
-        audio_sample_word_transfer <= audio_sample_word;
-        audio_sample_word_transfer_control <= !audio_sample_word_transfer_control;
+    if (reset) begin
+        clk_audio_old <= 1'b0;
+        audio_sample_word_transfer_control <= 1'b0;
+    end else begin
+        clk_audio_old <= clk_audio;
+        if (clk_audio & ~clk_audio_old) begin
+            audio_sample_word_transfer <= audio_sample_word;
+            audio_sample_word_transfer_control <= !audio_sample_word_transfer_control;
+        end
     end
 end
 
-logic [1:0] audio_sample_word_transfer_control_synchronizer_chain = 2'd0;
+logic [1:0] audio_sample_word_transfer_control_synchronizer_chain;
 always_ff @(posedge clk_pixel)
-    audio_sample_word_transfer_control_synchronizer_chain <= {audio_sample_word_transfer_control, audio_sample_word_transfer_control_synchronizer_chain[1]};
+begin
+    if (reset)
+        audio_sample_word_transfer_control_synchronizer_chain <= 2'd0;
+    else
+        audio_sample_word_transfer_control_synchronizer_chain <= {audio_sample_word_transfer_control, audio_sample_word_transfer_control_synchronizer_chain[1]};
+end
 
-logic sample_buffer_current = 1'b0;
-logic [1:0] samples_remaining = 2'd0;
+logic sample_buffer_current;
+logic [1:0] samples_remaining;
 logic [23:0] audio_sample_word_buffer [1:0] [3:0] [1:0];
 logic [AUDIO_BIT_WIDTH-1:0] audio_sample_word_transfer_mux [1:0];
 always_comb
@@ -91,33 +101,39 @@ begin
         audio_sample_word_transfer_mux = '{audio_sample_word_buffer[sample_buffer_current][samples_remaining][1][23:(24-AUDIO_BIT_WIDTH)], audio_sample_word_buffer[sample_buffer_current][samples_remaining][0][23:(24-AUDIO_BIT_WIDTH)]};
 end
 
-logic sample_buffer_used = 1'b0;
-logic sample_buffer_ready = 1'b0;
+logic sample_buffer_used;
+logic sample_buffer_ready;
 
 always_ff @(posedge clk_pixel)
 begin
-    if (sample_buffer_used)
+    if (reset) begin
+        sample_buffer_current <= 1'b0;
+        samples_remaining <= 2'd0;
         sample_buffer_ready <= 1'b0;
+    end else begin
+        if (sample_buffer_used)
+            sample_buffer_ready <= 1'b0;
 
-    if (audio_sample_word_transfer_control_synchronizer_chain[0] ^ audio_sample_word_transfer_control_synchronizer_chain[1])
-    begin
-        audio_sample_word_buffer[sample_buffer_current][samples_remaining][0] <=  24'(audio_sample_word_transfer_mux[0])<<(24-AUDIO_BIT_WIDTH);
-        audio_sample_word_buffer[sample_buffer_current][samples_remaining][1] <=  24'(audio_sample_word_transfer_mux[1])<<(24-AUDIO_BIT_WIDTH);
-        if (samples_remaining == 2'd3)
+        if (audio_sample_word_transfer_control_synchronizer_chain[0] ^ audio_sample_word_transfer_control_synchronizer_chain[1])
         begin
-            samples_remaining <= 2'd0;
-            sample_buffer_ready <= 1'b1;
-            sample_buffer_current <= !sample_buffer_current;
+            audio_sample_word_buffer[sample_buffer_current][samples_remaining][0] <=  24'(audio_sample_word_transfer_mux[0])<<(24-AUDIO_BIT_WIDTH);
+            audio_sample_word_buffer[sample_buffer_current][samples_remaining][1] <=  24'(audio_sample_word_transfer_mux[1])<<(24-AUDIO_BIT_WIDTH);
+            if (samples_remaining == 2'd3)
+            begin
+                samples_remaining <= 2'd0;
+                sample_buffer_ready <= 1'b1;
+                sample_buffer_current <= !sample_buffer_current;
+            end
+            else
+                samples_remaining <= samples_remaining + 1'd1;
         end
-        else
-            samples_remaining <= samples_remaining + 1'd1;
     end
 end
 
 logic [23:0] audio_sample_word_packet [3:0] [1:0];
 logic [3:0] audio_sample_word_present_packet;
 
-logic [7:0] frame_counter = 8'd0;
+logic [7:0] frame_counter;
 int k;
 always_ff @(posedge clk_pixel)
 begin
@@ -148,53 +164,65 @@ audio_info_frame audio_info_frame(.header(headers[132]), .sub(subs[132]));
 
 
 // "A Source shall always transmit... [an InfoFrame] at least once per two Video Fields"
-logic audio_info_frame_sent = 1'b0;
-logic auxiliary_video_information_info_frame_sent = 1'b0;
-logic source_product_description_info_frame_sent = 1'b0;
-logic last_clk_audio_counter_wrap = 1'b0;
+logic audio_info_frame_sent;
+logic auxiliary_video_information_info_frame_sent;
+logic source_product_description_info_frame_sent;
+logic last_clk_audio_counter_wrap;
 always_ff @(posedge clk_pixel)
 begin
-    if (sample_buffer_used)
-        sample_buffer_used <= 1'b0;
-
-    if (reset || video_field_end)
+    if (reset)
     begin
+        sample_buffer_used <= 1'b0;
         audio_info_frame_sent <= 1'b0;
         auxiliary_video_information_info_frame_sent <= 1'b0;
         source_product_description_info_frame_sent <= 1'b0;
-        packet_type <= 8'dx;
+        last_clk_audio_counter_wrap <= 1'b0;
+        audio_sample_word_present_packet <= 4'b0000;
+        packet_type <= 8'd0;
     end
-    else if (packet_enable)
-    begin
-        if (last_clk_audio_counter_wrap ^ clk_audio_counter_wrap)
+    else begin
+        if (sample_buffer_used)
+            sample_buffer_used <= 1'b0;
+
+        if (video_field_end)
         begin
-            packet_type <= 8'd1;
-            last_clk_audio_counter_wrap <= clk_audio_counter_wrap;
-        end
-        else if (sample_buffer_ready)
-        begin
-            packet_type <= 8'd2;
-            audio_sample_word_packet <= audio_sample_word_buffer[!sample_buffer_current];
-            audio_sample_word_present_packet <= 4'b1111;
-            sample_buffer_used <= 1'b1;
-        end
-        else if (!audio_info_frame_sent)
-        begin
-            packet_type <= 8'h84;
-            audio_info_frame_sent <= 1'b1;
-        end
-        else if (!auxiliary_video_information_info_frame_sent)
-        begin
-            packet_type <= 8'h82;
-            auxiliary_video_information_info_frame_sent <= 1'b1;
-        end
-        else if (!source_product_description_info_frame_sent)
-        begin
-            packet_type <= 8'h83;
-            source_product_description_info_frame_sent <= 1'b1;
-        end
-        else
+            audio_info_frame_sent <= 1'b0;
+            auxiliary_video_information_info_frame_sent <= 1'b0;
+            source_product_description_info_frame_sent <= 1'b0;
             packet_type <= 8'd0;
+        end
+        else if (packet_enable)
+        begin
+            if (last_clk_audio_counter_wrap ^ clk_audio_counter_wrap)
+            begin
+                packet_type <= 8'd1;
+                last_clk_audio_counter_wrap <= clk_audio_counter_wrap;
+            end
+            else if (sample_buffer_ready)
+            begin
+                packet_type <= 8'd2;
+                audio_sample_word_packet <= audio_sample_word_buffer[!sample_buffer_current];
+                audio_sample_word_present_packet <= 4'b1111;
+                sample_buffer_used <= 1'b1;
+            end
+            else if (!audio_info_frame_sent)
+            begin
+                packet_type <= 8'h84;
+                audio_info_frame_sent <= 1'b1;
+            end
+            else if (!auxiliary_video_information_info_frame_sent)
+            begin
+                packet_type <= 8'h82;
+                auxiliary_video_information_info_frame_sent <= 1'b1;
+            end
+            else if (!source_product_description_info_frame_sent)
+            begin
+                packet_type <= 8'h83;
+                source_product_description_info_frame_sent <= 1'b1;
+            end
+            else
+                packet_type <= 8'd0;
+        end
     end
 end
 

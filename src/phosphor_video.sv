@@ -106,22 +106,15 @@ end
 
 logic [2:0] tmds;
 logic tmds_clock;
-logic [15:0] silence [1:0];
-logic clk_audio = 1'b0;
-logic [9:0] audio_divider = 0;
-assign silence[0] = 16'b0;
-assign silence[1] = 16'b0;
+logic [15:0] audio_sample_word [1:0];
+logic clk_audio;
 
-// Clock the HDMI audio packetizer at approximately 48 kHz. The first audio
-// milestone will replace the silent samples with a generated test tone.
-always @(posedge clk_pixel) begin
-    if (audio_divider == 10'd772) begin
-        audio_divider <= 0;
-        clk_audio <= ~clk_audio;
-    end else begin
-        audio_divider <= audio_divider + 1'b1;
-    end
-end
+audio_test_source audio_source (
+    .clk_pixel(clk_pixel),
+    .resetn(resetn),
+    .clk_audio(clk_audio),
+    .audio_sample_word(audio_sample_word)
+);
 
 hdmi #(
     .VIDEO_ID_CODE(4),
@@ -138,7 +131,7 @@ hdmi #(
     .clk_audio(clk_audio),
     .rgb(rgb),
     .reset(~resetn),
-    .audio_sample_word(silence),
+    .audio_sample_word(audio_sample_word),
     .tmds(tmds),
     .tmds_clock(tmds_clock),
     .cx(cx),
