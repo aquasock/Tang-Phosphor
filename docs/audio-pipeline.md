@@ -40,6 +40,13 @@ A byte transfers only when `stream_valid && stream_ready`. Backpressure reaches
 Tang-Control through the existing credit response; no byte may be advanced or
 counted merely because `stream_valid` is asserted.
 
+The BL616 owns filesystem and playlist handling. A standalone WAV is one stream
+session; each VLC-style M3U/M3U8 entry is another independent session after the
+preceding track reaches the player's hardware `COMPLETE` state. Playlist paths
+are resolved against the playlist directory, so separately stored files do not
+need a TAR wrapper. `#EXTINF` duration is metadata and never controls the audio
+transition.
+
 Future content detection will buffer and replay the bytes it inspects so every
 selected decoder sees its file beginning at offset zero. Format selection is
 based on contents rather than the filename extension.

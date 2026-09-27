@@ -221,3 +221,35 @@ None.
 - User Test: PASS
 
 ---
+
+## 7 COMMIT Unreleased 2026-09-27T13:15:55-07:00
+
+#### Coming From:
+
+Unreleased 6d106eb
+
+#### Purpose:
+
+Add a user-operated Tang-Control file loader for standalone WAV files and VLC-style M3U/M3U8 playlists without requiring a TAR archive.
+
+#### Outcome:
+
+Tang-Control branch `feature/usb-cdc-file-transfer` commit `e3aa4f9` now recognizes Phosphor core ID `0x50`, exposes it directly in the TangCore menu, filters the SD chooser to WAV/M3U/M3U8 inputs, and streams each selected track through a reusable background file-stream service with Previous, Next, and Stop controls. The bounded playlist parser resolves paths relative to the playlist, preserves duplicate entries and order, accepts VLC extended-M3U metadata, BOM and LF/CRLF input, limits playlists to 255 entries, rejects URLs, HLS, nested or non-WAV entries, and uses FPGA completion rather than `#EXTINF` duration to advance. Its deterministic regression used a byte-for-byte copy of the user's four-entry VLC fixture with SHA-256 `3d6d029b029d0d7253703e08aeaafba180cd3f719d9d48b64120d21959687297` and passed. The Console 138K BL616 firmware built successfully at `233408` bytes, was flashed only to application offset `0x40000`, and passed device SHA-256 verification against `cf0e9dfaa04ae6512e7cf184c1b477fcb599ca57fb41c1246f10a7e38e67018d`. The user confirmed that direct file and playlist selection both loaded and played correctly, then reported that opening the OSD paused playback except while the cursor moved; the cause was a continuously redrawn higher-priority menu cursor loop, and the deployed correction redraws only on selection changes and yields every 10 ms. The user confirmed continuous playback after the correction, while live diagnostics at 5 Mbps reported player state playing, a full `2048`-sample FIFO, native `44100` Hz output, zero underruns, and zero transport timeouts, CRC errors, malformed packets, or unexpected responses. Tang-Phosphor documentation now pins the proven Tang-Control revision, and the required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Insert the bounded content detector and byte-exact prefix replay stage ahead of the proven WAV decoder, then use that shared stream boundary for the first FLAC implementation while retaining the qualified Tang-Control loader and playlist behavior.
+
+#### Files Modified:
+
+- README.md
+- docs/audio-pipeline.md
+- docs/debug-registers.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

@@ -41,8 +41,8 @@ RIFF/WAVE header, `2` missing or unsupported `fmt ` data, `3` a partial stereo
 PCM sample in the data chunk, and `4` premature transport end.
 
 Examples use the authoritative host client from the sibling Tang-Control
-repository. Check out its `feature/usb-cdc-file-transfer` branch, then run these
-commands from the Tang-Phosphor repository root:
+repository. Check out its `feature/usb-cdc-file-transfer` branch at `e3aa4f9`,
+then run these commands from the Tang-Phosphor repository root:
 
 ```bash
 python3 ../Tang-Control/scripts/tangctl.py caps
