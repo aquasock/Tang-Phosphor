@@ -22,6 +22,14 @@ module debug_regs (
     input  [15:0] hid1,
     input  [15:0] hid2,
     input   [5:0] controller_status,
+    input   [3:0] player_state,
+    input         wav_format_valid,
+    input         playback_active,
+    input  [31:0] wav_sample_rate,
+    input  [11:0] pcm_fifo_level,
+    input  [31:0] samples_played,
+    input  [31:0] audio_underruns,
+    input   [7:0] audio_error,
     output reg [31:0] request_rdata
 );
 
@@ -59,9 +67,9 @@ end
 always @* begin
     case (request_address)
         32'h0000_0000: request_rdata = MAGIC;
-        32'h0000_0004: request_rdata = 32'h0001_0000; // register ABI 1.0
+        32'h0000_0004: request_rdata = 32'h0001_0001; // register ABI 1.1
         32'h0000_0008: request_rdata = BUILD_DATE;
-        32'h0000_000c: request_rdata = 32'h0000_0001; // bit 0: debug bank
+        32'h0000_000c: request_rdata = 32'h0000_000f;
         32'h0000_0010: request_rdata = uptime_cycles;
         32'h0000_0014: request_rdata = frame_count;
         32'h0000_0018: request_rdata = request_count;
@@ -80,6 +88,12 @@ always @* begin
         32'h0000_0050: request_rdata = {16'b0, hid1};
         32'h0000_0054: request_rdata = {16'b0, hid2};
         32'h0000_0058: request_rdata = {26'b0, controller_status};
+        32'h0000_005c: request_rdata = {18'b0, audio_error,
+            playback_active, wav_format_valid, player_state};
+        32'h0000_0060: request_rdata = wav_sample_rate;
+        32'h0000_0064: request_rdata = {20'b0, pcm_fifo_level};
+        32'h0000_0068: request_rdata = samples_played;
+        32'h0000_006c: request_rdata = audio_underruns;
         default:       request_rdata = 32'hdead_beef;
     endcase
 end

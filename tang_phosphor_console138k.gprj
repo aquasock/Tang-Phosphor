@@ -8,6 +8,9 @@
         <File path="src/tang_phosphor_top.sv" type="file.verilog" enable="1"/>
         <File path="src/phosphor_video.sv" type="file.verilog" enable="1"/>
         <File path="src/audio_test_source.sv" type="file.verilog" enable="1"/>
+        <File path="src/audio/pcm_sample_fifo.sv" type="file.verilog" enable="1"/>
+        <File path="src/audio/wav_decoder.sv" type="file.verilog" enable="1"/>
+        <File path="src/audio/wav_stream_player.sv" type="file.verilog" enable="1"/>
         <File path="src/debug/debug_regs.sv" type="file.verilog" enable="1"/>
         <File path="src/stream/stream_debug_sink.sv" type="file.verilog" enable="1"/>
         <File path="src/usb_hid_host.v" type="file.verilog" enable="1"/>

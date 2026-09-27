@@ -4,6 +4,8 @@ module phosphor_video (
     input resetn,
     input clk_pixel,
     input clk_pixel_x5,
+    input clk_audio,
+    input logic [15:0] audio_sample_word [1:0],
 
     input overlay,
     output reg [7:0] overlay_x,
@@ -106,15 +108,6 @@ end
 
 logic [2:0] tmds;
 logic tmds_clock;
-logic [15:0] audio_sample_word [1:0];
-logic clk_audio;
-
-audio_test_source audio_source (
-    .clk_pixel(clk_pixel),
-    .resetn(resetn),
-    .clk_audio(clk_audio),
-    .audio_sample_word(audio_sample_word)
-);
 
 hdmi #(
     .VIDEO_ID_CODE(4),

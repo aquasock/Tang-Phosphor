@@ -1,8 +1,8 @@
 impl/
+/build/
 *.bin
 *.binx
 *.fs
 *.user
 *.tmp
 *.log
-

@@ -52,6 +52,13 @@ wire [14:0] overlay_color;
 wire [15:0] hid1;
 wire [15:0] hid2;
 wire frame_tick;
+wire clk_audio;
+wire sample_tick;
+wire [15:0] tone_sample_word [1:0];
+wire [15:0] player_audio_left;
+wire [15:0] player_audio_right;
+wire playback_active;
+wire [15:0] audio_sample_word [1:0];
 
 // The two controller-facing USB ports are wired directly to FPGA pins. Use
 // the same compact low-speed HID host as the stock Console 138K cores.
@@ -140,11 +147,31 @@ wire [31:0] stream_ends;
 wire [31:0] stream_cancels;
 wire [31:0] stream_last_offset;
 wire [31:0] stream_crc32;
+wire [3:0] player_state;
+wire wav_format_valid;
+wire [31:0] wav_sample_rate;
+wire [11:0] pcm_fifo_level;
+wire [31:0] samples_played;
+wire [31:0] audio_underruns;
+wire [7:0] audio_error;
+
+audio_test_source audio_timebase (
+    .clk_pixel(clk_pixel),
+    .resetn(resetn),
+    .clk_audio(clk_audio),
+    .sample_tick(sample_tick),
+    .audio_sample_word(tone_sample_word)
+);
+
+assign audio_sample_word[0] = playback_active ? player_audio_left : tone_sample_word[0];
+assign audio_sample_word[1] = playback_active ? player_audio_right : tone_sample_word[1];
 
 phosphor_video video (
     .resetn(resetn),
     .clk_pixel(clk_pixel),
     .clk_pixel_x5(clk_pixel_x5),
+    .clk_audio(clk_audio),
+    .audio_sample_word(audio_sample_word),
     .overlay(overlay),
     .overlay_x(overlay_x),
     .overlay_y(overlay_y),
@@ -195,7 +222,20 @@ iosys_bl616 #(
     .uart_tx(UART_TXD)
 );
 
-stream_debug_sink stream_sink (
+wav_stream_player wav_player (
+    .clk(clk_pixel), .resetn(resetn),
+    .stream_start(stream_start), .stream_end(stream_end),
+    .stream_cancel(stream_cancel), .stream_data(stream_data),
+    .stream_valid(stream_valid), .stream_ready(stream_ready),
+    .sample_tick(sample_tick), .audio_left(player_audio_left),
+    .audio_right(player_audio_right), .playback_active(playback_active),
+    .player_state(player_state), .format_valid(wav_format_valid),
+    .sample_rate(wav_sample_rate), .fifo_level(pcm_fifo_level),
+    .samples_played(samples_played), .underrun_count(audio_underruns),
+    .error_code(audio_error)
+);
+
+stream_debug_sink stream_monitor (
     .clk(clk_pixel), .resetn(resetn),
     .stream_start(stream_start), .stream_end(stream_end),
     .stream_cancel(stream_cancel), .stream_id(stream_id),
@@ -227,6 +267,14 @@ debug_regs debug_registers (
     .hid1(hid1),
     .hid2(hid2),
     .controller_status(controller_status),
+    .player_state(player_state),
+    .wav_format_valid(wav_format_valid),
+    .playback_active(playback_active),
+    .wav_sample_rate(wav_sample_rate),
+    .pcm_fifo_level(pcm_fifo_level),
+    .samples_played(samples_played),
+    .audio_underruns(audio_underruns),
+    .audio_error(audio_error),
     .request_rdata(debug_rdata)
 );
 

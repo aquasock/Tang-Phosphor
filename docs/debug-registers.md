@@ -7,9 +7,9 @@ return `0xdeadbeef`; unknown writes have no effect.
 | Address | Access | Meaning |
 |---:|:---:|---|
 | `0x0000` | R | Magic `0x54504830` (`TPH0`) |
-| `0x0004` | R | Register ABI, currently `0x00010000` (1.0) |
+| `0x0004` | R | Register ABI, currently `0x00010001` (1.1) |
 | `0x0008` | R | Build date in packed hexadecimal (`0x20260927`) |
-| `0x000c` | R | Core capabilities; bit 0 indicates this debug bank |
+| `0x000c` | R | Core capabilities: bit 0 debug bank, bit 1 stream transport, bit 2 WAV playback, bit 3 tone fallback |
 | `0x0010` | R | Logic-clock cycles since reset, wrapping at 32 bits |
 | `0x0014` | R | Video frames since reset |
 | `0x0018` | R | Valid debug requests seen by the register bank |
@@ -28,6 +28,16 @@ return `0xdeadbeef`; unknown writes have no effect.
 | `0x0050` | R | BL616-provided HID controller 1 state |
 | `0x0054` | R | BL616-provided HID controller 2 state |
 | `0x0058` | R | USB status: `{usb2_error, usb2_type[1:0], usb1_error, usb1_type[1:0]}` |
+| `0x005c` | R | Audio status: error `[13:6]`, playback active `[5]`, WAV format valid `[4]`, state `[3:0]` |
+| `0x0060` | R | Detected WAV sample rate in hertz |
+| `0x0064` | R | PCM FIFO fill level in stereo samples |
+| `0x0068` | R | PCM samples presented for playback in the current stream |
+| `0x006c` | R | PCM FIFO underruns in the current stream |
+
+Audio player states are `0` idle, `1` receiving, `2` prefilling, `3` playing,
+`4` complete, `5` error, and `6` cancelled. Audio error codes are `1` invalid
+RIFF/WAVE header, `2` missing or unsupported `fmt ` data, `3` a partial stereo
+PCM sample in the data chunk, and `4` premature transport end.
 
 Examples use the authoritative host client from the sibling Tang-Control
 repository. Check out its `feature/usb-cdc-file-transfer` branch, then run these
@@ -40,4 +50,5 @@ python3 ../Tang-Control/scripts/tangctl.py poke 0x20 0x12345678
 python3 ../Tang-Control/scripts/tangctl.py peek 0x20
 python3 ../Tang-Control/scripts/tangctl.py stream music/test.wav
 python3 ../Tang-Control/scripts/tangctl.py peek 0x30 6
+python3 ../Tang-Control/scripts/tangctl.py peek 0x5c 5
 ```

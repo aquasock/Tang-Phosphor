@@ -10,6 +10,7 @@ module audio_test_source #(
     input  logic        clk_pixel,
     input  logic        resetn,
     output logic        clk_audio,
+    output logic        sample_tick,
     output logic [15:0] audio_sample_word [1:0]
 );
 
@@ -42,6 +43,7 @@ always_ff @(posedge clk_pixel) begin
     if (!resetn) begin
         rate_accumulator <= 0;
         clk_audio <= 1'b0;
+        sample_tick <= 1'b0;
         left_half_count <= 0;
         right_half_count <= 0;
         left_positive <= 1'b1;
@@ -49,12 +51,14 @@ always_ff @(posedge clk_pixel) begin
         audio_sample_word[0] <= 16'b0;
         audio_sample_word[1] <= 16'b0;
     end else begin
+        sample_tick <= 1'b0;
         if (rate_accumulator >= RATE_WRAP_THRESHOLD) begin
             rate_accumulator <= rate_accumulator - RATE_WRAP_THRESHOLD;
             clk_audio <= ~clk_audio;
 
             // The HDMI packetizer consumes a new sample on each rising edge.
             if (!clk_audio) begin
+                sample_tick <= 1'b1;
                 audio_sample_word[0] <= left_positive ? AMPLITUDE : -AMPLITUDE;
                 audio_sample_word[1] <= right_positive ? AMPLITUDE : -AMPLITUDE;
 

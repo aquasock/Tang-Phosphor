@@ -1,5 +1,5 @@
-// Bring-up sink for the generic BL616 stream channel. It deliberately consumes
-// every byte while recording enough state to validate transfers over peek.
+// Observation-only monitor for the generic BL616 stream channel. The active
+// consumer owns ready; this block counts and checksums only accepted bytes.
 
 module stream_debug_sink (
     input         clk,
@@ -11,7 +11,7 @@ module stream_debug_sink (
     input  [31:0] stream_offset,
     input   [7:0] stream_data,
     input         stream_valid,
-    output        stream_ready,
+    input         stream_ready,
     output reg [31:0] session_count,
     output reg [31:0] byte_count,
     output reg [31:0] end_count,
@@ -19,8 +19,6 @@ module stream_debug_sink (
     output reg [31:0] last_offset,
     output reg [31:0] stream_crc32
 );
-
-assign stream_ready = 1'b1;
 
 function [31:0] crc32_byte;
     input [31:0] crc_in;

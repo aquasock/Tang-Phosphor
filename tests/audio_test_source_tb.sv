@@ -5,12 +5,14 @@ module audio_test_source_tb;
 logic clk_pixel = 1'b0;
 logic resetn = 1'b0;
 logic clk_audio;
+logic sample_tick;
 logic [15:0] audio_sample_word [1:0];
 
 audio_test_source dut (
     .clk_pixel(clk_pixel),
     .resetn(resetn),
     .clk_audio(clk_audio),
+    .sample_tick(sample_tick),
     .audio_sample_word(audio_sample_word)
 );
 
@@ -27,7 +29,7 @@ initial begin
 
     repeat (4) @(posedge clk_pixel);
     #1;
-    if (clk_audio !== 1'b0 || audio_sample_word[0] !== 16'b0 ||
+    if (clk_audio !== 1'b0 || sample_tick !== 1'b0 || audio_sample_word[0] !== 16'b0 ||
             audio_sample_word[1] !== 16'b0)
         $fatal(1, "audio outputs are not cleared during reset");
 
@@ -47,6 +49,8 @@ initial begin
             $fatal(1, "unknown audio state at pixel cycle %0d", pixel_cycle);
 
         if (clk_audio && !previous_audio) begin
+            if (!sample_tick)
+                $fatal(1, "sample tick missing from audio rising edge");
             sample_count++;
 
             if (last_sample_cycle != 0) begin
@@ -68,13 +72,15 @@ initial begin
                 $fatal(1, "right sample %0d was %h, expected %h",
                     sample_count, audio_sample_word[1], expected_right);
         end
+        else if (sample_tick)
+            $fatal(1, "sample tick occurred without an audio rising edge");
 
         previous_audio = clk_audio;
     end
 
     if (sample_count != 48)
         $fatal(1, "generated %0d samples in 1 ms, expected 48", sample_count);
-    if (clk_audio !== 1'b0)
+    if (clk_audio !== 1'b0 || sample_tick !== 1'b0)
         $fatal(1, "audio clock did not complete an integral number of cycles");
 
     // Reset in flight and require the rate and waveform phases to restart.
@@ -82,7 +88,7 @@ initial begin
     resetn = 1'b0;
     @(posedge clk_pixel);
     #1;
-    if (clk_audio !== 1'b0 || audio_sample_word[0] !== 16'b0 ||
+    if (clk_audio !== 1'b0 || sample_tick !== 1'b0 || audio_sample_word[0] !== 16'b0 ||
             audio_sample_word[1] !== 16'b0)
         $fatal(1, "audio outputs did not clear after restart reset");
 

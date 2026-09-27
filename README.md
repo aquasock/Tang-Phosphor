@@ -11,18 +11,22 @@ The first bring-up core provides:
 - Tang Console 138K clock and HDMI pinout
 - 1280x720p60 video over the HDMI connector
 - deterministic 48 kHz HDMI audio with distinct 1 kHz left and 2 kHz right test tones
+- streamed 16-bit stereo 48 kHz PCM WAV parsing and playback with buffered backpressure
 - a distinctive animated test pattern
 - the standard TangCore BL616 UART interface and OSD
 - a CRC-protected USB-to-FPGA debug register channel
 - a credit-based SD-to-FPGA test stream with negotiated 5 Mbps transport
 - experimental core ID `0x50`
 
-Audio decoding, codecs, DDR3, and the AE350 are not enabled yet. The current
-stream sink verifies transport counters and CRC, then discards the bytes; it
-will become the input FIFO for WAV playback.
+The test tones remain the idle and error fallback, while a valid WAV stream
+automatically takes over HDMI audio after its PCM FIFO has prefetched enough
+samples to cover transport turnaround. Native 44.1 kHz output, FLAC, MP3, Ogg
+Vorbis, DDR3, and the AE350 are not enabled yet.
 
 The current register map is documented in
 [`docs/debug-registers.md`](docs/debug-registers.md).
+The bounded audio architecture is documented in
+[`docs/audio-pipeline.md`](docs/audio-pipeline.md).
 
 ## Build
 
