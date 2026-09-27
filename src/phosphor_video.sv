@@ -9,6 +9,7 @@ module phosphor_video (
     output reg [7:0] overlay_x,
     output reg [7:0] overlay_y,
     input [14:0] overlay_color,
+    output       frame_tick,
 
     output       tmds_clk_p,
     output       tmds_clk_n,
@@ -21,6 +22,7 @@ localparam integer OSD_RIGHT = 1120;
 
 wire [10:0] cx;
 wire [9:0] cy;
+assign frame_tick = (cx == 0) && (cy == 0);
 reg [23:0] rgb;
 reg [23:0] pattern_rgb;
 reg osd_active = 1'b0;

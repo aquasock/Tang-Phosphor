@@ -13,9 +13,16 @@ The first bring-up core provides:
 - silent 48 kHz HDMI audio packets, ready for the test-tone milestone
 - a distinctive animated test pattern
 - the standard TangCore BL616 UART interface and OSD
+- a CRC-protected USB-to-FPGA debug register channel
+- a credit-based SD-to-FPGA test stream with negotiated 5 Mbps transport
 - experimental core ID `0x50`
 
-Audio, SD streaming, codecs, DDR3, and the AE350 are not enabled yet.
+Audio decoding, codecs, DDR3, and the AE350 are not enabled yet. The current
+stream sink verifies transport counters and CRC, then discards the bytes; it
+will become the input FIFO for WAV playback.
+
+The current register map is documented in
+[`docs/debug-registers.md`](docs/debug-registers.md).
 
 ## Build
 

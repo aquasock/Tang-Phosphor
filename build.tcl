@@ -2,6 +2,8 @@ set_device GW5AST-LV138PG484AC1/I0 -device_version B
 
 add_file -type verilog "src/tang_phosphor_top.sv"
 add_file -type verilog "src/phosphor_video.sv"
+add_file -type verilog "src/debug/debug_regs.sv"
+add_file -type verilog "src/stream/stream_debug_sink.sv"
 
 add_file -type verilog "src/hdmi/audio_clock_regeneration_packet.sv"
 add_file -type verilog "src/hdmi/audio_info_frame.sv"
@@ -35,4 +37,3 @@ set_option -multi_boot 1
 set_option -place_option 2
 
 run all
-

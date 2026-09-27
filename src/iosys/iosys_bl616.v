@@ -48,6 +48,25 @@ module iosys_bl616 #(
     
     output reg [31:0] core_config,
 
+    // Generic core-owned 32-bit debug register bus
+    output reg        debug_valid,
+    output reg        debug_write,
+    output reg [31:0] debug_address,
+    output reg [31:0] debug_wdata,
+    input      [31:0] debug_rdata,
+    output reg [31:0] debug_crc_errors,
+    output reg [31:0] debug_bad_requests,
+
+    // Credit-based byte stream from the BL616/SD card
+    output reg        stream_start,
+    output reg        stream_end,
+    output reg        stream_cancel,
+    output reg [15:0] stream_id,
+    output reg [31:0] stream_offset,
+    output      [7:0] stream_data,
+    output            stream_valid,
+    input             stream_ready,
+
     // UART interface
     input  uart_rx,
     output uart_tx
@@ -60,6 +79,83 @@ localparam [8*STR_LEN-1:0] CONF_STR = "Tang-Phosphor;-;O12,OSD key,Right+Select,
 localparam CLK_FREQ = FREQ;
 localparam BAUD_RATE = 2_000_000;
 
+localparam [7:0] EXT_COMMAND = 8'h10;
+localparam [7:0] EXT_VERSION = 8'h01;
+localparam [7:0] EXT_CAPABILITIES = 8'h00;
+localparam [7:0] EXT_READ32 = 8'h01;
+localparam [7:0] EXT_WRITE32 = 8'h02;
+localparam [7:0] EXT_SET_BAUD = 8'h03;
+localparam [7:0] STREAM_COMMAND = 8'h11;
+localparam [7:0] STREAM_VERSION = 8'h01;
+localparam [7:0] STREAM_START = 8'h01;
+localparam [7:0] STREAM_DATA = 8'h02;
+localparam [7:0] STREAM_END = 8'h04;
+localparam [7:0] STREAM_CANCEL = 8'h08;
+localparam [15:0] STREAM_CREDIT = 16'd1024;
+
+function [15:0] crc16_byte;
+    input [15:0] crc;
+    input [7:0] data;
+    integer bit_index;
+    reg [15:0] value;
+    begin
+        value = crc ^ {data, 8'b0};
+        for (bit_index = 0; bit_index < 8; bit_index = bit_index + 1)
+            value = value[15] ? (value << 1) ^ 16'h1021 : value << 1;
+        crc16_byte = value;
+    end
+endfunction
+
+function [15:0] stream_response_crc;
+    input [7:0] status;
+    input [7:0] flags;
+    input [15:0] identifier;
+    input [31:0] next_offset;
+    input [15:0] credit;
+    reg [15:0] crc;
+    begin
+        crc = crc16_byte(16'hffff, STREAM_COMMAND);
+        crc = crc16_byte(crc, STREAM_VERSION);
+        crc = crc16_byte(crc, status);
+        crc = crc16_byte(crc, flags);
+        crc = crc16_byte(crc, identifier[15:8]);
+        crc = crc16_byte(crc, identifier[7:0]);
+        crc = crc16_byte(crc, next_offset[31:24]);
+        crc = crc16_byte(crc, next_offset[23:16]);
+        crc = crc16_byte(crc, next_offset[15:8]);
+        crc = crc16_byte(crc, next_offset[7:0]);
+        crc = crc16_byte(crc, credit[15:8]);
+        crc = crc16_byte(crc, credit[7:0]);
+        stream_response_crc = crc;
+    end
+endfunction
+
+function [15:0] debug_response_crc;
+    input [7:0] opcode;
+    input [7:0] status;
+    input [15:0] transaction;
+    input [31:0] address;
+    input [31:0] value;
+    reg [15:0] crc;
+    begin
+        crc = crc16_byte(16'hffff, EXT_COMMAND);
+        crc = crc16_byte(crc, EXT_VERSION);
+        crc = crc16_byte(crc, opcode | 8'h80);
+        crc = crc16_byte(crc, status);
+        crc = crc16_byte(crc, transaction[15:8]);
+        crc = crc16_byte(crc, transaction[7:0]);
+        crc = crc16_byte(crc, address[31:24]);
+        crc = crc16_byte(crc, address[23:16]);
+        crc = crc16_byte(crc, address[15:8]);
+        crc = crc16_byte(crc, address[7:0]);
+        crc = crc16_byte(crc, value[31:24]);
+        crc = crc16_byte(crc, value[23:16]);
+        crc = crc16_byte(crc, value[15:8]);
+        crc = crc16_byte(crc, value[7:0]);
+        debug_response_crc = crc;
+    end
+endfunction
+
 reg overlay_reg = 1;
 assign overlay = overlay_reg;
 
@@ -67,6 +163,10 @@ reg [7:0] rom_loading_reg = LOADING_STATE;
 assign rom_loading = rom_loading_reg;
 
 // UART receiver signals
+wire [7:0] rx_data_slow;
+wire [7:0] rx_data_fast;
+wire rx_valid_slow;
+wire rx_valid_fast;
 wire [7:0] rx_data;
 wire rx_valid;
 
@@ -74,7 +174,17 @@ wire rx_valid;
 reg [7:0] tx_data;
 reg tx_valid;
 wire tx_ready;
+wire tx_busy_slow;
+wire tx_busy_fast;
 wire tx_busy;
+wire uart_tx_slow;
+wire uart_tx_fast;
+reg baud_fast;
+
+assign rx_data = baud_fast ? rx_data_fast : rx_data_slow;
+assign rx_valid = baud_fast ? rx_valid_fast : rx_valid_slow;
+assign tx_busy = baud_fast ? tx_busy_fast : tx_busy_slow;
+assign uart_tx = baud_fast ? uart_tx_fast : uart_tx_slow;
 
 // synchronize uart_rx to clk
 reg uart_rx_r = 1, uart_rx_rr = 1;
@@ -87,22 +197,43 @@ end
 async_receiver #(
     .ClkFrequency(CLK_FREQ),
     .Baud(BAUD_RATE)
-) uart_receiver (
+) uart_receiver_slow (
     .clk(clk),
     .RxD(uart_rx_rr),
-    .RxD_data(rx_data),
-    .RxD_data_ready(rx_valid)
+    .RxD_data(rx_data_slow),
+    .RxD_data_ready(rx_valid_slow)
+);
+
+async_receiver #(
+    .ClkFrequency(CLK_FREQ),
+    .Baud(5_000_000)
+) uart_receiver_fast (
+    .clk(clk),
+    .RxD(uart_rx_rr),
+    .RxD_data(rx_data_fast),
+    .RxD_data_ready(rx_valid_fast)
 );
 
 async_transmitter #(
     .ClkFrequency(CLK_FREQ),
     .Baud(BAUD_RATE)
-) uart_transmitter (
+) uart_transmitter_slow (
     .clk(clk),
-    .TxD(uart_tx),
+    .TxD(uart_tx_slow),
     .TxD_data(tx_data),
-    .TxD_start(tx_valid),
-    .TxD_busy(tx_busy)
+    .TxD_start(tx_valid && !baud_fast),
+    .TxD_busy(tx_busy_slow)
+);
+
+async_transmitter #(
+    .ClkFrequency(CLK_FREQ),
+    .Baud(5_000_000)
+) uart_transmitter_fast (
+    .clk(clk),
+    .TxD(uart_tx_fast),
+    .TxD_data(tx_data),
+    .TxD_start(tx_valid && baud_fast),
+    .TxD_busy(tx_busy_fast)
 );
 assign tx_ready = ~tx_busy;
 
@@ -123,6 +254,52 @@ reg [31:0] data_reg;
 reg [23:0] rom_remain;
 reg [15:0] data_cnt;
 reg [3:0] kbd_len;
+
+reg [7:0] ext_version;
+reg [7:0] ext_opcode;
+reg [15:0] ext_sequence;
+reg [31:0] ext_address;
+reg [31:0] ext_value;
+reg [15:0] ext_crc;
+reg [15:0] ext_crc_received;
+
+reg [7:0] response_opcode;
+reg [7:0] response_status;
+reg [15:0] response_sequence;
+reg [31:0] response_address;
+reg [31:0] response_data;
+wire [15:0] response_crc = debug_response_crc(
+    response_opcode, response_status, response_sequence,
+    response_address, response_data
+);
+
+reg [7:0] stream_flags_rx;
+reg [15:0] stream_id_rx;
+reg [31:0] stream_offset_rx;
+reg [15:0] stream_length_rx;
+reg [15:0] stream_crc_rx;
+reg [15:0] stream_crc_received;
+reg [7:0] stream_buffer [0:1023];
+reg stream_buffer_active;
+reg [9:0] stream_read_index;
+reg [10:0] stream_buffer_length;
+reg [31:0] stream_expected_offset;
+reg [15:0] stream_active_id;
+reg stream_session_active;
+reg stream_ack_pending;
+
+reg [7:0] stream_response_status;
+reg [7:0] stream_response_flags;
+reg [15:0] stream_response_id;
+reg [31:0] stream_response_next_offset;
+reg [15:0] stream_response_credit;
+wire [15:0] stream_response_crc_value = stream_response_crc(
+    stream_response_status, stream_response_flags, stream_response_id,
+    stream_response_next_offset, stream_response_credit
+);
+
+assign stream_valid = stream_buffer_active;
+assign stream_data = stream_buffer[stream_read_index];
 
 // Add new registers for textdisp interface
 reg [7:0] x_wr;
@@ -171,6 +348,8 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x0b addr[15:0] data[15:0] write to disk management interface (mgmt_address and mgmt_writedata)
 // 0x0c <scancode>            send PS/2 scancode (len specified by frame header)
 // 0x0d <string>              debug printf. core ignores this.
+// 0x10 <extended request>    versioned debug/control request with CRC-16
+// 0x11 <stream frame>        credit-based stream control/data with CRC-16
 //
 // Response payloads from FPGA to BL616:
 // 0x01 core_id[7:0]          core ID
@@ -178,6 +357,8 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x03 joy1[15:0] joy2[15:0] every 20ms, send DS2/SNES joypad state to BL616
 // 0x04 lba[15:0] <data_512>  write a sector to disk
 // 0x05 lba[15:0]             read a sector from disk (followed by command 0x0a)
+// 0x10 <extended response>   versioned debug/control response with CRC-16
+// 0x11 <stream ack>          stream status, next offset, and receive credit
 
 // UART RX: command processing
 always @(posedge clk) begin
@@ -195,6 +376,25 @@ always @(posedge clk) begin
         we <= 0;
         cursor_x <= 0;
         cursor_y <= 0;
+        response_req <= 0;
+        debug_valid <= 0;
+        debug_write <= 0;
+        debug_address <= 0;
+        debug_wdata <= 0;
+        debug_crc_errors <= 0;
+        debug_bad_requests <= 0;
+        stream_start <= 0;
+        stream_end <= 0;
+        stream_cancel <= 0;
+        stream_id <= 0;
+        stream_offset <= 0;
+        stream_buffer_active <= 0;
+        stream_read_index <= 0;
+        stream_buffer_length <= 0;
+        stream_expected_offset <= 0;
+        stream_active_id <= 0;
+        stream_session_active <= 0;
+        stream_ack_pending <= 0;
     end else begin
         rom_do_valid <= 0;
         we <= 0;
@@ -202,6 +402,31 @@ always @(posedge clk) begin
         fdd_read_finish <= 0;
         mgmt_rx <= 0;
         kbd_data_valid <= 0;
+        debug_valid <= 0;
+        debug_write <= 0;
+        stream_start <= 0;
+        stream_end <= 0;
+        stream_cancel <= 0;
+
+        if (stream_buffer_active && stream_ready) begin
+            stream_offset <= stream_offset + 1'b1;
+            if ({1'b0, stream_read_index} + 1'b1 == stream_buffer_length) begin
+                stream_buffer_active <= 0;
+                stream_expected_offset <= stream_expected_offset + stream_buffer_length;
+                stream_response_next_offset <= stream_expected_offset + stream_buffer_length;
+                stream_response_credit <= STREAM_CREDIT;
+                stream_ack_pending <= 1;
+            end else begin
+                stream_read_index <= stream_read_index + 1'b1;
+            end
+        end
+
+        if (stream_ack_pending && recv_state == RECV_IDLE && !rx_valid) begin
+            stream_ack_pending <= 0;
+            response_type <= STREAM_COMMAND;
+            response_req <= ~response_req;
+            recv_state <= RECV_RESPONSE_ACK;
+        end
 
         case (recv_state)
 
@@ -224,8 +449,18 @@ always @(posedge clk) begin
 
             RECV_CMD: if (rx_valid) begin
                 cmd_reg <= rx_data;
-                if (rx_data == 1 || rx_data == 2) 
+                if (rx_data == 1 || rx_data == 2)
                     recv_state <= RECV_RESPONSE_REQ;    // request sending core id / config string
+                else if (rx_data == EXT_COMMAND) begin
+                    ext_crc <= crc16_byte(16'hffff, EXT_COMMAND);
+                    if (len_reg != 16'd15)
+                        debug_bad_requests <= debug_bad_requests + 1'b1;
+                    recv_state <= (len_reg > 1) ? RECV_PARAM : RECV_IDLE;
+                end
+                else if (rx_data == STREAM_COMMAND) begin
+                    stream_crc_rx <= crc16_byte(16'hffff, STREAM_COMMAND);
+                    recv_state <= (len_reg > 1) ? RECV_PARAM : RECV_IDLE;
+                end
                 else if (len_reg > 1)
                     recv_state <= RECV_PARAM;
                 else
@@ -306,6 +541,171 @@ always @(posedge clk) begin
                         kbd_data <= rx_data;
                         kbd_data_valid <= 1;
                     end
+                    EXT_COMMAND: begin
+                        if (data_cnt < 12)
+                            ext_crc <= crc16_byte(ext_crc, rx_data);
+                        case (data_cnt)
+                            0: ext_version <= rx_data;
+                            1: ext_opcode <= rx_data;
+                            2: ext_sequence[15:8] <= rx_data;
+                            3: ext_sequence[7:0] <= rx_data;
+                            4: ext_address[31:24] <= rx_data;
+                            5: ext_address[23:16] <= rx_data;
+                            6: ext_address[15:8] <= rx_data;
+                            7: begin
+                                ext_address[7:0] <= rx_data;
+                                debug_address <= {ext_address[31:8], rx_data};
+                            end
+                            8: ext_value[31:24] <= rx_data;
+                            9: ext_value[23:16] <= rx_data;
+                            10: ext_value[15:8] <= rx_data;
+                            11: begin
+                                ext_value[7:0] <= rx_data;
+                                debug_wdata <= {ext_value[31:8], rx_data};
+                            end
+                            12: ext_crc_received[15:8] <= rx_data;
+                            13: if (len_reg == 16'd15) begin
+                                ext_crc_received[7:0] <= rx_data;
+                                response_type <= EXT_COMMAND;
+                                response_opcode <= ext_opcode;
+                                response_sequence <= ext_sequence;
+                                response_address <= ext_address;
+                                if (ext_crc != {ext_crc_received[15:8], rx_data}) begin
+                                    response_status <= 8'd3;
+                                    response_data <= 0;
+                                    debug_crc_errors <= debug_crc_errors + 1'b1;
+                                end else if (ext_version != EXT_VERSION) begin
+                                    response_status <= 8'd1;
+                                    response_data <= 0;
+                                    debug_bad_requests <= debug_bad_requests + 1'b1;
+                                end else if (ext_opcode == EXT_CAPABILITIES) begin
+                                    response_status <= 0;
+                                    response_data <= 32'h0000_000f;
+                                end else if (ext_opcode == EXT_READ32) begin
+                                    response_status <= 0;
+                                    response_data <= debug_rdata;
+                                    debug_valid <= 1;
+                                end else if (ext_opcode == EXT_WRITE32) begin
+                                    response_status <= 0;
+                                    response_data <= ext_value;
+                                    debug_valid <= 1;
+                                    debug_write <= 1;
+                                end else if (ext_opcode == EXT_SET_BAUD &&
+                                             (ext_value == 32'd2000000 ||
+                                              ext_value == 32'd5000000)) begin
+                                    response_status <= 0;
+                                    response_data <= ext_value;
+                                end else begin
+                                    response_status <= 8'd2;
+                                    response_data <= 0;
+                                    debug_bad_requests <= debug_bad_requests + 1'b1;
+                                end
+                                response_req <= ~response_req;
+                                recv_state <= RECV_RESPONSE_ACK;
+                            end
+                            default: ;
+                        endcase
+                    end
+                    STREAM_COMMAND: begin
+                        if (data_cnt <= 9 ||
+                            (data_cnt >= 10 && data_cnt < 10 + stream_length_rx))
+                            stream_crc_rx <= crc16_byte(stream_crc_rx, rx_data);
+
+                        case (data_cnt)
+                            0: ext_version <= rx_data;
+                            1: stream_flags_rx <= rx_data;
+                            2: stream_id_rx[15:8] <= rx_data;
+                            3: stream_id_rx[7:0] <= rx_data;
+                            4: stream_offset_rx[31:24] <= rx_data;
+                            5: stream_offset_rx[23:16] <= rx_data;
+                            6: stream_offset_rx[15:8] <= rx_data;
+                            7: stream_offset_rx[7:0] <= rx_data;
+                            8: stream_length_rx[15:8] <= rx_data;
+                            9: stream_length_rx[7:0] <= rx_data;
+                            default: begin
+                                if (data_cnt >= 10 &&
+                                    data_cnt < 10 + stream_length_rx &&
+                                    data_cnt < 10 + STREAM_CREDIT)
+                                    stream_buffer[data_cnt - 10] <= rx_data;
+                                else if (data_cnt == 10 + stream_length_rx)
+                                    stream_crc_received[15:8] <= rx_data;
+                                else if (data_cnt == 11 + stream_length_rx) begin
+                                    stream_crc_received[7:0] <= rx_data;
+                                    stream_response_flags <= stream_flags_rx;
+                                    stream_response_id <= stream_id_rx;
+                                    stream_response_next_offset <= stream_expected_offset;
+                                    stream_response_credit <= STREAM_CREDIT;
+
+                                    if (len_reg != stream_length_rx + 16'd13 ||
+                                        stream_length_rx > STREAM_CREDIT) begin
+                                        stream_response_status <= 8'd2;
+                                        stream_ack_pending <= 1;
+                                        debug_bad_requests <= debug_bad_requests + 1'b1;
+                                    end else if (stream_crc_rx !=
+                                                 {stream_crc_received[15:8], rx_data}) begin
+                                        stream_response_status <= 8'd3;
+                                        stream_ack_pending <= 1;
+                                        debug_crc_errors <= debug_crc_errors + 1'b1;
+                                    end else if (ext_version != STREAM_VERSION) begin
+                                        stream_response_status <= 8'd1;
+                                        stream_ack_pending <= 1;
+                                        debug_bad_requests <= debug_bad_requests + 1'b1;
+                                    end else if (stream_flags_rx == STREAM_START &&
+                                                 stream_length_rx == 0) begin
+                                        stream_response_status <= 0;
+                                        stream_response_next_offset <= 0;
+                                        stream_session_active <= 1;
+                                        stream_active_id <= stream_id_rx;
+                                        stream_expected_offset <= 0;
+                                        stream_id <= stream_id_rx;
+                                        stream_offset <= 0;
+                                        stream_start <= 1;
+                                        stream_ack_pending <= 1;
+                                    end else if (stream_flags_rx == STREAM_DATA &&
+                                                 stream_length_rx != 0 &&
+                                                 stream_session_active &&
+                                                 stream_id_rx == stream_active_id &&
+                                                 stream_offset_rx == stream_expected_offset &&
+                                                 !stream_buffer_active) begin
+                                        stream_response_status <= 0;
+                                        stream_response_credit <= 0;
+                                        stream_buffer_active <= 1;
+                                        stream_buffer_length <= stream_length_rx[10:0];
+                                        stream_read_index <= 0;
+                                        stream_id <= stream_id_rx;
+                                        stream_offset <= stream_offset_rx;
+                                    end else if (stream_flags_rx == STREAM_END &&
+                                                 stream_length_rx == 0 &&
+                                                 stream_session_active &&
+                                                 stream_id_rx == stream_active_id &&
+                                                 stream_offset_rx == stream_expected_offset) begin
+                                        stream_response_status <= 0;
+                                        stream_response_next_offset <= stream_expected_offset;
+                                        stream_response_credit <= 0;
+                                        stream_session_active <= 0;
+                                        stream_id <= stream_id_rx;
+                                        stream_offset <= stream_offset_rx;
+                                        stream_end <= 1;
+                                        stream_ack_pending <= 1;
+                                    end else if (stream_flags_rx == STREAM_CANCEL &&
+                                                 stream_length_rx == 0) begin
+                                        stream_response_status <= 0;
+                                        stream_response_credit <= 0;
+                                        stream_session_active <= 0;
+                                        stream_buffer_active <= 0;
+                                        stream_id <= stream_id_rx;
+                                        stream_offset <= stream_offset_rx;
+                                        stream_cancel <= 1;
+                                        stream_ack_pending <= 1;
+                                    end else begin
+                                        stream_response_status <= 8'd2;
+                                        stream_ack_pending <= 1;
+                                        debug_bad_requests <= debug_bad_requests + 1'b1;
+                                    end
+                                end
+                            end
+                        endcase
+                    end
                     default: begin
                         // unknown command: consume all data and return
                     end
@@ -316,7 +716,7 @@ always @(posedge clk) begin
                 case (cmd_reg)
                     1,2: begin                      // 1: core ID, 2: config string
                         response_type <= cmd_reg;
-                        response_req ^= 1;
+                        response_req <= ~response_req;
                         recv_state <= RECV_RESPONSE_ACK;
                     end
                     default:
@@ -342,20 +742,29 @@ localparam SEND_FDD_READ = 5;
 
 localparam SEND_HEADER = 6;
 localparam SEND_DONE = 7;
+localparam SEND_DEBUG = 8;
+localparam SEND_BAUD_WAIT = 9;
+localparam SEND_STREAM_ACK = 10;
 
-reg [2:0] send_state, send_state_next;
+reg [3:0] send_state, send_state_next;
+reg [7:0] resp_type;
 reg [$clog2(STR_LEN+1)-1:0] send_idx;
 localparam JOY_UPDATE_INTERVAL = 50_000_000 / 50; // 20ms interval for 50Hz
 reg [$clog2(JOY_UPDATE_INTERVAL+1)-1:0] joy_timer;
 reg [15:0] joy1_reg;
 reg [15:0] joy2_reg;
 reg [15:0] resp_frame_len;
+reg baud_wait_seen_busy;
 
 // UART TX: command responses, joystick updates and FDD requests
 always @(posedge clk) begin
     if (!resetn) begin
         joy_timer <= 0;
         send_state <= 0;
+        tx_valid <= 0;
+        response_ack <= 0;
+        baud_fast <= 0;
+        baud_wait_seen_busy <= 0;
     end else begin
         tx_valid <= 0;
         mgmt_read <= 0;
@@ -374,25 +783,40 @@ always @(posedge clk) begin
                     joy1_reg <= joy1;
                     joy2_reg <= joy2;
                     send_state_next <= SEND_JOYPAD;
+                    resp_type <= SEND_JOYPAD;
                     send_state <= SEND_HEADER;
                     resp_frame_len <= 5;
                 end else if (fdd_request[1] && fdd_state == FDD_READY) begin
                     send_state_next <= SEND_FDD_WRITE;
+                    resp_type <= SEND_FDD_WRITE;
                     send_state <= SEND_HEADER;
                     mgmt_address_tx <= 16'hf200;    // read {drive, sector}
                     resp_frame_len <= 515;
                 end else if (fdd_request[0] && fdd_state == FDD_READY) begin
                     send_state_next <= SEND_FDD_READ;
+                    resp_type <= SEND_FDD_READ;
                     send_state <= SEND_HEADER;
                     mgmt_address_tx <= 16'hf200;    // read {drive, sector}
                     resp_frame_len <= 3;
                 end else if (response_req != response_ack) begin
-                    if (response_type == 2) begin
+                    if (response_type == EXT_COMMAND) begin
+                        send_state_next <= SEND_DEBUG;
+                        resp_type <= EXT_COMMAND;
+                        send_state <= SEND_HEADER;
+                        resp_frame_len <= 16;
+                    end else if (response_type == STREAM_COMMAND) begin
+                        send_state_next <= SEND_STREAM_ACK;
+                        resp_type <= STREAM_COMMAND;
+                        send_state <= SEND_HEADER;
+                        resp_frame_len <= 14;
+                    end else if (response_type == 2) begin
                         send_state_next <= SEND_CONFIG_STRING;
+                        resp_type <= SEND_CONFIG_STRING;
                         send_state <= SEND_HEADER;
                         resp_frame_len <= STR_LEN + 1;
                     end else if (response_type == 1) begin
                         send_state_next <= SEND_CORE_ID;
+                        resp_type <= SEND_CORE_ID;
                         send_state <= SEND_HEADER;
                         resp_frame_len <= 2;
                     end
@@ -408,7 +832,7 @@ always @(posedge clk) begin
                         1: tx_data <= resp_frame_len[15:8];
                         2: tx_data <= resp_frame_len[7:0];
                         3: begin
-                            tx_data <= send_state_next;
+                            tx_data <= resp_type;
                             send_state <= send_state_next;
                             send_idx <= 0;
                         end
@@ -451,6 +875,76 @@ always @(posedge clk) begin
                     send_idx <= send_idx + 1;
                     if (send_idx == 3) begin
                         send_state <= SEND_IDLE;
+                    end
+                end
+            end
+
+            SEND_DEBUG: begin
+                if (tx_ready && ~tx_valid) begin
+                    case (send_idx)
+                        0: tx_data <= EXT_VERSION;
+                        1: tx_data <= response_opcode | 8'h80;
+                        2: tx_data <= response_status;
+                        3: tx_data <= response_sequence[15:8];
+                        4: tx_data <= response_sequence[7:0];
+                        5: tx_data <= response_address[31:24];
+                        6: tx_data <= response_address[23:16];
+                        7: tx_data <= response_address[15:8];
+                        8: tx_data <= response_address[7:0];
+                        9: tx_data <= response_data[31:24];
+                        10: tx_data <= response_data[23:16];
+                        11: tx_data <= response_data[15:8];
+                        12: tx_data <= response_data[7:0];
+                        13: tx_data <= response_crc[15:8];
+                        14: tx_data <= response_crc[7:0];
+                        default: tx_data <= 0;
+                    endcase
+                    tx_valid <= 1;
+                    send_idx <= send_idx + 1'b1;
+                    if (send_idx == 14) begin
+                        if (response_opcode == EXT_SET_BAUD && response_status == 0) begin
+                            send_state <= SEND_BAUD_WAIT;
+                            baud_wait_seen_busy <= 0;
+                        end else begin
+                            send_state <= SEND_IDLE;
+                            response_ack <= response_req;
+                        end
+                    end
+                end
+            end
+
+            SEND_BAUD_WAIT: begin
+                if (tx_busy)
+                    baud_wait_seen_busy <= 1;
+                else if (baud_wait_seen_busy) begin
+                    baud_fast <= (response_data == 32'd5000000);
+                    response_ack <= response_req;
+                    send_state <= SEND_IDLE;
+                end
+            end
+
+            SEND_STREAM_ACK: begin
+                if (tx_ready && ~tx_valid) begin
+                    case (send_idx)
+                        0: tx_data <= STREAM_VERSION;
+                        1: tx_data <= stream_response_status;
+                        2: tx_data <= stream_response_flags;
+                        3: tx_data <= stream_response_id[15:8];
+                        4: tx_data <= stream_response_id[7:0];
+                        5: tx_data <= stream_response_next_offset[31:24];
+                        6: tx_data <= stream_response_next_offset[23:16];
+                        7: tx_data <= stream_response_next_offset[15:8];
+                        8: tx_data <= stream_response_next_offset[7:0];
+                        9: tx_data <= stream_response_credit[15:8];
+                        10: tx_data <= stream_response_credit[7:0];
+                        11: tx_data <= stream_response_crc_value[15:8];
+                        12: tx_data <= stream_response_crc_value[7:0];
+                        default: tx_data <= 0;
+                    endcase
+                    tx_valid <= 1;
+                    send_idx <= send_idx + 1'b1;
+                    if (send_idx == 12) begin
+                        send_state <= SEND_IDLE;
                         response_ack <= response_req;
                     end
                 end
@@ -474,7 +968,6 @@ always @(posedge clk) begin
                     send_idx <= send_idx + 1;
                     if (send_idx == 511+2) begin
                         send_state <= SEND_DONE;
-                        response_ack <= response_req;
                         fdd_write_finish <= 1;              // notify FDD state machine
                     end
                 end
@@ -492,7 +985,6 @@ always @(posedge clk) begin
                     send_idx <= send_idx + 1;
                     if (send_idx == 1) begin
                         send_state <= SEND_DONE;
-                        response_ack <= response_req;
                         fdd_read_start <= 1;                // notify FDD state machine
                     end
                 end

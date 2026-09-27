@@ -46,6 +46,29 @@ wire [7:0] overlay_y;
 wire [14:0] overlay_color;
 wire [15:0] hid1_unused;
 wire [15:0] hid2_unused;
+wire frame_tick;
+
+wire debug_valid;
+wire debug_write;
+wire [31:0] debug_address;
+wire [31:0] debug_wdata;
+wire [31:0] debug_rdata;
+wire [31:0] debug_crc_errors;
+wire [31:0] debug_bad_requests;
+wire stream_start;
+wire stream_end;
+wire stream_cancel;
+wire [15:0] stream_id;
+wire [31:0] stream_offset;
+wire [7:0] stream_data;
+wire stream_valid;
+wire stream_ready;
+wire [31:0] stream_sessions;
+wire [31:0] stream_bytes;
+wire [31:0] stream_ends;
+wire [31:0] stream_cancels;
+wire [31:0] stream_last_offset;
+wire [31:0] stream_crc32;
 
 phosphor_video video (
     .resetn(resetn),
@@ -55,6 +78,7 @@ phosphor_video video (
     .overlay_x(overlay_x),
     .overlay_y(overlay_y),
     .overlay_color(overlay_color),
+    .frame_tick(frame_tick),
     .tmds_clk_p(tmds_clk_p),
     .tmds_clk_n(tmds_clk_n),
     .tmds_d_p(tmds_d_p),
@@ -79,10 +103,55 @@ iosys_bl616 #(
     .joy2(12'b0),
     .hid1(hid1_unused),
     .hid2(hid2_unused),
+    .debug_valid(debug_valid),
+    .debug_write(debug_write),
+    .debug_address(debug_address),
+    .debug_wdata(debug_wdata),
+    .debug_rdata(debug_rdata),
+    .debug_crc_errors(debug_crc_errors),
+    .debug_bad_requests(debug_bad_requests),
+    .stream_start(stream_start),
+    .stream_end(stream_end),
+    .stream_cancel(stream_cancel),
+    .stream_id(stream_id),
+    .stream_offset(stream_offset),
+    .stream_data(stream_data),
+    .stream_valid(stream_valid),
+    .stream_ready(stream_ready),
     .mgmt_readdata(16'b0),
     .fdd_request(2'b0),
     .uart_rx(UART_RXD),
     .uart_tx(UART_TXD)
+);
+
+stream_debug_sink stream_sink (
+    .clk(clk_pixel), .resetn(resetn),
+    .stream_start(stream_start), .stream_end(stream_end),
+    .stream_cancel(stream_cancel), .stream_id(stream_id),
+    .stream_offset(stream_offset), .stream_data(stream_data),
+    .stream_valid(stream_valid), .stream_ready(stream_ready),
+    .session_count(stream_sessions), .byte_count(stream_bytes),
+    .end_count(stream_ends), .cancel_count(stream_cancels),
+    .last_offset(stream_last_offset), .stream_crc32(stream_crc32)
+);
+
+debug_regs debug_registers (
+    .clk(clk_pixel),
+    .resetn(resetn),
+    .frame_tick(frame_tick),
+    .request_valid(debug_valid),
+    .request_write(debug_write),
+    .request_address(debug_address),
+    .request_wdata(debug_wdata),
+    .transport_crc_errors(debug_crc_errors),
+    .transport_bad_requests(debug_bad_requests),
+    .stream_sessions(stream_sessions),
+    .stream_bytes(stream_bytes),
+    .stream_ends(stream_ends),
+    .stream_cancels(stream_cancels),
+    .stream_last_offset(stream_last_offset),
+    .stream_crc32(stream_crc32),
+    .request_rdata(debug_rdata)
 );
 
 endmodule
