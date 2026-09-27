@@ -10,7 +10,7 @@ The first bring-up core provides:
 
 - Tang Console 138K clock and HDMI pinout
 - 1280x720p60 video over the HDMI connector
-- silent 48 kHz HDMI audio packets, ready for the test-tone milestone
+- deterministic 48 kHz HDMI audio with distinct 1 kHz left and 2 kHz right test tones
 - a distinctive animated test pattern
 - the standard TangCore BL616 UART interface and OSD
 - a CRC-protected USB-to-FPGA debug register channel

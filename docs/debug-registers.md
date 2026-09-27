@@ -29,13 +29,15 @@ return `0xdeadbeef`; unknown writes have no effect.
 | `0x0054` | R | BL616-provided HID controller 2 state |
 | `0x0058` | R | USB status: `{usb2_error, usb2_type[1:0], usb1_error, usb1_type[1:0]}` |
 
-Examples using the Tang-Control host client:
+Examples use the authoritative host client from the sibling Tang-Control
+repository. Check out its `feature/usb-cdc-file-transfer` branch, then run these
+commands from the Tang-Phosphor repository root:
 
 ```bash
-python3 scripts/tangctl.py caps
-python3 scripts/tangctl.py peek 0x0 11
-python3 scripts/tangctl.py poke 0x20 0x12345678
-python3 scripts/tangctl.py peek 0x20
-python3 scripts/tangctl.py stream music/test.wav
-python3 scripts/tangctl.py peek 0x30 6
+python3 ../Tang-Control/scripts/tangctl.py caps
+python3 ../Tang-Control/scripts/tangctl.py peek 0x0 11
+python3 ../Tang-Control/scripts/tangctl.py poke 0x20 0x12345678
+python3 ../Tang-Control/scripts/tangctl.py peek 0x20
+python3 ../Tang-Control/scripts/tangctl.py stream music/test.wav
+python3 ../Tang-Control/scripts/tangctl.py peek 0x30 6
 ```

@@ -748,9 +748,18 @@ localparam SEND_STREAM_ACK = 10;
 
 reg [3:0] send_state, send_state_next;
 reg [7:0] resp_type;
-reg [$clog2(STR_LEN+1)-1:0] send_idx;
-localparam JOY_UPDATE_INTERVAL = 50_000_000 / 50; // 20ms interval for 50Hz
-reg [$clog2(JOY_UPDATE_INTERVAL+1)-1:0] joy_timer;
+localparam integer FDD_WRITE_LAST_INDEX = 512 + 1;
+localparam integer SEND_INDEX_COUNT =
+    (STR_LEN > FDD_WRITE_LAST_INDEX + 1) ? STR_LEN : FDD_WRITE_LAST_INDEX + 1;
+localparam integer SEND_INDEX_WIDTH = $clog2(SEND_INDEX_COUNT);
+localparam [SEND_INDEX_WIDTH-1:0] FDD_WRITE_LAST =
+    SEND_INDEX_WIDTH'(FDD_WRITE_LAST_INDEX);
+reg [SEND_INDEX_WIDTH-1:0] send_idx;
+localparam integer JOY_UPDATE_INTERVAL = FREQ / 50; // 20ms interval for 50Hz
+localparam integer JOY_TIMER_WIDTH = $clog2(JOY_UPDATE_INTERVAL + 1);
+localparam [JOY_TIMER_WIDTH-1:0] JOY_UPDATE_RELOAD =
+    JOY_TIMER_WIDTH'(JOY_UPDATE_INTERVAL);
+reg [JOY_TIMER_WIDTH-1:0] joy_timer;
 reg [15:0] joy1_reg;
 reg [15:0] joy2_reg;
 reg [15:0] resp_frame_len;
@@ -779,7 +788,7 @@ always @(posedge clk) begin
             SEND_IDLE: begin
                 send_idx <= 0;
                 if (joy_timer == 0 && (joy1 != joy1_reg || joy2 != joy2_reg)) begin
-                    joy_timer <= JOY_UPDATE_INTERVAL;
+                    joy_timer <= JOY_UPDATE_RELOAD;
                     joy1_reg <= joy1;
                     joy2_reg <= joy2;
                     send_state_next <= SEND_JOYPAD;
@@ -966,7 +975,7 @@ always @(posedge clk) begin
                     endcase
                     tx_valid <= 1;
                     send_idx <= send_idx + 1;
-                    if (send_idx == 511+2) begin
+                    if (send_idx == FDD_WRITE_LAST) begin
                         send_state <= SEND_DONE;
                         fdd_write_finish <= 1;              // notify FDD state machine
                     end

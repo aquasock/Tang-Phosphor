@@ -21,6 +21,9 @@ wire overlay;
 wire [14:0] overlay_color;
 wire [15:0] hid1;
 wire [15:0] hid2;
+reg [11:0] joy1 = 0;
+reg [11:0] joy2 = 0;
+reg [1:0] fdd_request = 0;
 wire [7:0] rom_loading;
 wire [7:0] rom_do;
 wire rom_do_valid;
@@ -28,6 +31,7 @@ wire [15:0] mgmt_address;
 wire mgmt_read;
 wire mgmt_write;
 wire [15:0] mgmt_writedata;
+wire [15:0] mgmt_readdata = (mgmt_address == 16'hf200) ? 16'h1234 : 16'h005a;
 wire [7:0] kbd_data;
 wire kbd_data_valid;
 wire [31:0] core_config;
@@ -44,15 +48,16 @@ reg [31:0] stream_word = 0;
 integer stream_byte_count = 0;
 integer stream_start_count = 0;
 integer stream_end_count = 0;
+integer mgmt_read_count = 0;
 
 iosys_bl616 #(.FREQ(CLOCK_HZ), .CORE_ID(16'h0050)) dut (
     .clk(clk), .hclk(clk), .resetn(resetn),
     .overlay(overlay), .overlay_x(8'b0), .overlay_y(8'b0),
-    .overlay_color(overlay_color), .joy1(12'b0), .joy2(12'b0),
+    .overlay_color(overlay_color), .joy1(joy1), .joy2(joy2),
     .hid1(hid1), .hid2(hid2),
     .rom_loading(rom_loading), .rom_do(rom_do), .rom_do_valid(rom_do_valid),
-    .mgmt_address(mgmt_address), .mgmt_read(mgmt_read), .mgmt_readdata(16'b0),
-    .mgmt_write(mgmt_write), .mgmt_writedata(mgmt_writedata), .fdd_request(2'b0),
+    .mgmt_address(mgmt_address), .mgmt_read(mgmt_read), .mgmt_readdata(mgmt_readdata),
+    .mgmt_write(mgmt_write), .mgmt_writedata(mgmt_writedata), .fdd_request(fdd_request),
     .kbd_data(kbd_data), .kbd_data_valid(kbd_data_valid),
     .core_config(core_config),
     .debug_valid(debug_valid), .debug_write(debug_write),
@@ -75,6 +80,8 @@ always @(posedge clk) begin
         stream_start_count <= stream_start_count + 1;
     if (stream_end)
         stream_end_count <= stream_end_count + 1;
+    if (mgmt_read)
+        mgmt_read_count <= mgmt_read_count + 1;
     if (stream_valid) begin
         stream_word <= {stream_word[23:0], stream_data};
         stream_byte_count <= stream_byte_count + 1;
@@ -111,6 +118,52 @@ task automatic send_byte(input [7:0] value);
         @(negedge clk);
         dut.uart_receiver_slow.RxD_data_ready = 1'b0;
         dut.uart_receiver_fast.RxD_data_ready = 1'b0;
+    end
+endtask
+
+task automatic check_joypad_response(
+    input [15:0] expected_joy1,
+    input [15:0] expected_joy2
+);
+    integer i;
+    reg [7:0] bytes [0:7];
+    begin
+        for (i = 0; i < 8; i = i + 1)
+            receive_byte(bytes[i]);
+        if (bytes[0] !== 8'haa || bytes[1] !== 0 || bytes[2] !== 5 ||
+            bytes[3] !== 3 || {bytes[4], bytes[5]} !== expected_joy1 ||
+            {bytes[6], bytes[7]} !== expected_joy2)
+            $fatal(1, "FAIL joypad response");
+    end
+endtask
+
+task automatic check_fdd_write_response;
+    integer i;
+    reg [7:0] value;
+    begin
+        receive_byte(value);
+        if (value !== 8'haa)
+            $fatal(1, "FAIL FDD write sync");
+        receive_byte(value);
+        if (value !== 8'h02)
+            $fatal(1, "FAIL FDD write length high");
+        receive_byte(value);
+        if (value !== 8'h03)
+            $fatal(1, "FAIL FDD write length low");
+        receive_byte(value);
+        if (value !== 8'h04)
+            $fatal(1, "FAIL FDD write response type");
+        receive_byte(value);
+        if (value !== 8'h12)
+            $fatal(1, "FAIL FDD write sector high");
+        receive_byte(value);
+        if (value !== 8'h34)
+            $fatal(1, "FAIL FDD write sector low");
+        for (i = 0; i < 512; i = i + 1) begin
+            receive_byte(value);
+            if (value !== 8'h5a)
+                $fatal(1, "FAIL FDD write data byte %0d", i);
+        end
     end
 endtask
 
@@ -315,7 +368,31 @@ initial begin
         stream_byte_count !== 4 || stream_word !== 32'hdead_beef)
         $fatal(1, "FAIL stream sink data");
 
-    $display("PASS iosys extended debug protocol");
+    if (dut.JOY_UPDATE_INTERVAL != CLOCK_HZ / 50)
+        $fatal(1, "FAIL joypad interval is not derived from FREQ");
+    fork
+        begin
+            @(negedge clk);
+            joy1 = 12'ha5a;
+        end
+        check_joypad_response(16'h0a5a, 16'h0000);
+    join
+
+    fork
+        begin
+            @(negedge clk);
+            fdd_request = 2'b10;
+            @(posedge dut.fdd_write_finish);
+            @(negedge clk);
+            fdd_request = 2'b00;
+        end
+        check_fdd_write_response();
+    join
+    repeat (4) @(posedge clk);
+    if (mgmt_read_count !== 512)
+        $fatal(1, "FAIL FDD write consumed %0d FIFO bytes", mgmt_read_count);
+
+    $display("PASS iosys debug, controller timing, and FDD write protocol");
     $finish;
 end
 
