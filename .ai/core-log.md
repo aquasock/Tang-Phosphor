@@ -552,3 +552,34 @@ Continue playlist UI refinement as the user directs. Then define the bounded PCM
 - User Test: PASS
 
 ---
+
+## 16 COMMIT Unreleased 2026-09-27T21:52:59-07:00
+
+#### Coming From:
+
+Unreleased 8e7d46b
+
+#### Purpose:
+
+Investigate and implement BL616 Tang-Control firmware updates that do not require BOOT mode.
+
+#### Outcome:
+
+A read-only 4 MiB BL616 flash readback identified a GigaDevice JEDEC `c86016` part. The vendor loader occupies `0x000000`-`0x01bfff`, TangCore sits at `0x040000` and was byte-identical to the Tang-Control `3636da1` image deployed in entry 15, completing the readback that entry could not perform, and a vendor data record sits at `0x200000`. The loader is opaque and no software entry into ROM ISP exists, so the chosen approach is an in-place self-update. Tang-Control `feature/usb-cdc-file-transfer` commit `fa5f912` adds a `tangctl firmware` command and a `fwupdate` console command. They check the BL616 boot header, which has a CRC-32 at `0xfc` and a body length at `0x84` after a 4 KiB header region. The image is uploaded to SD, staged at `0x100000` with SHA-256 verification, and then written over `0x040000` sector by sector from a TCM- and ROM-only routine with interrupts masked, followed by a reset. The linked ELF's call graph was checked so that no instruction fetch reaches application flash during the commit. `status` reports the running image's offset, size, and SHA-256. The first bootstrap build refused to update because the XIP image offset is `0x41000`, not the header address, and was corrected with one additional BOOT-mode flash. Two BOOT-free updates then installed a temporary test image and restored the committed image, and each was proven by `app_sha256` after reconnecting. Both showed that the vendor loader starts the Sipeed USB debugger, `0403:6010`, after a software reset and starts TangCore only after power-on, so an update ends with one USB replug; the user accepted that. The final `260448`-byte firmware with SHA-256 `04c59dc7383ce74a07e4684fa593eaf702f6abc18b7c6a40806d49dc41147096` was installed through the finished flow without BOOT mode, and the client verified the matching `app_sha256` after the replug. A temporary `git checkout` of `usb/usb_cdc_console.cpp` discarded uncommitted console edits mid-cycle; they were reapplied, and the rebuild was byte-identical to the image then running. New host tests cover SHA-256 against FIPS 180-4 vectors and boot-header validation in both C++ and Python, and all Tang-Control tests passed. No FPGA change was made, Tang-Phosphor documentation now pins `fa5f912`, and the required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Use `tangctl.py firmware` with one USB replug for future Tang-Control updates, keeping BOOT mode as the recovery path. Continue playlist UI refinement as the user directs, then the bounded PCM-driven waveform visualizer.
+
+#### Files Modified:
+
+- README.md
+- docs/debug-registers.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
