@@ -38,7 +38,7 @@ The current register map is documented in
 The bounded audio architecture is documented in
 [`docs/audio-pipeline.md`](docs/audio-pipeline.md).
 
-Tang-Control's `feature/usb-cdc-file-transfer` branch at `26a6ff7` supplies the
+Tang-Control's `feature/usb-cdc-file-transfer` branch at `3636da1` supplies the
 SD-card file loader for core ID `0x50`. Its Phosphor menu can open standalone
 WAV/FLAC files or VLC-style M3U/M3U8 playlists whose entries remain separate
 SD files; no TAR container is required. TangCore's OSD is intentionally limited
@@ -51,6 +51,9 @@ name, and filename fallbacks. JPEG covers are decoded on the BL616 to the same
 92x92 RGB332 representation used by MiSTer-Phosphor and are published through
 an independent double buffer. Audio backpressure remains authoritative while
 the shared UART is interleaved, and no partially uploaded image is exposed.
+Text and artwork travel as CRC-validated 64-word block writes (transport
+capability bit 4), so a cover appears within about a second of a track
+starting instead of waiting for one register write per audio frame.
 
 ## Build
 

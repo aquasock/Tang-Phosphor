@@ -49,6 +49,12 @@ integer stream_byte_count = 0;
 integer stream_start_count = 0;
 integer stream_end_count = 0;
 integer mgmt_read_count = 0;
+reg stream_ready = 1;
+integer bus_writes = 0;
+integer cycle = 0;
+integer bus_cycle [0:127];
+reg [31:0] bus_address [0:127];
+reg [31:0] bus_data [0:127];
 
 iosys_bl616 #(.FREQ(CLOCK_HZ), .CORE_ID(16'h0050)) dut (
     .clk(clk), .hclk(clk), .resetn(resetn),
@@ -67,13 +73,24 @@ iosys_bl616 #(.FREQ(CLOCK_HZ), .CORE_ID(16'h0050)) dut (
     .stream_start(stream_start), .stream_end(stream_end),
     .stream_cancel(stream_cancel), .stream_id(stream_id),
     .stream_offset(stream_offset), .stream_data(stream_data),
-    .stream_valid(stream_valid), .stream_ready(1'b1),
+    .stream_valid(stream_valid), .stream_ready(stream_ready),
     .uart_rx(uart_rx), .uart_tx(uart_tx)
 );
 
 always @(posedge clk)
     if (debug_valid && debug_write && debug_address == 32'h20)
         scratch <= debug_wdata;
+
+// Record every register write and the cycle on which it occurred.
+always @(posedge clk) begin
+    cycle <= cycle + 1;
+    if (debug_valid && debug_write) begin
+        bus_cycle[bus_writes % 128] <= cycle;
+        bus_address[bus_writes % 128] <= debug_address;
+        bus_data[bus_writes % 128] <= debug_wdata;
+        bus_writes <= bus_writes + 1;
+    end
+end
 
 always @(posedge clk) begin
     if (stream_start)
@@ -82,7 +99,7 @@ always @(posedge clk) begin
         stream_end_count <= stream_end_count + 1;
     if (mgmt_read)
         mgmt_read_count <= mgmt_read_count + 1;
-    if (stream_valid) begin
+    if (stream_valid && stream_ready) begin
         stream_word <= {stream_word[23:0], stream_data};
         stream_byte_count <= stream_byte_count + 1;
     end
@@ -282,6 +299,71 @@ task automatic send_request(
     end
 endtask
 
+function automatic [31:0] block_word(input [7:0] seed, input integer index);
+    block_word = {seed, index[7:0], ~index[7:0], seed ^ index[7:0]};
+endfunction
+
+// corrupt: 0 none, 1 CRC, 2 header count exceeds the carried words
+task automatic send_block_request(
+    input [7:0] opcode,
+    input [15:0] transaction,
+    input [31:0] address,
+    input [7:0] count,
+    input [7:0] seed,
+    input integer corrupt
+);
+    integer i, j, words;
+    reg [15:0] crc;
+    reg [15:0] frame_length;
+    reg [31:0] value;
+    reg [7:0] header [0:8];
+    begin
+        repeat (4) @(posedge clk);
+        words = corrupt == 2 ? count - 1 : count;
+        frame_length = 12 + 4 * words;
+        header[0] = 8'h01; header[1] = opcode;
+        header[2] = transaction[15:8]; header[3] = transaction[7:0];
+        header[4] = address[31:24]; header[5] = address[23:16];
+        header[6] = address[15:8]; header[7] = address[7:0];
+        header[8] = count;
+        crc = crc_byte(16'hffff, 8'h12);
+        send_byte(8'haa); send_byte(frame_length[15:8]);
+        send_byte(frame_length[7:0]); send_byte(8'h12);
+        for (i = 0; i < 9; i = i + 1) begin
+            crc = crc_byte(crc, header[i]);
+            send_byte(header[i]);
+        end
+        for (i = 0; i < words; i = i + 1) begin
+            value = block_word(seed, i);
+            for (j = 3; j >= 0; j = j - 1) begin
+                crc = crc_byte(crc, value[8*j +: 8]);
+                send_byte(value[8*j +: 8]);
+            end
+        end
+        if (corrupt == 1)
+            crc = crc ^ 16'h0100;
+        send_byte(crc[15:8]); send_byte(crc[7:0]);
+    end
+endtask
+
+task automatic check_block_writes(
+    input integer first,
+    input [31:0] address,
+    input integer count,
+    input [7:0] seed
+);
+    integer i;
+    begin
+        if (bus_writes - first !== count)
+            $fatal(1, "FAIL block write count %0d, expected %0d", bus_writes - first, count);
+        for (i = 0; i < count; i = i + 1)
+            if (bus_address[(first + i) % 128] !== address + 4 * i ||
+                bus_data[(first + i) % 128] !== block_word(seed, i) ||
+                (i != 0 && bus_cycle[(first + i) % 128] !== bus_cycle[(first + i - 1) % 128] + 1))
+                $fatal(1, "FAIL block word %0d", i);
+    end
+endtask
+
 task automatic check_response(
     input [7:0] opcode,
     input [7:0] status,
@@ -321,7 +403,7 @@ initial begin
 
     fork
         send_request(8'h00, 16'h1001, 0, 0, 0);
-        check_response(8'h00, 0, 16'h1001, 0, 32'h0000_000f);
+        check_response(8'h00, 0, 16'h1001, 0, 32'h0000_001f);
     join
 
     fork
@@ -368,6 +450,88 @@ initial begin
         stream_byte_count !== 4 || stream_word !== 32'hdead_beef)
         $fatal(1, "FAIL stream sink data");
 
+    // Validated block writes replay back-to-back onto the register bus.
+    begin : block_writes
+        integer first, crc_errors, bad_requests;
+        first = bus_writes;
+        fork
+            send_block_request(8'h04, 16'h2001, 32'h100, 3, 8'h31, 0);
+            check_response(8'h04, 0, 16'h2001, 32'h100, 3);
+        join
+        check_block_writes(first, 32'h100, 3, 8'h31);
+
+        first = bus_writes;
+        fork
+            send_block_request(8'h04, 16'h2002, 32'h1000, 64, 8'h64, 0);
+            check_response(8'h04, 0, 16'h2002, 32'h1000, 64);
+        join
+        check_block_writes(first, 32'h1000, 64, 8'h64);
+
+        crc_errors = debug_crc_errors;
+        bad_requests = debug_bad_requests;
+        first = bus_writes;
+        fork
+            send_block_request(8'h04, 16'h2003, 32'h100, 4, 8'h01, 1);
+            check_response(8'h04, 3, 16'h2003, 32'h100, 4);
+        join
+        fork
+            send_block_request(8'h04, 16'h2004, 32'h100, 0, 8'h02, 0);
+            check_response(8'h04, 2, 16'h2004, 32'h100, 0);
+        join
+        fork
+            send_block_request(8'h04, 16'h2005, 32'h100, 65, 8'h03, 0);
+            check_response(8'h04, 2, 16'h2005, 32'h100, 65);
+        join
+        fork
+            send_block_request(8'h04, 16'h2006, 32'h100, 5, 8'h04, 2);
+            check_response(8'h04, 2, 16'h2006, 32'h100, 5);
+        join
+        fork
+            send_block_request(8'h04, 16'h2007, 32'h102, 2, 8'h05, 0);
+            check_response(8'h04, 2, 16'h2007, 32'h102, 2);
+        join
+        fork
+            send_block_request(8'h02, 16'h2008, 32'h100, 2, 8'h06, 0);
+            check_response(8'h02, 2, 16'h2008, 32'h100, 2);
+        join
+        repeat (4) @(posedge clk);
+        if (bus_writes !== first)
+            $fatal(1, "FAIL rejected block frame reached the register bus");
+        if (debug_crc_errors !== crc_errors + 1 || debug_bad_requests !== bad_requests + 5)
+            $fatal(1, "FAIL block error counters");
+
+        // A block write is serviced while an undrained stream buffer waits
+        // for backpressure to clear, and the held stream data is unchanged.
+        fork
+            send_stream_request(8'h01, 16'h0056, 0, 0, 0);
+            check_stream_response(8'h01, 0, 16'h0056, 0, 16'd1024);
+        join
+        stream_ready = 0;
+        stream_byte_count = 0;
+        send_stream_request(8'h02, 16'h0056, 0, 4, 32'hcafe_f00d);
+        repeat (8) @(posedge clk);
+        if (!stream_valid)
+            $fatal(1, "FAIL stream buffer did not hold under backpressure");
+        first = bus_writes;
+        fork
+            send_block_request(8'h04, 16'h2009, 32'h200, 8, 8'h77, 0);
+            check_response(8'h04, 0, 16'h2009, 32'h200, 8);
+        join
+        check_block_writes(first, 32'h200, 8, 8'h77);
+        if (!stream_valid || stream_byte_count !== 0)
+            $fatal(1, "FAIL block write disturbed the held stream buffer");
+        fork
+            begin
+                @(negedge clk);
+                stream_ready = 1;
+            end
+            check_stream_response(8'h02, 0, 16'h0056, 4, 16'd1024);
+        join
+        repeat (4) @(posedge clk);
+        if (stream_byte_count !== 4 || stream_word !== 32'hcafe_f00d)
+            $fatal(1, "FAIL stream data after interleaved block write");
+    end
+
     if (dut.JOY_UPDATE_INTERVAL != CLOCK_HZ / 50)
         $fatal(1, "FAIL joypad interval is not derived from FREQ");
     fork
@@ -392,7 +556,7 @@ initial begin
     if (mgmt_read_count !== 512)
         $fatal(1, "FAIL FDD write consumed %0d FIFO bytes", mgmt_read_count);
 
-    $display("PASS iosys debug, controller timing, and FDD write protocol");
+    $display("PASS iosys debug, block writes, controller timing, and FDD write protocol");
     $finish;
 end
 

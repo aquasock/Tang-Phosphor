@@ -519,3 +519,36 @@ Define the bounded PCM-driven waveform visualizer for the album screen against t
 - User Test: PASS
 
 ---
+
+## 15 COMMIT Unreleased 2026-09-27T21:18:52-07:00
+
+#### Coming From:
+
+Unreleased fc482f8
+
+#### Purpose:
+
+Make album artwork appear shortly after a track starts by replacing thousands of single-register UI writes with validated block writes on the shared FPGA link.
+
+#### Outcome:
+
+Cover art previously appeared about 30 seconds into playback, and sooner after a pause, because Tang-Control holds the shared link until each 1 KiB stream frame is acknowledged. The FPGA ignores received bytes while transmitting, and the stream acknowledgement is unsolicited. Only one register write therefore fit between frames, which arrived every `9.8` ms at the measured `104` kB/s FLAC rate, so the `2116`-word artwork and roughly `160` text and control writes took about 22 seconds; pausing stopped the stream and freed the link. `iosys_bl616` now accepts frame type `0x12` opcode `0x04`, carrying 1 to 64 words, buffers them in a block RAM, and replays them back-to-back on the debug bus only after the CRC, version, opcode, count, length, and word alignment validate. It answers with an ordinary `0x10` response and advertises transport capability bit 4, so capabilities are now `0x0000001f`. Tang-Control `feature/usb-cdc-file-transfer` commit `3636da1` adds `fpga_debug_write_block()` under the unchanged link discipline and sends the 72-word text snapshot and the artwork as 64-word blocks when that bit is present, falling back to single-register writes otherwise. The frame encoders moved into `utils/fpga_ext_frame.h`, and a new host test checks them against independently computed CRC-16 vectors; the protocol document describes the frame. All FPGA regressions passed, and `tests/iosys_debug_tb.sv` now covers 3- and 64-word replay on consecutive cycles, rejection of bad CRC, zero or 65 words, a header/length mismatch, a misaligned address, and a wrong opcode with no bus writes and correct counters, and a block write serviced while a stream buffer is held by backpressure. An uncommitted equivalence harness against `fc482f8` showed `iosys_bl616` cycle-identical for all non-block traffic. The eight-core Gowin EDA 1.9.11.03 build for `GW5AST-LV138PG484AC1/I0` revision B passed timing in all four placement options with worst setup slack `+0.012`, `+0.110`, `+0.574`, and `+1.266` ns. Option 3 was selected with pixel Fmax `81.956 MHz` and worst hold slack `+0.153` ns; its `4841472`-byte artifact with SHA-256 `dee67024b2fe6d9effff5c1d3b58f894280d0e1abb2345efac9150bc1dd0079f` was uploaded as `cores/console138k/tang-phosphor.bin` with a byte-identical SD readback, CRC-32 `a4b5e761`. The `252608`-byte Tang-Control firmware with SHA-256 `f0630083b04de3c5ab90b57d6bc682acba4d306d041be500858f60de0cb046f5` was application-only flashed at `0x40000` and passed the flash tool's on-device SHA verification. The user reported that everything passed and that artwork appears almost instantly. Post-test probes reported capabilities `0x0000001f`, a scratch write/readback restored to zero, an active 44.1 kHz FLAC session with a full `2048`-sample FIFO and zero underruns, zero FPGA-side CRC or bad-request counts, and `387` Tang-Control requests matched by responses with no timeouts, CRC errors, malformed packets, unexpected responses, or FIFO overflows. The required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Continue playlist UI refinement as the user directs. Then define the bounded PCM-driven waveform visualizer for the album screen, and pipeline the FLAC decoder's main control state machine if slack in a later build's default placement falls below the recovered margin.
+
+#### Files Modified:
+
+- README.md
+- docs/debug-registers.md
+- src/iosys/iosys_bl616.v
+- tests/iosys_debug_tb.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

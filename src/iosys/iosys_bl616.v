@@ -85,6 +85,9 @@ localparam [7:0] EXT_CAPABILITIES = 8'h00;
 localparam [7:0] EXT_READ32 = 8'h01;
 localparam [7:0] EXT_WRITE32 = 8'h02;
 localparam [7:0] EXT_SET_BAUD = 8'h03;
+localparam [7:0] EXT_WRITE_BLOCK = 8'h04;
+localparam [7:0] BLOCK_COMMAND = 8'h12;
+localparam integer BLOCK_MAX_WORDS = 64;
 localparam [7:0] STREAM_COMMAND = 8'h11;
 localparam [7:0] STREAM_VERSION = 8'h01;
 localparam [7:0] STREAM_START = 8'h01;
@@ -245,7 +248,8 @@ localparam RECV_CMD          = 7'b0001000; // receiving command
 localparam RECV_PARAM        = 7'b0010000; // receiving parameters
 localparam RECV_RESPONSE_REQ = 7'b0100000; // sending response
 localparam RECV_RESPONSE_ACK = 7'b1000000; // waiting for response sending to finish 
-reg [6:0] recv_state = RECV_IDLE;
+localparam RECV_BLOCK_WRITE  = 8'b10000000; // replaying a validated block write
+reg [7:0] recv_state = RECV_IDLE;
 
 // UART command buffer
 reg [7:0] cmd_reg;
@@ -262,6 +266,29 @@ reg [31:0] ext_address;
 reg [31:0] ext_value;
 reg [15:0] ext_crc;
 reg [15:0] ext_crc_received;
+
+// Block writes buffer up to 64 words and replay them onto the debug bus only
+// after the whole frame's CRC, version, opcode, length, and alignment pass,
+// so a damaged frame never reaches core registers.
+(* syn_ramstyle = "block_ram" *) reg [31:0] block_buffer [0:BLOCK_MAX_WORDS-1];
+reg block_buffer_write;
+reg [5:0] block_buffer_write_address;
+reg [31:0] block_buffer_write_data;
+reg [31:0] block_buffer_read_data;
+reg [15:0] block_payload_end;
+reg [6:0] block_word_count;
+reg block_length_ok;
+reg [6:0] block_replay_index;
+reg block_replay_primed;
+reg [31:0] block_replay_address;
+wire [5:0] block_buffer_read_address = block_replay_primed ?
+    block_replay_index[5:0] + 1'b1 : block_replay_index[5:0];
+
+always @(posedge clk) begin
+    if (block_buffer_write)
+        block_buffer[block_buffer_write_address] <= block_buffer_write_data;
+    block_buffer_read_data <= block_buffer[block_buffer_read_address];
+end
 
 reg [7:0] response_opcode;
 reg [7:0] response_status;
@@ -375,6 +402,7 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x0d <string>              debug printf. core ignores this.
 // 0x10 <extended request>    versioned debug/control request with CRC-16
 // 0x11 <stream frame>        credit-based stream control/data with CRC-16
+// 0x12 <block write>         validated 1-64 word register write with CRC-16
 //
 // Response payloads from FPGA to BL616:
 // 0x01 core_id[7:0]          core ID
@@ -422,6 +450,15 @@ always @(posedge clk) begin
         stream_crc_high_index <= 0;
         stream_crc_low_index <= 0;
         stream_frame_length_ok <= 0;
+        block_buffer_write <= 0;
+        block_buffer_write_address <= 0;
+        block_buffer_write_data <= 0;
+        block_payload_end <= 0;
+        block_word_count <= 0;
+        block_length_ok <= 0;
+        block_replay_index <= 0;
+        block_replay_primed <= 0;
+        block_replay_address <= 0;
         stream_expected_offset <= 0;
         stream_active_id <= 0;
         stream_session_active <= 0;
@@ -439,6 +476,7 @@ always @(posedge clk) begin
         stream_end <= 0;
         stream_cancel <= 0;
         stream_buffer_write <= 0;
+        block_buffer_write <= 0;
 
         if (stream_buffer_active && stream_ready) begin
             stream_offset <= stream_offset + 1'b1;
@@ -492,6 +530,12 @@ always @(posedge clk) begin
                 end
                 else if (rx_data == STREAM_COMMAND) begin
                     stream_crc_rx <= crc16_byte(16'hffff, STREAM_COMMAND);
+                    recv_state <= (len_reg > 1) ? RECV_PARAM : RECV_IDLE;
+                end
+                else if (rx_data == BLOCK_COMMAND) begin
+                    ext_crc <= crc16_byte(16'hffff, BLOCK_COMMAND);
+                    // Payload bytes precede the two CRC bytes.
+                    block_payload_end <= len_reg - 16'd3;
                     recv_state <= (len_reg > 1) ? RECV_PARAM : RECV_IDLE;
                 end
                 else if (len_reg > 1)
@@ -613,7 +657,7 @@ always @(posedge clk) begin
                                     debug_bad_requests <= debug_bad_requests + 1'b1;
                                 end else if (ext_opcode == EXT_CAPABILITIES) begin
                                     response_status <= 0;
-                                    response_data <= 32'h0000_000f;
+                                    response_data <= 32'h0000_001f;
                                 end else if (ext_opcode == EXT_READ32) begin
                                     response_status <= 0;
                                     response_data <= debug_rdata;
@@ -638,6 +682,71 @@ always @(posedge clk) begin
                             end
                             default: ;
                         endcase
+                    end
+                    BLOCK_COMMAND: begin
+                        if (data_cnt < block_payload_end)
+                            ext_crc <= crc16_byte(ext_crc, rx_data);
+                        case (data_cnt)
+                            0: ext_version <= rx_data;
+                            1: ext_opcode <= rx_data;
+                            2: ext_sequence[15:8] <= rx_data;
+                            3: ext_sequence[7:0] <= rx_data;
+                            4: ext_address[31:24] <= rx_data;
+                            5: ext_address[23:16] <= rx_data;
+                            6: ext_address[15:8] <= rx_data;
+                            7: ext_address[7:0] <= rx_data;
+                            8: begin
+                                block_word_count <= rx_data[6:0];
+                                block_length_ok <= rx_data != 0 &&
+                                    rx_data <= BLOCK_MAX_WORDS &&
+                                    len_reg == 16'd12 + {6'b0, rx_data, 2'b0};
+                            end
+                            default: ;
+                        endcase
+                        // Data bytes start at payload offset 9; every fourth
+                        // byte completes one big-endian word.
+                        if (data_cnt >= 9 && data_cnt < block_payload_end &&
+                            data_cnt < 9 + 4 * BLOCK_MAX_WORDS && data_cnt[1:0] == 2'd0) begin
+                            block_buffer_write <= 1;
+                            block_buffer_write_address <= 6'((data_cnt - 16'd9) >> 2);
+                            block_buffer_write_data <= {data_reg[23:0], rx_data};
+                        end
+                        if (data_cnt == block_payload_end)
+                            ext_crc_received[15:8] <= rx_data;
+                        if (data_cnt + 2 == len_reg) begin
+                            response_type <= EXT_COMMAND;
+                            response_opcode <= ext_opcode;
+                            response_sequence <= ext_sequence;
+                            response_address <= ext_address;
+                            response_data <= {25'b0, block_word_count};
+                            if (len_reg < 16'd12) begin
+                                // Too short for the header and CRC; drop it
+                                // like a malformed-length extended request.
+                                debug_bad_requests <= debug_bad_requests + 1'b1;
+                            end else if (ext_crc != {ext_crc_received[15:8], rx_data}) begin
+                                response_status <= 8'd3;
+                                debug_crc_errors <= debug_crc_errors + 1'b1;
+                                response_req <= ~response_req;
+                                recv_state <= RECV_RESPONSE_ACK;
+                            end else if (ext_version != EXT_VERSION) begin
+                                response_status <= 8'd1;
+                                debug_bad_requests <= debug_bad_requests + 1'b1;
+                                response_req <= ~response_req;
+                                recv_state <= RECV_RESPONSE_ACK;
+                            end else if (ext_opcode != EXT_WRITE_BLOCK || !block_length_ok ||
+                                         ext_address[1:0] != 2'b00) begin
+                                response_status <= 8'd2;
+                                debug_bad_requests <= debug_bad_requests + 1'b1;
+                                response_req <= ~response_req;
+                                recv_state <= RECV_RESPONSE_ACK;
+                            end else begin
+                                response_status <= 0;
+                                block_replay_index <= 0;
+                                block_replay_primed <= 0;
+                                block_replay_address <= ext_address;
+                                recv_state <= RECV_BLOCK_WRITE;
+                            end
+                        end
                     end
                     STREAM_COMMAND: begin
                         if (data_cnt <= 9 || {1'b0, data_cnt} < stream_crc_high_index)
@@ -768,6 +877,24 @@ always @(posedge clk) begin
             RECV_RESPONSE_ACK:                      // wait for TX to finish
                 if (response_req == response_ack) begin
                     recv_state <= RECV_IDLE;
+                end
+
+            // One word per cycle from the validated block buffer.  The read
+            // port leads the replay index by one word once primed.
+            RECV_BLOCK_WRITE:
+                if (!block_replay_primed) begin
+                    block_replay_primed <= 1;
+                end else begin
+                    debug_valid <= 1;
+                    debug_write <= 1;
+                    debug_address <= block_replay_address;
+                    debug_wdata <= block_buffer_read_data;
+                    block_replay_address <= block_replay_address + 32'd4;
+                    block_replay_index <= block_replay_index + 1'b1;
+                    if (block_replay_index + 1'b1 == block_word_count) begin
+                        response_req <= ~response_req;
+                        recv_state <= RECV_RESPONSE_ACK;
+                    end
                 end
         endcase
         
