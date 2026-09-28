@@ -59,3 +59,46 @@ supported profile. Project-specific limits remain implementation limits.
 - Tang-Phosphor use: Require `RIFF` at byte zero and `WAVE` at byte eight, making 12 bytes the bounded WAV-classification prefix before byte-exact replay.
 
 ---
+
+## GW5AST AE350 Hard Processor
+
+### Gowin RiscV_AE350_SOC Hardware Design Manual 1.3.1E
+
+- Source: https://www.gowinsemi.com/upload/database_doc/2725/document/6981101d547a4.pdf
+- Authority: Current Gowin primary hardware-integration manual, released January 2026.
+- Relevant rule: The hard A25 CPU exposes FPGA peripherals through extended APB/AHB interfaces, accepts 16 fabric interrupt inputs, and requires its core clock from the dedicated PLL path while AHB and APB remain synchronous and below 200 MHz.
+- Tang-Phosphor use: Place the AE350 clock PLL at `PLL_R[0]`, keep the initial fabric bus at 75 MHz, and attach the USB host registers through the CPU-master fabric interface.
+
+### LiteX Gowin AE350 wrapper and Tang hardware demonstration
+
+- Sources: https://github.com/enjoy-digital/litex/blob/5940a34ca0b4ee0fd9344f717dc7859aed503d9f/litex/soc/cores/cpu/gowin_ae350/core.py and https://github.com/enjoy-digital/litex_wr_nic/blob/cd5fde38b6ef4fde5bdbbd37c2452ee853d1dac5/doc/tang_mega_138k_pro.md
+- Authority: Reproducible open-source integration and physical GW5AST-138B test evidence; not a substitute for Gowin's manual.
+- Relevant behavior: The wrapper directly instantiates `AE350_SOC`, maps the fixed `0x80000000` reset vector and extended fabric bus, and the Tang target demonstrates AE350 firmware and interrupts on hardware.
+- Tang-Phosphor use: Reuse the BSD-2-Clause primitive wiring and dedicated-PLL approach while keeping White Rabbit gateware and firmware outside this project.
+
+---
+
+## USB Full-Speed Host
+
+### USB 2.0 Specification
+
+- Source: https://www.usb.org/documents?category%5B0%5D=49&items_per_page=50&order=field_date_&search=usb+2.0&sort=desc
+- Authority: USB Implementers Forum primary specification distribution.
+- Relevant scope: USB full-speed uses a 12 Mb/s signaling rate and defines host transactions, control transfers, enumeration, endpoint behavior, and electrical requirements.
+- Tang-Phosphor use: Treat 12 Mb/s as the signaling rate rather than application throughput and validate the host controller and firmware against the normative transaction and enumeration rules.
+
+### Device Class Definition for HID 1.11
+
+- Source: https://www.usb.org/document-library/device-class-definition-hid-111
+- Authority: USB Implementers Forum primary HID class specification.
+- Relevant scope: HID descriptors and reports are self-describing and require host parsing rather than assuming one fixed gamepad packet layout.
+- Tang-Phosphor use: Start with a bounded controller profile, then add a generic HID report parser as a separate compatibility milestone.
+
+### Gowin USB 1.1 SoftPHY
+
+- Source: https://www.gowinsemi.com/en/support/ip_detail/83/
+- Authority: Gowin primary IP documentation for supported FPGA devices.
+- Relevant behavior: The SoftPHY supports 12 Mb/s full-speed and 1.5 Mb/s low-speed signaling, NRZI, bit stuffing, and an eight-bit UTMI interface; it does not provide a USB host controller or class stack.
+- Tang-Phosphor use: Place the PHY between the FPGA pins and the selected UTMI host controller, with host scheduling and enumeration performed by RTL and AE350 firmware.
+
+---

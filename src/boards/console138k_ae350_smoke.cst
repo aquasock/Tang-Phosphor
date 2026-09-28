@@ -1,0 +1,13 @@
+// Tang Console 138K AE350 proof-of-life pinout.
+
+IO_LOC "sys_clk" V22;
+IO_PORT "sys_clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=OFF;
+
+// UART to the external BL616 for automated proof-of-life queries.
+IO_LOC "UART_RXD" V14;
+IO_LOC "UART_TXD" U15;
+IO_PORT "UART_RXD" IO_TYPE=LVCMOS33;
+IO_PORT "UART_TXD" IO_TYPE=LVCMOS33;
+
+// The AE350 core clock has a dedicated route from this PLL location.
+INS_LOC "cpu_pll/PLL_inst" PLL_R[0];

@@ -2,7 +2,9 @@
 
 Tang-Phosphor is a hardware audio player and visualizer for the Sipeed Tang
 Console 138K. The initial target is WAV and FLAC playback with FPGA-native
-decoding and visualization. The GW5AST AE350 CPU is intentionally not used.
+decoding and visualization. The deployment core still leaves the GW5AST AE350
+CPU unused; a separate proof-of-life image now exercises it ahead of the
+full-speed USB-host integration.
 
 ## Current milestone
 
@@ -37,7 +39,8 @@ clocks, and display metadata switch at that exact boundary. A successor at a
 different native rate switches the sample cadence, HDMI clock regeneration
 packet, and IEC channel status together at the boundary, so only same-rate
 transitions are sample-contiguous. MP3 and Ogg Vorbis are outside the
-current project scope; DDR3 and the AE350 are not enabled.
+current playback scope; DDR3 and the AE350 are not enabled in the deployment
+core.
 
 The current register map is documented in
 [`docs/debug-registers.md`](docs/debug-registers.md).
@@ -96,9 +99,39 @@ Copy it to the SD card under `cores/console138k/` (or `cores/`) with a unique
 name such as `tang-phosphor.bin`, then select it from TangCore's **Cores** menu.
 The stock `monitor.bin` does not need to be replaced.
 
+### AE350 proof of life
+
+The opt-in smoke image instantiates the hardened AE350 directly, clocks its A25
+core at 750 MHz with a 75 MHz fabric bus, fetches a four-instruction program at
+the fixed `0x80000000` reset vector, and writes a status bit through the
+extended AHB interface. It is isolated from the deployment build:
+
+```sh
+scripts/build-ae350-smoke.sh
+```
+
+The generated image and timing reports are written under `build/ae350-smoke/`.
+Copy `tang_phosphor_ae350_smoke.bin` to `cores/console138k/` and select it from
+TangCore's **Cores** menu. Its diagnostic tag is `0x0350`; the legacy TangCore
+status command carries only the low byte, so it reports core `0x50`. With the
+Tang-Control USB CDC client connected, the hardware result is checked with:
+
+```sh
+python3 ../Tang-Control/scripts/tangctl.py status
+python3 ../Tang-Control/scripts/tangctl.py peek 0
+```
+
+`status` must report active core `80` (`0x50`), and `peek 0` must return
+`0x00000001`. The latter value is produced only after the AE350 executes the
+boot ROM and completes its CPU-to-fabric write; the deployment Phosphor core
+instead returns its `0x54504830` magic at address zero. This diagnostic image
+does not drive HDMI or either USB port. Power-cycle or select the deployment
+core again after testing.
+
 ## Licensing and provenance
 
 Tang-Phosphor is distributed under GPL-3.0. The initial board-support, BL616
 interface, OSD, PLL, and HDMI integration are derived from nand2mario's
 TangCore Monitor Core at commit `e4446093a754205f46e7000e6ef1bf37176bda19`.
+The AE350 primitive wiring is based on BSD-2-Clause LiteX integration work.
 See [THIRD_PARTY.md](THIRD_PARTY.md) for details.

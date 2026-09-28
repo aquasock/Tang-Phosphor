@@ -622,3 +622,42 @@ Continue playlist UI refinement as the user directs, noting that Left/Right pres
 - User Test: PASS
 
 ---
+
+## 18 COMMIT Unreleased 2026-09-27T23:54:55-07:00
+
+#### Coming From:
+
+Unreleased e62989b
+
+#### Purpose:
+
+Prove that the GW5AST AE350 hard processor can boot and access Tang-Phosphor fabric logic before integrating a full-speed USB host.
+
+#### Outcome:
+
+An isolated `build-ae350-smoke.tcl` flow now directly instantiates the hardened `AE350_SOC`, uses its required dedicated PLL for a 750 MHz A25 core and 75 MHz fabric bus, serves a four-instruction reset ROM at `0x80000000`, and exposes a CPU-written status bit through the existing TangCore UART debug transport without changing the deployment core. The Gowin EDA 1.9.11.03 Education build for `GW5AST-LV138PG484AC1/I0` revision B used the single available AE350, 1,664 logic elements, 724 registers, and 1,077 CLSs, and passed timing with 80.100 MHz fabric Fmax, `+0.849` ns worst setup slack, and `+0.275` ns worst hold slack. All ten existing FPGA regressions passed. The `4330802`-byte artifact with SHA-256 `13ff822c3f2fde6387f1e146ca4bc2c05c8c83c4b23af81bdfef28e46b26919d` was copied to `cores/console138k/tang-phosphor-ae350-smoke.bin` with matching size and CRC-32 `44d7005f` on SD readback. The user loaded it and reported `active_core: 80`, the expected low byte of diagnostic tag `0x0350` because the legacy identification response transmits only `CORE_ID[7:0]`, and `peek 0` returned `0x00000001`; that value proves the AE350 fetched and executed the reset program and completed its extended-AHB write into fabric, whereas the deployment core returns magic `0x54504830` at address zero. The primitive wiring is derived from pinned BSD-2-Clause LiteX sources, the Gowin, USB 2.0, and HID primary references are recorded, no White Rabbit source was copied, and the required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Use the hardware-proven AE350 clock, reset, reset-vector, and fabric-bus foundation to integrate one 12 Mb/s USB full-speed host controller and PHY with bounded AE350 enumeration and gamepad firmware while preserving the existing BL616-connected USB port and deployment-core behavior.
+
+#### Files Modified:
+
+- README.md
+- THIRD_PARTY.md
+- build-ae350-smoke.tcl
+- scripts/build-ae350-smoke.sh
+- src/ae350/ae350_pll.v
+- src/ae350/ae350_smoke_top.sv
+- src/ae350/ae350_soc_smoke.sv
+- src/boards/console138k_ae350_smoke.cst
+- src/boards/console138k_ae350_smoke.sdc
+- third_party/litex/LICENSE-BSD-2-Clause
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
