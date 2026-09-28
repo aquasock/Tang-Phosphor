@@ -39,7 +39,25 @@ logic [7:0] shadow_length_8;
 (* syn_ramstyle = "block_ram" *) logic [31:0] text_memory [0:255];
 (* syn_ramstyle = "block_ram" *) logic [31:0] artwork_memory [0:4231];
 
-wire text_write = request_valid && request_write &&
+// Writes are decoded from the transport request and applied one cycle later
+// from registered strobes, keeping the 32-bit address compare and bank-offset
+// arithmetic off the storage and register enables.
+logic write_q;
+logic [31:0] wdata_q;
+logic pause_write_q;
+logic visibility_write_q;
+logic playlist_write_q;
+logic lengths_0_3_write_q;
+logic lengths_4_7_write_q;
+logic length_8_write_q;
+logic artwork_control_write_q;
+logic text_write_q;
+logic [7:0] text_write_address_q;
+logic artwork_write_q;
+logic [12:0] artwork_write_address_q;
+
+wire request_write_valid = request_valid && request_write;
+wire text_write = request_write_valid &&
     request_address >= 32'h0000_0100 &&
     request_address <= 32'h0000_021c && request_address[1:0] == 2'b00;
 wire [7:0] text_write_word = request_address[9:2] - 8'h40;
@@ -50,7 +68,7 @@ wire [7:0] text_read_address = (active_bank ? 8'd72 : 8'd0) +
 logic [31:0] text_read_word;
 logic [1:0] text_byte_select;
 
-wire artwork_write = request_valid && request_write &&
+wire artwork_write = request_write_valid &&
     request_address >= 32'h0000_1000 &&
     request_address <= 32'h0000_310c && request_address[1:0] == 2'b00;
 wire [11:0] artwork_write_word = request_address[13:2] - 12'h400;
@@ -83,12 +101,34 @@ end
 // first committed snapshot.  Keeping its write port outside the reset mux
 // avoids putting the high-fanout video reset on every byte lane.
 always_ff @(posedge clk) begin
-    if (text_write)
-        text_memory[text_write_address] <= request_wdata;
+    if (!resetn) begin
+        write_q <= 1'b0;
+        text_write_q <= 1'b0;
+        artwork_write_q <= 1'b0;
+    end else begin
+        write_q <= request_write_valid;
+        text_write_q <= text_write;
+        artwork_write_q <= artwork_write;
+    end
+    wdata_q <= request_wdata;
+    pause_write_q <= request_address == 32'h0000_0078;
+    visibility_write_q <= request_address == 32'h0000_007c;
+    playlist_write_q <= request_address == 32'h0000_0080;
+    lengths_0_3_write_q <= request_address == 32'h0000_0084;
+    lengths_4_7_write_q <= request_address == 32'h0000_0088;
+    length_8_write_q <= request_address == 32'h0000_0094;
+    artwork_control_write_q <= request_address == 32'h0000_0098;
+    text_write_address_q <= text_write_address;
+    artwork_write_address_q <= artwork_write_address;
+end
+
+always_ff @(posedge clk) begin
+    if (text_write_q)
+        text_memory[text_write_address_q] <= wdata_q;
     text_read_word <= text_memory[text_read_address];
     text_byte_select <= text_address[1:0];
-    if (artwork_write)
-        artwork_memory[artwork_write_address] <= request_wdata;
+    if (artwork_write_q)
+        artwork_memory[artwork_write_address_q] <= wdata_q;
     artwork_read_word <= artwork_memory[artwork_read_address];
     artwork_byte_select <= artwork_address[1:0];
 end
@@ -111,13 +151,13 @@ always_ff @(posedge clk) begin
         shadow_lengths_0_3 <= 0;
         shadow_lengths_4_7 <= 0;
         shadow_length_8 <= 0;
-    end else if (request_valid && request_write) begin
-        if (request_address == 32'h0000_0078) begin
-            pause_requested <= request_wdata[0];
-        end else if (request_address == 32'h0000_007c) begin
-            ui_visible <= request_wdata[0];
-            playlist <= request_wdata[1];
-            if (request_wdata[31]) begin
+    end else if (write_q) begin
+        if (pause_write_q) begin
+            pause_requested <= wdata_q[0];
+        end else if (visibility_write_q) begin
+            ui_visible <= wdata_q[0];
+            playlist <= wdata_q[1];
+            if (wdata_q[31]) begin
                 active_bank <= ~active_bank;
                 current_track <= shadow_playlist_state[7:0];
                 track_count <= shadow_playlist_state[15:8];
@@ -126,17 +166,17 @@ always_ff @(posedge clk) begin
                 lengths_4_7 <= shadow_lengths_4_7;
                 length_8 <= shadow_length_8;
             end
-        end else if (request_address == 32'h0000_0080) begin
-            shadow_playlist_state <= request_wdata[23:0];
-        end else if (request_address == 32'h0000_0084) begin
-            shadow_lengths_0_3 <= request_wdata;
-        end else if (request_address == 32'h0000_0088) begin
-            shadow_lengths_4_7 <= request_wdata;
-        end else if (request_address == 32'h0000_0094) begin
-            shadow_length_8 <= request_wdata[31:24];
-        end else if (request_address == 32'h0000_0098) begin
-            artwork_valid <= request_wdata[0];
-            if (request_wdata[31])
+        end else if (playlist_write_q) begin
+            shadow_playlist_state <= wdata_q[23:0];
+        end else if (lengths_0_3_write_q) begin
+            shadow_lengths_0_3 <= wdata_q;
+        end else if (lengths_4_7_write_q) begin
+            shadow_lengths_4_7 <= wdata_q;
+        end else if (length_8_write_q) begin
+            shadow_length_8 <= wdata_q[31:24];
+        end else if (artwork_control_write_q) begin
+            artwork_valid <= wdata_q[0];
+            if (wdata_q[31])
                 active_artwork_bank <= ~active_artwork_bank;
         end
     end

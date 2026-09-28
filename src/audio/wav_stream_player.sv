@@ -252,6 +252,15 @@ logic [35:0] duration_quotient;
 logic [32:0] duration_remainder;
 logic [31:0] duration_divisor;
 logic [15:0] elapsed_subsecond;
+// The rate is fixed by metadata long before prefill can start playback, so
+// the per-second terminal count is registered instead of re-deriving it from
+// the decoder-selected rate on every sample.
+logic [15:0] elapsed_subsecond_last;
+logic elapsed_rate_known;
+always_ff @(posedge clk) begin
+    elapsed_subsecond_last <= sample_rate[15:0] - 1'b1;
+    elapsed_rate_known <= sample_rate != 0;
+end
 
 always_ff @(posedge clk) begin : duration_division
     logic [32:0] shifted_remainder;
@@ -384,8 +393,8 @@ always_ff @(posedge clk) begin
                     audio_left <= fifo_output_data[31:16];
                     audio_right <= fifo_output_data[15:0];
                     samples_played <= samples_played + 1'b1;
-                    if (sample_rate != 0 &&
-                            elapsed_subsecond == sample_rate[15:0] - 1'b1) begin
+                    if (elapsed_rate_known &&
+                            elapsed_subsecond == elapsed_subsecond_last) begin
                         elapsed_subsecond <= 0;
                         elapsed_seconds <= elapsed_seconds + 1'b1;
                     end else begin

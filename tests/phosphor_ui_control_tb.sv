@@ -47,6 +47,8 @@ begin
     @(negedge clk);
     request_valid = 0;
     request_write = 0;
+    // Decoded writes are applied one cycle after the request pulse.
+    @(negedge clk);
 end
 endtask
 

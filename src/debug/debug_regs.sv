@@ -74,45 +74,47 @@ always @(posedge clk) begin
     end
 end
 
-always @* begin
+// The transport latches the address six UART bytes before sampling read data,
+// so a registered read multiplexer keeps this wide case off its response path.
+always @(posedge clk) begin
     case (request_address)
-        32'h0000_0000: request_rdata = MAGIC;
-        32'h0000_0004: request_rdata = 32'h0001_0006; // register ABI 1.6
-        32'h0000_0008: request_rdata = BUILD_DATE;
-        32'h0000_000c: request_rdata = 32'h0000_007f;
-        32'h0000_0010: request_rdata = uptime_cycles;
-        32'h0000_0014: request_rdata = frame_count;
-        32'h0000_0018: request_rdata = request_count;
-        32'h0000_001c: request_rdata = write_count;
-        32'h0000_0020: request_rdata = scratch;
-        32'h0000_0024: request_rdata = transport_crc_errors;
-        32'h0000_0028: request_rdata = transport_bad_requests;
-        32'h0000_0030: request_rdata = stream_sessions;
-        32'h0000_0034: request_rdata = stream_bytes;
-        32'h0000_0038: request_rdata = stream_ends;
-        32'h0000_003c: request_rdata = stream_cancels;
-        32'h0000_0040: request_rdata = stream_last_offset;
-        32'h0000_0044: request_rdata = stream_crc32;
-        32'h0000_0048: request_rdata = {20'b0, controller1};
-        32'h0000_004c: request_rdata = {20'b0, controller2};
-        32'h0000_0050: request_rdata = {16'b0, hid1};
-        32'h0000_0054: request_rdata = {16'b0, hid2};
-        32'h0000_0058: request_rdata = {26'b0, controller_status};
-        32'h0000_005c: request_rdata = {18'b0, audio_error,
+        32'h0000_0000: request_rdata <= MAGIC;
+        32'h0000_0004: request_rdata <= 32'h0001_0006; // register ABI 1.6
+        32'h0000_0008: request_rdata <= BUILD_DATE;
+        32'h0000_000c: request_rdata <= 32'h0000_007f;
+        32'h0000_0010: request_rdata <= uptime_cycles;
+        32'h0000_0014: request_rdata <= frame_count;
+        32'h0000_0018: request_rdata <= request_count;
+        32'h0000_001c: request_rdata <= write_count;
+        32'h0000_0020: request_rdata <= scratch;
+        32'h0000_0024: request_rdata <= transport_crc_errors;
+        32'h0000_0028: request_rdata <= transport_bad_requests;
+        32'h0000_0030: request_rdata <= stream_sessions;
+        32'h0000_0034: request_rdata <= stream_bytes;
+        32'h0000_0038: request_rdata <= stream_ends;
+        32'h0000_003c: request_rdata <= stream_cancels;
+        32'h0000_0040: request_rdata <= stream_last_offset;
+        32'h0000_0044: request_rdata <= stream_crc32;
+        32'h0000_0048: request_rdata <= {20'b0, controller1};
+        32'h0000_004c: request_rdata <= {20'b0, controller2};
+        32'h0000_0050: request_rdata <= {16'b0, hid1};
+        32'h0000_0054: request_rdata <= {16'b0, hid2};
+        32'h0000_0058: request_rdata <= {26'b0, controller_status};
+        32'h0000_005c: request_rdata <= {18'b0, audio_error,
             playback_active, audio_format_valid, player_state};
-        32'h0000_0060: request_rdata = audio_sample_rate;
-        32'h0000_0064: request_rdata = {20'b0, pcm_fifo_level};
-        32'h0000_0068: request_rdata = samples_played;
-        32'h0000_006c: request_rdata = audio_underruns;
-        32'h0000_0070: request_rdata = hdmi_audio_rate;
-        32'h0000_0074: request_rdata = {29'b0, detected_format};
-        32'h0000_0078: request_rdata = {31'b0, pause_requested};
-        32'h0000_007c: request_rdata = {30'b0, ui_playlist, ui_visible};
-        32'h0000_0080: request_rdata = {8'b0, ui_window_start,
+        32'h0000_0060: request_rdata <= audio_sample_rate;
+        32'h0000_0064: request_rdata <= {20'b0, pcm_fifo_level};
+        32'h0000_0068: request_rdata <= samples_played;
+        32'h0000_006c: request_rdata <= audio_underruns;
+        32'h0000_0070: request_rdata <= hdmi_audio_rate;
+        32'h0000_0074: request_rdata <= {29'b0, detected_format};
+        32'h0000_0078: request_rdata <= {31'b0, pause_requested};
+        32'h0000_007c: request_rdata <= {30'b0, ui_playlist, ui_visible};
+        32'h0000_0080: request_rdata <= {8'b0, ui_window_start,
             ui_track_count, ui_current_track};
-        32'h0000_008c: request_rdata = elapsed_seconds;
-        32'h0000_0090: request_rdata = duration_seconds;
-        default:       request_rdata = 32'hdead_beef;
+        32'h0000_008c: request_rdata <= elapsed_seconds;
+        32'h0000_0090: request_rdata <= duration_seconds;
+        default:       request_rdata <= 32'hdead_beef;
     endcase
 end
 

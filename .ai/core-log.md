@@ -482,3 +482,40 @@ None.
 - User Test: N/A
 
 ---
+
+## 14 COMMIT Unreleased 2026-09-27T20:56:59-07:00
+
+#### Coming From:
+
+Unreleased e88bc3d
+
+#### Purpose:
+
+Recover pixel-clock timing margin without functional change by pipelining the independent critical-path families that limited entry 11 to `+0.043` ns worst setup slack.
+
+#### Outcome:
+
+Entry 11's four placement reports showed that the whole design shares the 74.25 MHz pixel clock and that each option moved the worst path between seven families within `+0.6` ns, so every family was pipelined in one build. The album UI now registers region classification, per-zone text coordinates, slot length, scroll, and a precomputed selected-row offset before its colour and glyph stages, and registers artwork coordinates and the 92-byte row address ahead of the artwork BSRAM with the artwork merge moved later in the existing delay line, preserving total raster latency. The debug register read multiplexer is registered, since the transport latches the address six UART bytes before sampling read data; `phosphor_ui_control` applies writes one cycle after decoding them into registered strobes; the BL616 stream receive buffer is now a synchronous-read block RAM with registered writes, a read index that returns to zero whenever the buffer is inactive, and frame bounds resolved when the length byte arrives; the per-second elapsed-time terminal count is registered; and the FLAC subframe decoder separates its wasted-bits shift from the sample range check and registers its high-fanout reset. All regressions passed, with `tests/phosphor_ui_control_tb.sv` explicitly allowing the one-cycle write latency. Uncommitted cycle-exact equivalence harnesses against the `e88bc3d` sources matched the album UI over `85409944` scanned cycles including artwork and 80 frames of scrolling, and matched every stream, debug, and UART-transmit output of `iosys_bl616` under credit-conforming randomized traffic with backpressure, mid-drain cancellation, CRC and framing errors, and extended requests; both harnesses detected deliberate one-cycle mutations. A credit-violating DATA frame received while the prior buffer drains overwrites undelivered bytes in both the old and new designs, but the corrupted values differ, which is acceptable because Tang-Control waits for each acknowledgement before sending more data. The eight-core Gowin EDA 1.9.11.03 build for `GW5AST-LV138PG484AC1/I0` revision B passed timing in all four placement options with worst setup slack `+0.005`, `+0.504`, `+1.658`, and `+0.835` ns; default option 2 was selected with pixel Fmax `84.676 MHz`, worst hold slack `+0.143` ns, the third-party TMDS encoder as its worst path, and none of the seven original families in its worst paths, while the marginal options are now limited by the FLAC decoder's main control state machine. The `4749002`-byte artifact with SHA-256 `0d1796d4e6ea9fa77f2f7180fcf522b999ae3c18798c0c696eea71ce86bf7be4` was uploaded as `cores/console138k/tang-phosphor.bin`, and its SD readback was byte-identical with CRC-32 `55aac516`. The user reported that the album screen, direct WAV and FLAC playback, mixed playlist navigation, pause and resume, and the X screen toggle all passed; post-test probes reported capabilities `0x0000000f`, magic `0x54504830`, unchanged ABI 1.6, a successful scratch write/readback restored to zero, an active 44.1 kHz FLAC session with a full `2048`-sample FIFO and zero underruns, and zero FPGA-side CRC or bad-request counts with `12682` Tang-Control requests matched by responses and no timeouts, CRC errors, malformed packets, or unexpected responses. The required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Define the bounded PCM-driven waveform visualizer for the album screen against the recovered timing margin, and pipeline the FLAC decoder's main control state machine if a later build selects a placement option where that family limits slack.
+
+#### Files Modified:
+
+- src/audio/flac_decoder.sv
+- src/audio/flac_subframe_decoder.sv
+- src/audio/wav_stream_player.sv
+- src/debug/debug_regs.sv
+- src/iosys/iosys_bl616.v
+- src/ui/phosphor_album_ui.sv
+- src/ui/phosphor_ui_control.sv
+- tests/phosphor_ui_control_tb.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

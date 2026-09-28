@@ -288,12 +288,32 @@ localparam logic [4:0] TEXT_TRACK = 17;
 
 logic [4:0] text_zone;
 logic [4:0] text_zone_q;
-logic [10:0] text_x_q;
-logic [9:0] text_y_q;
+logic [10:0] text_local_x;
+logic [9:0] text_local_y;
+logic [7:0] text_length;
+logic [5:0] text_scroll;
+logic text_row_selected;
+logic [10:0] text_local_x_q;
+logic [9:0] text_local_y_q;
+logic [7:0] text_length_q;
+logic [5:0] text_scroll_q;
+logic text_row_selected_q;
 
-// First register only classifies the sparse text rectangles.  The following
-// stage computes character and font coordinates, keeping the pixel counter off
-// the font-address critical path.
+// Playlist rows compare against one registered offset instead of adding the
+// window start to every raster row: current == start + row <=> row ==
+// current - start, modulo 256.
+logic [7:0] selected_row_q;
+always_ff @(posedge clk) begin
+    if (!resetn)
+        selected_row_q <= 0;
+    else
+        selected_row_q <= current_track - window_start;
+end
+
+// First register classifies the sparse text rectangles and resolves each
+// zone's local coordinates, slot length, scroll, and row selection.  The
+// following stage then only indexes characters, keeping the pixel counter
+// and the slot-length multiplexer off the font-address critical path.
 always_comb begin
     text_zone = TEXT_NONE;
     if (visible && track_count != 0) begin
@@ -321,15 +341,80 @@ always_comb begin
     end
 end
 
+always_comb begin
+    text_local_x = 0;
+    text_local_y = 0;
+    text_length = 0;
+    text_scroll = 0;
+    text_row_selected = 1'b0;
+    case (text_zone)
+        TEXT_PHOSPHOR: begin
+            text_local_x = x - 186; text_local_y = y - 190;
+        end
+        TEXT_PLAYLIST_LABEL: begin
+            text_local_x = x - 690; text_local_y = y - 105;
+        end
+        TEXT_ALBUM: begin
+            text_local_x = x - 100; text_local_y = y - 466;
+            text_length = slot_length(0); text_scroll = album_scroll[5:0];
+        end
+        TEXT_ARTIST: begin
+            text_local_x = x - 100; text_local_y = y - 518;
+            text_length = slot_length(1); text_scroll = artist_scroll[5:0];
+        end
+        TEXT_TRACK: begin
+            text_local_x = x - 100; text_local_y = y - 570;
+            text_length = slot_length(2); text_scroll = title_scroll[5:0];
+        end
+        TEXT_ROW_0: begin
+            text_local_x = x - 482; text_local_y = y - 166;
+            text_length = slot_length(3); text_row_selected = selected_row_q == 0;
+        end
+        TEXT_ROW_1: begin
+            text_local_x = x - 482; text_local_y = y - 234;
+            text_length = slot_length(4); text_row_selected = selected_row_q == 1;
+        end
+        TEXT_ROW_2: begin
+            text_local_x = x - 482; text_local_y = y - 302;
+            text_length = slot_length(5); text_row_selected = selected_row_q == 2;
+        end
+        TEXT_ROW_3: begin
+            text_local_x = x - 482; text_local_y = y - 370;
+            text_length = slot_length(6); text_row_selected = selected_row_q == 3;
+        end
+        TEXT_ROW_4: begin
+            text_local_x = x - 482; text_local_y = y - 438;
+            text_length = slot_length(7); text_row_selected = selected_row_q == 4;
+        end
+        TEXT_ROW_5: begin
+            text_local_x = x - 482; text_local_y = y - 506;
+            text_length = slot_length(8); text_row_selected = selected_row_q == 5;
+        end
+        TEXT_ELAPSED: begin
+            text_local_x = x - 100; text_local_y = y - 670;
+        end
+        TEXT_DURATION: begin
+            text_local_x = x - 1052; text_local_y = y - 670;
+        end
+        default: ;
+    endcase
+end
+
 always_ff @(posedge clk) begin
     if (!resetn) begin
         text_zone_q <= TEXT_NONE;
-        text_x_q <= 0;
-        text_y_q <= 0;
+        text_local_x_q <= 0;
+        text_local_y_q <= 0;
+        text_length_q <= 0;
+        text_scroll_q <= 0;
+        text_row_selected_q <= 1'b0;
     end else begin
         text_zone_q <= text_zone;
-        text_x_q <= x;
-        text_y_q <= y;
+        text_local_x_q <= text_local_x;
+        text_local_y_q <= text_local_y;
+        text_length_q <= text_length;
+        text_scroll_q <= text_scroll;
+        text_row_selected_q <= text_row_selected;
     end
 end
 
@@ -373,7 +458,172 @@ always_ff @(posedge clk) begin
     end
 end
 
+// Base layout, stage 1: classify every panel, placeholder, progress, and
+// playlist-row rectangle from the pixel counter.  Stage 2 only prioritizes the
+// registered flags, so no comparison chain reaches the colour multiplexer.
+logic [23:0] rgb_in_q;
+logic region_visible;
+logic art_panel, art_panel_border;
+logic meta_panel, meta_panel_border;
+logic list_panel, list_panel_border;
+logic placeholder, placeholder_grid, placeholder_cross, placeholder_frame;
+logic progress_area, progress_border;
+logic [10:0] progress_x;
+logic [5:0] progress_block;
+logic row_band_selected;
+logic region_visible_q;
+logic art_panel_q, art_panel_border_q;
+logic meta_panel_q, meta_panel_border_q;
+logic list_panel_q, list_panel_border_q;
+logic placeholder_q, placeholder_grid_q, placeholder_cross_q, placeholder_frame_q;
+logic progress_area_q, progress_border_q;
+logic [5:0] progress_block_q;
+logic row_band_selected_q;
+
+always_comb begin
+    region_visible = visible && track_count != 0;
+
+    // Three panels from the MiSTer album presentation: artwork, metadata,
+    // and a six-row library viewport.
+    art_panel = x >= 80 && x < 420 && y >= 80 && y < 420;
+    art_panel_border = x < 84 || x >= 416 || y < 84 || y >= 416;
+    meta_panel = x >= 80 && x < 420 && y >= 438 && y < 610;
+    meta_panel_border = x < 84 || x >= 416 || y < 442 || y >= 606;
+    list_panel = playlist && x >= 446 && x < 1200 && y >= 80 && y < 610;
+    list_panel_border = x < 450 || x >= 1196 || y < 84 || y >= 606;
+
+    // Keep the Phosphor placeholder until a complete artwork bank commits.
+    placeholder = !artwork_valid && x >= 118 && x < 382 && y >= 118 && y < 382;
+    placeholder_grid = x[5:0] == 0 || y[5:0] == 0;
+    placeholder_cross = (x >= 244 && x < 256) || (y >= 244 && y < 256);
+    placeholder_frame = (x >= 160 && x < 340 && (y == 160 || y == 340)) ||
+                        (y >= 160 && y < 340 && (x == 160 || x == 340));
+
+    // Quantized progress bar avoids a raster-rate divider.
+    progress_area = x >= 100 && x < 1124 && y >= 644 && y < 660;
+    progress_border = y == 644 || y == 659 || x == 100 || x == 1123;
+    progress_x = x - 100;
+    progress_block = progress_x[10:5];
+
+    // Six playlist rows, with the active row highlighted as a complete band.
+    row_band_selected = 1'b0;
+    if (playlist && x >= 466 && x < 1180) begin
+        if (y >= 150 && y < 202) row_band_selected = selected_row_q == 0;
+        else if (y >= 218 && y < 270) row_band_selected = selected_row_q == 1;
+        else if (y >= 286 && y < 338) row_band_selected = selected_row_q == 2;
+        else if (y >= 354 && y < 406) row_band_selected = selected_row_q == 3;
+        else if (y >= 422 && y < 474) row_band_selected = selected_row_q == 4;
+        else if (y >= 490 && y < 542) row_band_selected = selected_row_q == 5;
+    end
+end
+
+always_ff @(posedge clk) begin
+    if (!resetn) begin
+        rgb_in_q <= 0;
+        region_visible_q <= 1'b0;
+        art_panel_q <= 1'b0;
+        art_panel_border_q <= 1'b0;
+        meta_panel_q <= 1'b0;
+        meta_panel_border_q <= 1'b0;
+        list_panel_q <= 1'b0;
+        list_panel_border_q <= 1'b0;
+        placeholder_q <= 1'b0;
+        placeholder_grid_q <= 1'b0;
+        placeholder_cross_q <= 1'b0;
+        placeholder_frame_q <= 1'b0;
+        progress_area_q <= 1'b0;
+        progress_border_q <= 1'b0;
+        progress_block_q <= 0;
+        row_band_selected_q <= 1'b0;
+    end else begin
+        rgb_in_q <= rgb_in;
+        region_visible_q <= region_visible;
+        art_panel_q <= art_panel;
+        art_panel_border_q <= art_panel_border;
+        meta_panel_q <= meta_panel;
+        meta_panel_border_q <= meta_panel_border;
+        list_panel_q <= list_panel;
+        list_panel_border_q <= list_panel_border;
+        placeholder_q <= placeholder;
+        placeholder_grid_q <= placeholder_grid;
+        placeholder_cross_q <= placeholder_cross;
+        placeholder_frame_q <= placeholder_frame;
+        progress_area_q <= progress_area;
+        progress_border_q <= progress_border;
+        progress_block_q <= progress_block;
+        row_band_selected_q <= row_band_selected;
+    end
+end
+
 logic [23:0] base_rgb;
+
+always_comb begin
+    base_rgb = rgb_in_q;
+    if (region_visible_q) begin
+        base_rgb = 24'h07100c;
+        if (art_panel_q)
+            base_rgb = art_panel_border_q ? 24'h668078 : 24'h0b1812;
+        if (meta_panel_q)
+            base_rgb = meta_panel_border_q ? 24'h668078 : 24'h0b1812;
+        if (list_panel_q)
+            base_rgb = list_panel_border_q ? 24'h668078 : 24'h0b1812;
+        if (placeholder_q) begin
+            if (placeholder_grid_q)
+                base_rgb = 24'h183c2a;
+            if (placeholder_cross_q)
+                base_rgb = 24'h56f08c;
+            if (placeholder_frame_q)
+                base_rgb = 24'h2a8050;
+        end
+        if (progress_area_q) begin
+            if (progress_border_q)
+                base_rgb = 24'h668078;
+            else if (progress_block_q < progress_filled)
+                base_rgb = 24'h38d878;
+            else
+                base_rgb = 24'h14251d;
+        end
+        if (row_band_selected_q)
+            base_rgb = 24'h183c2a;
+    end
+end
+
+// Artwork addressing is registered twice before the block RAM: once for the
+// panel-local coordinates and once for the 92-byte row multiply.  The
+// artwork colour replaces the base layout two stages later in its delay line,
+// so the total raster latency is unchanged.
+logic artwork_pixel;
+logic artwork_pixel_q;
+logic artwork_pixel_qq;
+logic artwork_pixel_qqq;
+logic [6:0] artwork_x_q;
+logic [6:0] artwork_y_q;
+
+always_comb
+    artwork_pixel = visible && track_count != 0 && artwork_valid &&
+        x >= 158 && x < 342 && y >= 158 && y < 342;
+
+always_ff @(posedge clk) begin
+    if (!resetn) begin
+        artwork_pixel_q <= 1'b0;
+        artwork_pixel_qq <= 1'b0;
+        artwork_pixel_qqq <= 1'b0;
+        artwork_x_q <= 0;
+        artwork_y_q <= 0;
+        artwork_address <= 0;
+    end else begin
+        artwork_pixel_q <= artwork_pixel;
+        artwork_pixel_qq <= artwork_pixel_q;
+        artwork_pixel_qqq <= artwork_pixel_qq;
+        artwork_x_q <= 7'((x - 11'd158) >> 1);
+        artwork_y_q <= 7'((y - 10'd158) >> 1);
+        artwork_address <= artwork_pixel_q ?
+            {1'b0, artwork_y_q, 6'b0} + {3'b0, artwork_y_q, 4'b0} +
+            {4'b0, artwork_y_q, 3'b0} + {5'b0, artwork_y_q, 2'b0} +
+            {7'b0, artwork_x_q} : 14'd0;
+    end
+end
+
 logic glyph_valid;
 logic [7:0] glyph_character;
 logic [2:0] glyph_x;
@@ -386,35 +636,8 @@ logic [5:0] dynamic_index;
 logic [3:0] static_line;
 logic [5:0] static_index;
 logic [7:0] row;
-logic row_selected;
-logic [10:0] local_x;
-logic [9:0] local_y;
-logic [5:0] progress_block;
-logic artwork_pixel;
-logic [6:0] artwork_x;
-logic [6:0] artwork_y;
-logic [13:0] artwork_row_offset;
 
 always_comb begin
-    artwork_pixel = visible && track_count != 0 && artwork_valid &&
-        x >= 158 && x < 342 && y >= 158 && y < 342;
-    artwork_x = 0;
-    artwork_y = 0;
-    artwork_row_offset = 0;
-    artwork_address = 0;
-    if (artwork_pixel) begin
-        artwork_x = 7'((x - 11'd158) >> 1);
-        artwork_y = 7'((y - 10'd158) >> 1);
-        artwork_row_offset = {1'b0, artwork_y, 6'b0} +
-                             {3'b0, artwork_y, 4'b0} +
-                             {4'b0, artwork_y, 3'b0} +
-                             {5'b0, artwork_y, 2'b0};
-        artwork_address = artwork_row_offset + {7'b0, artwork_x};
-    end
-end
-
-always_comb begin
-    base_rgb = rgb_in;
     glyph_valid = 1'b0;
     glyph_character = " ";
     glyph_x = 0;
@@ -427,127 +650,43 @@ always_comb begin
     static_line = 0;
     static_index = 0;
     row = 0;
-    row_selected = 1'b0;
-    local_x = 0;
-    local_y = 0;
-    progress_block = 0;
 
     if (visible && track_count != 0) begin
-        base_rgb = 24'h07100c;
-
-        // Three panels from the MiSTer album presentation: artwork, metadata,
-        // and a six-row library viewport.
-        if (x >= 80 && x < 420 && y >= 80 && y < 420)
-            base_rgb = (x < 84 || x >= 416 || y < 84 || y >= 416) ?
-                24'h668078 : 24'h0b1812;
-        if (x >= 80 && x < 420 && y >= 438 && y < 610)
-            base_rgb = (x < 84 || x >= 416 || y < 442 || y >= 606) ?
-                24'h668078 : 24'h0b1812;
-        if (playlist && x >= 446 && x < 1200 && y >= 80 && y < 610)
-            base_rgb = (x < 450 || x >= 1196 || y < 84 || y >= 606) ?
-                24'h668078 : 24'h0b1812;
-
-        // Keep the Phosphor placeholder until a complete artwork bank commits.
-        if (!artwork_valid && x >= 118 && x < 382 && y >= 118 && y < 382) begin
-            if (x[5:0] == 0 || y[5:0] == 0)
-                base_rgb = 24'h183c2a;
-            if ((x >= 244 && x < 256) || (y >= 244 && y < 256))
-                base_rgb = 24'h56f08c;
-            if ((x >= 160 && x < 340 && (y == 160 || y == 340)) ||
-                    (y >= 160 && y < 340 && (x == 160 || x == 340)))
-                base_rgb = 24'h2a8050;
-        end
-
-        // Quantized progress bar avoids a raster-rate divider.
-        if (x >= 100 && x < 1124 && y >= 644 && y < 660) begin
-            local_x = x - 100;
-            progress_block = local_x[10:5];
-            if (y == 644 || y == 659 || x == 100 || x == 1123)
-                base_rgb = 24'h668078;
-            else if (progress_block < progress_filled)
-                base_rgb = 24'h38d878;
-            else
-                base_rgb = 24'h14251d;
-        end
-
-        // Six playlist rows, with the active row highlighted as a complete band.
-        if (playlist && x >= 466 && x < 1180 && y >= 150 && y < 542) begin
-            case (y)
-                10'd150: row = 0;
-                default: begin
-                    if (y >= 150 && y < 202) row = 0;
-                    else if (y >= 218 && y < 270) row = 1;
-                    else if (y >= 286 && y < 338) row = 2;
-                    else if (y >= 354 && y < 406) row = 3;
-                    else if (y >= 422 && y < 474) row = 4;
-                    else if (y >= 490 && y < 542) row = 5;
-                    else row = 8'hff;
-                end
-            endcase
-            if (row < 6) begin
-                row_selected = current_track == window_start + row;
-                if (row_selected)
-                    base_rgb = 24'h183c2a;
-            end
-        end
-
-        // Text-zone classification was registered one cycle earlier.  This
-        // stage now contains only small subtracts, shifts, and slot selects.
+        // Text-zone coordinates, lengths, and scroll were resolved one cycle
+        // earlier.  This stage contains only small adds, compares, and selects.
         case (text_zone_q)
             TEXT_PHOSPHOR: begin
-                static_line = 0; local_x = text_x_q - 186; local_y = text_y_q - 190;
-                static_index = local_x[9:4]; glyph_valid = static_index < 8;
+                static_line = 0; static_index = text_local_x_q[9:4];
+                glyph_valid = static_index < 8;
             end
             TEXT_PLAYLIST_LABEL: begin
-                static_line = 3; local_x = text_x_q - 690; local_y = text_y_q - 105;
-                static_index = local_x[9:4]; glyph_valid = static_index < 16;
+                static_line = 3; static_index = text_local_x_q[9:4];
+                glyph_valid = static_index < 16;
             end
-            TEXT_ALBUM: begin
-                local_x = text_x_q - 100; local_y = text_y_q - 466;
-                dynamic_slot = 0; dynamic_index = local_x[9:4] + album_scroll[5:0];
-                glyph_valid = local_x[9:4] < 18 && {2'b0, dynamic_index} < slot_length(0);
-                dynamic_text = glyph_valid;
-            end
-            TEXT_ARTIST: begin
-                local_x = text_x_q - 100; local_y = text_y_q - 518;
-                dynamic_slot = 1; dynamic_index = local_x[9:4] + artist_scroll[5:0];
-                glyph_valid = local_x[9:4] < 18 && {2'b0, dynamic_index} < slot_length(1);
-                dynamic_text = glyph_valid;
-            end
-            TEXT_TRACK: begin
-                local_x = text_x_q - 100; local_y = text_y_q - 570;
-                dynamic_slot = 2; dynamic_index = local_x[9:4] + title_scroll[5:0];
-                glyph_valid = local_x[9:4] < 18 && {2'b0, dynamic_index} < slot_length(2);
+            TEXT_ALBUM, TEXT_ARTIST, TEXT_TRACK: begin
+                dynamic_slot = text_zone_q == TEXT_ALBUM ? 4'd0 :
+                               text_zone_q == TEXT_ARTIST ? 4'd1 : 4'd2;
+                dynamic_index = text_local_x_q[9:4] + text_scroll_q;
+                glyph_valid = text_local_x_q[9:4] < 18 &&
+                              {2'b0, dynamic_index} < text_length_q;
                 dynamic_text = glyph_valid;
             end
             TEXT_ROW_0, TEXT_ROW_1, TEXT_ROW_2, TEXT_ROW_3,
             TEXT_ROW_4, TEXT_ROW_5: begin
                 row = {3'b0, text_zone_q} - {3'b0, TEXT_ROW_0};
-                local_x = text_x_q - 482;
-                case (text_zone_q)
-                    TEXT_ROW_0: local_y = text_y_q - 166;
-                    TEXT_ROW_1: local_y = text_y_q - 234;
-                    TEXT_ROW_2: local_y = text_y_q - 302;
-                    TEXT_ROW_3: local_y = text_y_q - 370;
-                    TEXT_ROW_4: local_y = text_y_q - 438;
-                    default: local_y = text_y_q - 506;
-                endcase
                 dynamic_slot = {1'b0, row[2:0]} + 4'd3;
-                dynamic_index = local_x[9:4];
-                glyph_valid = {2'b0, dynamic_index} < slot_length(dynamic_slot);
+                dynamic_index = text_local_x_q[9:4];
+                glyph_valid = {2'b0, dynamic_index} < text_length_q;
                 dynamic_text = glyph_valid;
-                row_selected = current_track == window_start + row;
-                glyph_color = row_selected ? 24'hf2fff8 : 24'h789488;
+                glyph_color = text_row_selected_q ? 24'hf2fff8 : 24'h789488;
             end
             TEXT_ELAPSED: begin
-                local_x = text_x_q - 100; local_y = text_y_q - 670;
-                static_index = local_x[9:4]; glyph_valid = static_index < 8;
+                static_index = text_local_x_q[9:4]; glyph_valid = static_index < 8;
                 glyph_character = time_glyph(elapsed_digits, static_index[3:0]);
                 char_mode = 1;
             end
             TEXT_DURATION: begin
-                local_x = text_x_q - 1052; local_y = text_y_q - 670;
-                static_index = local_x[9:4]; glyph_valid = static_index < 8;
+                static_index = text_local_x_q[9:4]; glyph_valid = static_index < 8;
                 glyph_character = time_glyph(duration_digits, static_index[3:0]);
                 char_mode = 1;
             end
@@ -561,8 +700,8 @@ always_comb begin
         end
 
         if (glyph_valid) begin
-            glyph_x = local_x[3:1];
-            glyph_y = local_y[4:1];
+            glyph_x = text_local_x_q[3:1];
+            glyph_y = text_local_y_q[4:1];
             if (glyph_y > 7)
                 glyph_valid = 1'b0;
         end
@@ -598,7 +737,6 @@ logic [5:0] dynamic_index_q;
 logic [23:0] base_rgb_qqq;
 logic [23:0] base_rgb_qqqq;
 logic [23:0] base_rgb_qqqqq;
-logic [23:0] base_rgb_qqqqqq;
 logic [23:0] glyph_color_qqq;
 logic [23:0] glyph_color_qqqq;
 logic [23:0] glyph_color_qqqqq;
@@ -608,7 +746,6 @@ logic [2:0] glyph_x_qqqqq;
 logic glyph_valid_qqq;
 logic glyph_valid_qqqq;
 logic glyph_valid_qqqqq;
-logic artwork_pixel_q;
 
 wire [10:0] font_address = {1'b1, glyph_character_q[6:0], glyph_y_qqq[2:0]};
 wire [7:0] font_bits;
@@ -648,7 +785,6 @@ always_ff @(posedge clk) begin
         glyph_valid_qqq <= 0;
         glyph_valid_qqqq <= 0;
         glyph_valid_qqqqq <= 0;
-        artwork_pixel_q <= 0;
         char_mode_q <= 0;
         char_mode_qq <= 0;
         char_mode_qqq <= 0;
@@ -667,23 +803,20 @@ always_ff @(posedge clk) begin
         base_rgb_qqq <= 0;
         base_rgb_qqqq <= 0;
         base_rgb_qqqqq <= 0;
-        base_rgb_qqqqqq <= 0;
         glyph_color_qqq <= 0;
         glyph_color_qqqq <= 0;
         glyph_color_qqqqq <= 0;
         rgb_out <= 0;
     end else begin
         base_rgb_q <= base_rgb;
-        artwork_pixel_q <= artwork_pixel;
-        base_rgb_qq <= artwork_pixel_q ?
+        base_rgb_qq <= base_rgb_q;
+        base_rgb_qqq <= artwork_pixel_qqq ?
             {{artwork_data[7:5], artwork_data[7:5], artwork_data[7:6]},
              {artwork_data[4:2], artwork_data[4:2], artwork_data[4:3]},
              {artwork_data[1:0], artwork_data[1:0], artwork_data[1:0],
-              artwork_data[1:0]}} : base_rgb_q;
-        base_rgb_qqq <= base_rgb_qq;
+              artwork_data[1:0]}} : base_rgb_qq;
         base_rgb_qqqq <= base_rgb_qqq;
         base_rgb_qqqqq <= base_rgb_qqqq;
-        base_rgb_qqqqqq <= base_rgb_qqqqq;
         glyph_color_q <= glyph_color;
         glyph_color_qq <= glyph_color_q;
         glyph_color_qqq <= glyph_color_qq;
@@ -725,7 +858,7 @@ always_ff @(posedge clk) begin
         text_address <= {dynamic_slot_q, 5'b0} + {3'b0, dynamic_index_q};
         // The shared TangCore font ROM stores the leftmost pixel in bit 0.
         rgb_out <= glyph_valid_qqqqq && font_bits[glyph_x_qqqqq] ?
-            glyph_color_qqqqq : base_rgb_qqqqqq;
+            glyph_color_qqqqq : base_rgb_qqqqq;
     end
 end
 

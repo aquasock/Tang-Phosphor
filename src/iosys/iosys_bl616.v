@@ -279,7 +279,21 @@ reg [31:0] stream_offset_rx;
 reg [15:0] stream_length_rx;
 reg [15:0] stream_crc_rx;
 reg [15:0] stream_crc_received;
-reg [7:0] stream_buffer [0:1023];
+// The receive buffer is a synchronous-read block RAM.  Writes are registered
+// one cycle after their UART byte, and the read port always addresses the byte
+// that will be presented next, so the registered output behaves as the former
+// combinational first-word-fall-through read without placing the receive
+// state machine or a 1024-entry fabric multiplexer on the stream data path.
+(* syn_ramstyle = "block_ram" *) reg [7:0] stream_buffer [0:1023];
+reg stream_buffer_write;
+reg [9:0] stream_buffer_write_address;
+reg [7:0] stream_buffer_write_data;
+reg [7:0] stream_buffer_read_data;
+// Frame bounds are fixed once the length's low byte arrives; resolve them
+// then instead of adding the payload length on every later byte.
+reg [16:0] stream_crc_high_index;
+reg [16:0] stream_crc_low_index;
+reg stream_frame_length_ok;
 reg stream_buffer_active;
 reg [9:0] stream_read_index;
 reg [10:0] stream_buffer_length;
@@ -299,7 +313,18 @@ wire [15:0] stream_response_crc_value = stream_response_crc(
 );
 
 assign stream_valid = stream_buffer_active;
-assign stream_data = stream_buffer[stream_read_index];
+assign stream_data = stream_buffer_read_data;
+
+// The read index returns to zero whenever the buffer is inactive, so byte 0 is
+// already registered when a validated DATA frame raises stream_valid.
+wire [9:0] stream_buffer_read_address =
+    stream_buffer_active && stream_ready ? stream_read_index + 1'b1 : stream_read_index;
+
+always @(posedge clk) begin
+    if (stream_buffer_write)
+        stream_buffer[stream_buffer_write_address] <= stream_buffer_write_data;
+    stream_buffer_read_data <= stream_buffer[stream_buffer_read_address];
+end
 
 // Add new registers for textdisp interface
 reg [7:0] x_wr;
@@ -391,6 +416,12 @@ always @(posedge clk) begin
         stream_buffer_active <= 0;
         stream_read_index <= 0;
         stream_buffer_length <= 0;
+        stream_buffer_write <= 0;
+        stream_buffer_write_address <= 0;
+        stream_buffer_write_data <= 0;
+        stream_crc_high_index <= 0;
+        stream_crc_low_index <= 0;
+        stream_frame_length_ok <= 0;
         stream_expected_offset <= 0;
         stream_active_id <= 0;
         stream_session_active <= 0;
@@ -407,11 +438,13 @@ always @(posedge clk) begin
         stream_start <= 0;
         stream_end <= 0;
         stream_cancel <= 0;
+        stream_buffer_write <= 0;
 
         if (stream_buffer_active && stream_ready) begin
             stream_offset <= stream_offset + 1'b1;
             if ({1'b0, stream_read_index} + 1'b1 == stream_buffer_length) begin
                 stream_buffer_active <= 0;
+                stream_read_index <= 0;
                 stream_expected_offset <= stream_expected_offset + stream_buffer_length;
                 stream_response_next_offset <= stream_expected_offset + stream_buffer_length;
                 stream_response_credit <= STREAM_CREDIT;
@@ -607,8 +640,7 @@ always @(posedge clk) begin
                         endcase
                     end
                     STREAM_COMMAND: begin
-                        if (data_cnt <= 9 ||
-                            (data_cnt >= 10 && data_cnt < 10 + stream_length_rx))
+                        if (data_cnt <= 9 || {1'b0, data_cnt} < stream_crc_high_index)
                             stream_crc_rx <= crc16_byte(stream_crc_rx, rx_data);
 
                         case (data_cnt)
@@ -621,23 +653,32 @@ always @(posedge clk) begin
                             6: stream_offset_rx[15:8] <= rx_data;
                             7: stream_offset_rx[7:0] <= rx_data;
                             8: stream_length_rx[15:8] <= rx_data;
-                            9: stream_length_rx[7:0] <= rx_data;
+                            9: begin
+                                stream_length_rx[7:0] <= rx_data;
+                                stream_crc_high_index <=
+                                    17'd10 + {1'b0, stream_length_rx[15:8], rx_data};
+                                stream_crc_low_index <=
+                                    17'd11 + {1'b0, stream_length_rx[15:8], rx_data};
+                                stream_frame_length_ok <=
+                                    len_reg == {stream_length_rx[15:8], rx_data} + 16'd13 &&
+                                    {stream_length_rx[15:8], rx_data} <= STREAM_CREDIT;
+                            end
                             default: begin
-                                if (data_cnt >= 10 &&
-                                    data_cnt < 10 + stream_length_rx &&
-                                    data_cnt < 10 + STREAM_CREDIT)
-                                    stream_buffer[data_cnt - 10] <= rx_data;
-                                else if (data_cnt == 10 + stream_length_rx)
+                                if ({1'b0, data_cnt} < stream_crc_high_index &&
+                                    data_cnt < 10 + STREAM_CREDIT) begin
+                                    stream_buffer_write <= 1;
+                                    stream_buffer_write_address <= data_cnt[9:0] - 10'd10;
+                                    stream_buffer_write_data <= rx_data;
+                                end else if ({1'b0, data_cnt} == stream_crc_high_index)
                                     stream_crc_received[15:8] <= rx_data;
-                                else if (data_cnt == 11 + stream_length_rx) begin
+                                else if ({1'b0, data_cnt} == stream_crc_low_index) begin
                                     stream_crc_received[7:0] <= rx_data;
                                     stream_response_flags <= stream_flags_rx;
                                     stream_response_id <= stream_id_rx;
                                     stream_response_next_offset <= stream_expected_offset;
                                     stream_response_credit <= STREAM_CREDIT;
 
-                                    if (len_reg != stream_length_rx + 16'd13 ||
-                                        stream_length_rx > STREAM_CREDIT) begin
+                                    if (!stream_frame_length_ok) begin
                                         stream_response_status <= 8'd2;
                                         stream_ack_pending <= 1;
                                         debug_bad_requests <= debug_bad_requests + 1'b1;
@@ -693,6 +734,7 @@ always @(posedge clk) begin
                                         stream_response_credit <= 0;
                                         stream_session_active <= 0;
                                         stream_buffer_active <= 0;
+                                        stream_read_index <= 0;
                                         stream_id <= stream_id_rx;
                                         stream_offset <= stream_offset_rx;
                                         stream_cancel <= 1;

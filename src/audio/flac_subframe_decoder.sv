@@ -44,7 +44,8 @@ localparam logic [4:0]
     STATE_MAC_SHIFT     = 5'd21,
     STATE_MAC_FINISH    = 5'd22,
     STATE_RESTORE       = 5'd23,
-    STATE_FAILED        = 5'd24;
+    STATE_FAILED        = 5'd24,
+    STATE_RESTORE_CHECK = 5'd25;
 
 localparam logic [1:0]
     KIND_CONSTANT  = 2'd0,
@@ -78,6 +79,7 @@ logic signed [31:0] residual;
 logic signed [47:0] reconstructed_sample;
 logic signed [16:0] restored_sample;
 logic restored_sample_fits;
+logic signed [63:0] restored_wide_q;
 
 logic [3:0] coefficient_precision;
 logic [3:0] coefficient_index;
@@ -101,9 +103,10 @@ wire signed [47:0] shifted_prediction = prediction_shift < 0 ?
     $signed(mac_accumulator) >>> prediction_shift;
 wire signed [63:0] restored_wide =
     $signed({{16{reconstructed_sample[47]}}, reconstructed_sample}) <<< wasted_bits;
+// The wasted-bits shift and the range check occupy separate cycles.
 wire restored_fits = nominal_bits == 5'd17 ?
-    restored_wide[63:16] == {48{restored_wide[16]}} :
-    restored_wide[63:15] == {49{restored_wide[15]}};
+    restored_wide_q[63:16] == {48{restored_wide_q[16]}} :
+    restored_wide_q[63:15] == {49{restored_wide_q[15]}};
 wire [12:0] next_partition_size = block_size >> bit_field[3:0];
 wire [12:0] predictor_order_wide = {9'b0, predictor_order};
 wire signed [31:0] sign_extended_value =
@@ -282,6 +285,7 @@ always_ff @(posedge clk) begin
         reconstructed_sample <= 0;
         restored_sample <= 0;
         restored_sample_fits <= 1'b0;
+        restored_wide_q <= 0;
         coefficient_precision <= 0;
         coefficient_index <= 0;
         prediction_shift <= 0;
@@ -549,7 +553,12 @@ always_ff @(posedge clk) begin
             end
 
             STATE_RESTORE: begin
-                restored_sample <= restored_wide[16:0];
+                restored_wide_q <= restored_wide;
+                state <= STATE_RESTORE_CHECK;
+            end
+
+            STATE_RESTORE_CHECK: begin
+                restored_sample <= restored_wide_q[16:0];
                 restored_sample_fits <= restored_fits;
                 state <= STATE_EMIT;
             end

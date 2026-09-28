@@ -166,7 +166,13 @@ logic signed [17:0] stereo_right_wide;
 logic signed [17:0] mid_expanded;
 logic stereo_fits;
 
-assign sf_reset = reset || state == STATE_FAILED;
+// Registered locally so the transport's stream start/cancel pulse does not
+// fan out combinationally to every subframe coefficient and history register.
+// The outer machine only observes subframe outputs in STATE_SUBFRAME, and it
+// re-zeroes write_index before each subframe, so the one-cycle-later reset is
+// not observable.
+always_ff @(posedge clk)
+    sf_reset <= reset || state == STATE_FAILED;
 assign sf_start = state == STATE_SUBFRAME_START;
 assign sf_sample_ready = 1'b1;
 
