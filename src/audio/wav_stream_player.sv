@@ -1,9 +1,14 @@
 // Stream-to-HDMI audio playback shell. The UART receiver provides byte-level
 // backpressure; this module selects the detected decoder, adds decoded-PCM
 // buffering, and waits for a useful prefill before replacing diagnostic tones.
+//
+// Gapless sessions: once a stream's final sample is queued, the next START
+// appends instead of resetting. Only the ingress and decoders restart; the PCM
+// FIFO keeps playing the previous tail. The new stream's rate, length, and ID
+// become audible when the previous end-of-stream sample is presented.
 
 module wav_stream_player #(
-    parameter integer FIFO_ADDRESS_WIDTH = 11,
+    parameter integer FIFO_ADDRESS_WIDTH = 14,
     parameter integer PREFILL_SAMPLES = 512
 ) (
     input  logic         clk,
@@ -11,6 +16,7 @@ module wav_stream_player #(
     input  logic         stream_start,
     input  logic         stream_end,
     input  logic         stream_cancel,
+    input  logic  [15:0] stream_id,
     input  logic   [7:0] stream_data,
     input  logic         stream_valid,
     output logic         stream_ready,
@@ -29,7 +35,12 @@ module wav_stream_player #(
     output logic  [31:0] duration_seconds,
     output logic  [31:0] underrun_count,
     output logic   [7:0] error_code,
-    output logic   [2:0] detected_format
+    output logic   [2:0] detected_format,
+    output logic         playback_rate_valid,
+    output logic  [31:0] playback_rate,
+    output logic  [15:0] audible_stream_id,
+    output logic  [31:0] boundary_count,
+    output logic  [31:0] boundary_gap_samples
 );
 
 localparam logic [3:0]
@@ -39,7 +50,8 @@ localparam logic [3:0]
     PLAYER_PLAYING   = 4'd3,
     PLAYER_COMPLETE  = 4'd4,
     PLAYER_ERROR     = 4'd5,
-    PLAYER_CANCELLED = 4'd6;
+    PLAYER_CANCELLED = 4'd6,
+    PLAYER_DRAINING  = 4'd7;
 localparam logic [FIFO_ADDRESS_WIDTH:0] PREFILL_LEVEL =
     (FIFO_ADDRESS_WIDTH + 1)'(PREFILL_SAMPLES);
 
@@ -105,6 +117,14 @@ logic eof_queued;
 logic playback_started;
 logic finish_pending;
 logic playback_complete;
+logic [3:0] state;
+// An appended session's end-of-stream predecessor is still in the FIFO.
+logic boundary_pending;
+// The predecessor ended before the appended session reached its prefill.
+logic boundary_waiting;
+logic [15:0] session_stream_id;
+logic [35:0] session_total_samples;
+logic [31:0] session_duration_seconds;
 
 assign decoder_reset = !resetn || stream_start || stream_cancel;
 assign stream_ready = session_active && ingress_count != 2;
@@ -234,8 +254,20 @@ assign wav_pcm_ready = decoder_pcm_ready && detected_format == 3'd1;
 assign flac_pcm_ready = decoder_pcm_ready && detected_format == 3'd2;
 assign fifo_output_ready = sample_tick && playback_started && fifo_output_valid && !paused;
 
+// DRAINING: the transport has ended this session and its final sample is
+// queued, so the next START may append. At most one successor is queued.
+wire drain_ready = playback_started && eof_queued && !session_active &&
+    !boundary_pending;
+// Registered terms only: if the final sample leaves the FIFO on this same
+// cycle, the sample-tick logic below crosses the boundary immediately.
+wire append_start = stream_start && drain_ready;
+
+assign player_state = state == PLAYER_PLAYING && drain_ready ?
+    PLAYER_DRAINING : state;
+
 pcm_sample_fifo #(.ADDRESS_WIDTH(FIFO_ADDRESS_WIDTH)) pcm_fifo (
-    .clk(clk), .reset(!resetn), .clear(stream_start || stream_cancel),
+    .clk(clk), .reset(!resetn),
+    .clear((stream_start && !append_start) || stream_cancel),
     .input_data(fifo_input_data), .input_valid(selected_pcm_valid),
     .input_ready(fifo_input_ready), .output_data(fifo_output_data),
     .output_valid(fifo_output_valid), .output_ready(fifo_output_ready),
@@ -258,8 +290,8 @@ logic [15:0] elapsed_subsecond;
 logic [15:0] elapsed_subsecond_last;
 logic elapsed_rate_known;
 always_ff @(posedge clk) begin
-    elapsed_subsecond_last <= sample_rate[15:0] - 1'b1;
-    elapsed_rate_known <= sample_rate != 0;
+    elapsed_subsecond_last <= playback_rate[15:0] - 1'b1;
+    elapsed_rate_known <= playback_rate != 0;
 end
 
 always_ff @(posedge clk) begin : duration_division
@@ -278,12 +310,12 @@ always_ff @(posedge clk) begin : duration_division
         duration_quotient <= 0;
         duration_remainder <= 0;
         duration_divisor <= 0;
-        total_samples <= 0;
-        duration_seconds <= 0;
+        session_total_samples <= 0;
+        session_duration_seconds <= 0;
     end else begin
         if (selected_metadata_valid && !metadata_seen) begin
             metadata_seen <= 1'b1;
-            total_samples <= selected_total_samples;
+            session_total_samples <= selected_total_samples;
             duration_dividend <= selected_total_samples;
             duration_quotient <= 0;
             duration_remainder <= 0;
@@ -297,9 +329,32 @@ always_ff @(posedge clk) begin : duration_division
                 shifted_remainder - {1'b0, duration_divisor} : shifted_remainder;
             duration_count <= duration_count - 1'b1;
             if (duration_count == 1) begin
-                duration_seconds <= next_quotient[31:0];
+                session_duration_seconds <= next_quotient[31:0];
                 duration_busy <= 1'b0;
             end
+        end
+    end
+end
+
+// The decoder-side session becomes audible immediately unless it was appended
+// behind a predecessor that is still playing.
+always_ff @(posedge clk) begin
+    if (!resetn) begin
+        session_stream_id <= 0;
+        audible_stream_id <= 0;
+        total_samples <= 0;
+        duration_seconds <= 0;
+        playback_rate_valid <= 1'b0;
+        playback_rate <= 0;
+    end else begin
+        if (stream_start)
+            session_stream_id <= stream_id;
+        if (!boundary_pending) begin
+            audible_stream_id <= session_stream_id;
+            total_samples <= session_total_samples;
+            duration_seconds <= session_duration_seconds;
+            playback_rate_valid <= format_valid;
+            playback_rate <= sample_rate;
         end
     end
 end
@@ -310,7 +365,7 @@ always_ff @(posedge clk) begin
         audio_left <= 0;
         audio_right <= 0;
         playback_active <= 1'b0;
-        player_state <= PLAYER_IDLE;
+        state <= PLAYER_IDLE;
         samples_played <= 0;
         elapsed_seconds <= 0;
         elapsed_subsecond <= 0;
@@ -320,12 +375,16 @@ always_ff @(posedge clk) begin
         playback_started <= 1'b0;
         finish_pending <= 1'b0;
         playback_complete <= 1'b0;
+        boundary_pending <= 1'b0;
+        boundary_waiting <= 1'b0;
+        boundary_count <= 0;
+        boundary_gap_samples <= 0;
     end else if (stream_cancel) begin
         session_active <= 1'b0;
         audio_left <= 0;
         audio_right <= 0;
         playback_active <= 1'b0;
-        player_state <= PLAYER_CANCELLED;
+        state <= PLAYER_CANCELLED;
         samples_played <= 0;
         elapsed_seconds <= 0;
         elapsed_subsecond <= 0;
@@ -335,12 +394,14 @@ always_ff @(posedge clk) begin
         playback_started <= 1'b0;
         finish_pending <= 1'b0;
         playback_complete <= 1'b0;
-    end else if (stream_start) begin
+        boundary_pending <= 1'b0;
+        boundary_waiting <= 1'b0;
+    end else if (stream_start && !append_start) begin
         session_active <= 1'b1;
         audio_left <= 0;
         audio_right <= 0;
         playback_active <= 1'b0;
-        player_state <= PLAYER_RECEIVING;
+        state <= PLAYER_RECEIVING;
         samples_played <= 0;
         elapsed_seconds <= 0;
         elapsed_subsecond <= 0;
@@ -350,30 +411,38 @@ always_ff @(posedge clk) begin
         playback_started <= 1'b0;
         finish_pending <= 1'b0;
         playback_complete <= 1'b0;
+        boundary_pending <= 1'b0;
+        boundary_waiting <= 1'b0;
     end else begin
+        if (append_start) begin
+            session_active <= 1'b1;
+            eof_queued <= 1'b0;
+            boundary_pending <= 1'b1;
+        end
+
         if (stream_end)
             session_active <= 1'b0;
 
         if (detector_format_error) begin
             error_code <= 8'h11; // Unknown or truncated content signature.
-            player_state <= PLAYER_ERROR;
+            state <= PLAYER_ERROR;
             playback_started <= 1'b0;
             playback_active <= 1'b0;
         end else if (detector_format_valid &&
                 detected_format != 3'd1 && detected_format != 3'd2) begin
             error_code <= 8'h10; // Recognized format has no decoder yet.
-            player_state <= PLAYER_ERROR;
+            state <= PLAYER_ERROR;
             playback_started <= 1'b0;
             playback_active <= 1'b0;
         end else if (selected_format_error) begin
             error_code <= selected_error_code;
-            player_state <= PLAYER_ERROR;
+            state <= PLAYER_ERROR;
             playback_started <= 1'b0;
             playback_active <= 1'b0;
         end else begin
             if (format_valid && !playback_started && !playback_active &&
                     !finish_pending && !playback_complete)
-                player_state <= PLAYER_PREFILL;
+                state <= PLAYER_PREFILL;
 
             if (selected_pcm_valid && decoder_pcm_ready && selected_pcm_eof)
                 eof_queued <= 1'b1;
@@ -382,7 +451,8 @@ always_ff @(posedge clk) begin
                     (fifo_level >= PREFILL_LEVEL || eof_queued)) begin
                 playback_started <= 1'b1;
                 playback_active <= 1'b1;
-                player_state <= PLAYER_PLAYING;
+                boundary_waiting <= 1'b0;
+                state <= PLAYER_PLAYING;
             end
 
             if (sample_tick && playback_started && paused) begin
@@ -392,30 +462,52 @@ always_ff @(posedge clk) begin
                 if (fifo_output_valid) begin
                     audio_left <= fifo_output_data[31:16];
                     audio_right <= fifo_output_data[15:0];
-                    samples_played <= samples_played + 1'b1;
-                    if (elapsed_rate_known &&
-                            elapsed_subsecond == elapsed_subsecond_last) begin
+                    if (fifo_output_data[32] && (boundary_pending || append_start)) begin
+                        // The appended session's clocks start with its first
+                        // sample on the next tick.
+                        boundary_pending <= 1'b0;
+                        boundary_count <= boundary_count + 1'b1;
+                        samples_played <= 0;
+                        elapsed_seconds <= 0;
                         elapsed_subsecond <= 0;
-                        elapsed_seconds <= elapsed_seconds + 1'b1;
+                        underrun_count <= 0;
+                        if ((append_start || !eof_queued) &&
+                                fifo_level <= PREFILL_LEVEL) begin
+                            playback_started <= 1'b0;
+                            boundary_waiting <= 1'b1;
+                            state <= PLAYER_PREFILL;
+                        end
                     end else begin
-                        elapsed_subsecond <= elapsed_subsecond + 1'b1;
-                    end
-                    if (fifo_output_data[32]) begin
-                        playback_started <= 1'b0;
-                        finish_pending <= 1'b1;
+                        samples_played <= samples_played + 1'b1;
+                        if (elapsed_rate_known &&
+                                elapsed_subsecond == elapsed_subsecond_last) begin
+                            elapsed_subsecond <= 0;
+                            elapsed_seconds <= elapsed_seconds + 1'b1;
+                        end else begin
+                            elapsed_subsecond <= elapsed_subsecond + 1'b1;
+                        end
+                        if (fifo_output_data[32]) begin
+                            playback_started <= 1'b0;
+                            finish_pending <= 1'b1;
+                        end
                     end
                 end else begin
                     audio_left <= 0;
                     audio_right <= 0;
                     underrun_count <= underrun_count + 1'b1;
                 end
+            end else if (sample_tick && boundary_waiting) begin
+                audio_left <= 0;
+                audio_right <= 0;
+                if (!paused)
+                    boundary_gap_samples <= boundary_gap_samples + 1'b1;
             end else if (sample_tick && finish_pending) begin
                 audio_left <= 0;
                 audio_right <= 0;
                 playback_active <= 1'b0;
                 finish_pending <= 1'b0;
                 playback_complete <= 1'b1;
-                player_state <= PLAYER_COMPLETE;
+                state <= PLAYER_COMPLETE;
             end
         end
     end

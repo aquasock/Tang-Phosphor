@@ -133,7 +133,10 @@ always_ff @(posedge clk) begin
         format_error <= 1'b0;
         error_code <= 0;
     end else begin
-        if (input_end && state != DRAIN && state != FAILED)
+        // A decoded sample waiting on PCM backpressure needs no more input.
+        // input_end stays asserted, so a truncated chunk still fails once the
+        // emitted sample returns the parser to a byte-consuming state.
+        if (input_end && state != DRAIN && state != FAILED && state != SAMPLE_EMIT)
             fail(8'h04); // Transport ended before the data chunk completed.
 
         case (state)

@@ -38,9 +38,11 @@ Tang-Control through the existing credit response; no byte may be advanced or
 counted merely because `stream_valid` is asserted.
 
 The BL616 owns filesystem and playlist handling. A standalone WAV or FLAC is
-one stream session; each VLC-style M3U/M3U8 entry is another independent
-session after the preceding track reaches the player's hardware `COMPLETE`
-state. Playlists may mix WAV and FLAC. Paths are resolved against the playlist
+one stream session, and each VLC-style M3U/M3U8 entry is another session.
+Playlists may mix WAV and FLAC. Tang-Control sends a native FLAC as its `fLaC`
+marker, STREAMINFO marked as the last metadata block, and the unchanged audio
+frames. The core skips every other metadata block anyway, and large PICTURE or
+PADDING blocks would otherwise delay the track's first frame on the UART. Paths are resolved against the playlist
 directory, so separately stored files do not need a TAR wrapper. `#EXTINF`
 duration is metadata and never controls the audio transition.
 
@@ -58,6 +60,33 @@ rendering, exact sample-derived elapsed/total clocks, progress, and the pause
 gate. Start pauses/resumes, Left/Right move within a playlist, and X toggles the
 native screen. These actions are ignored while TangCore's OSD is visible; that
 OSD only launches files/playlists or returns to the main menu.
+
+## Gapless session boundary
+
+Once a session's transport END has arrived and its decoder has queued the
+final sample into the PCM FIFO, the player reports state `7` (draining). A
+START in that state appends: the ingress, content detector, and decoders
+restart for the new session, while the PCM FIFO, output, clocks, and HDMI rate
+keep serving the previous tail. At most one successor is queued; a START in any
+other state takes the ordinary reset path, and CANCEL flushes both sessions.
+
+The FIFO's end-of-stream flag marks the boundary. When that sample is
+presented, the successor's stream ID, sample total, duration, and native rate
+become the audible values, and the played-sample count, elapsed time, and
+underrun count restart at zero, so the first successor sample becomes sample
+one. If the successor already holds more than the prefill threshold, its first
+sample follows on the next sample period. Otherwise, the player emits silence
+until the prefill threshold is met and counts those periods in
+`boundary_gap_samples` rather than as underruns. An error in a queued successor
+stops playback, including any remaining predecessor tail.
+
+Tang-Control starts the next playlist entry as soon as it observes the draining
+state, which leaves the whole FIFO depth for the successor's START, STREAMINFO,
+and first CRC-validated FLAC frame. A rate change between tracks is adopted at
+the boundary by the same fractional timebase and ACR logic used at startup, so
+it cannot be sample-contiguous on the HDMI sink.
+
+## Content detection
 
 The content detector buffers at most 12 bytes: four bytes identify the FLAC
 `fLaC` marker, while RIFF/WAVE identification also checks `RIFF` at byte zero
@@ -98,9 +127,10 @@ separately verified asynchronous boundary.
 
 The BL616's 1,024-byte receive buffer provides transport backpressure but is
 empty while the acknowledgement and following frame make their round trip. A
-2,048-entry stereo PCM FIFO absorbs this burst-and-gap behavior. Playback waits
-for 512 decoded samples, or for a short file's final sample, before taking over
-from silence. The diagnostic tones are available only before the first stream
+16,384-entry stereo PCM FIFO (about 371 ms at 44.1 kHz) absorbs this
+burst-and-gap behavior and carries a track's tail while a gapless successor
+starts. Playback waits for 512 decoded samples, or for a short file's final
+sample, before taking over from silence. The diagnostic tones are available only before the first stream
 session begins.
 
 FIFO fullness stalls the selected decoder, which stalls the BL616 stream
@@ -117,14 +147,16 @@ completion remains non-looping.
 
 The debug register bank reports the player state, content format ID, selected
 decoder format validity, detected rate, FIFO level, played-sample count,
-underrun count, and decoder or content-front-end error code.
+underrun count, and decoder or content-front-end error code. Gapless
+diagnostics report the audible stream ID, the number of session boundaries
+crossed, and the sample periods of silence inserted at them.
 The original stream byte count, offset, CRC, end, and cancel counters remain
 observation-only and count only accepted bytes. See
 [`debug-registers.md`](debug-registers.md) for the register ABI.
 
 The deterministic 1 kHz left and 2 kHz right tones are a startup diagnostic.
 The first stream session disables them until core reset; prefill, completion,
-cancellation, decoder errors, and independent-session playlist boundaries emit
-silence whenever PCM is not active. The HDMI timebase retains the last valid
-native rate across those boundaries, avoiding a transient return to 48 kHz while
-the next track's metadata is parsed.
+cancellation, decoder errors, and late gapless boundaries emit silence whenever
+PCM is not active. The HDMI timebase follows the audible session's native rate
+and retains the last valid rate while no session is audible, avoiding a
+transient return to 48 kHz while the next track's metadata is parsed.

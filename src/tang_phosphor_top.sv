@@ -153,7 +153,7 @@ wire [31:0] stream_crc32;
 wire [3:0] player_state;
 wire audio_format_valid;
 wire [31:0] audio_sample_rate;
-wire [11:0] pcm_fifo_level;
+wire [14:0] pcm_fifo_level;
 wire [31:0] samples_played;
 wire [31:0] audio_underruns;
 wire [7:0] audio_error;
@@ -175,13 +175,18 @@ wire [7:0] ui_artwork_data;
 wire [35:0] total_samples;
 wire [31:0] elapsed_seconds;
 wire [31:0] duration_seconds;
+wire playback_rate_valid;
+wire [31:0] playback_rate;
+wire [15:0] audible_stream_id;
+wire [31:0] boundary_count;
+wire [31:0] boundary_gap_samples;
 
 audio_output_policy output_policy (
     .clk(clk_pixel),
     .resetn(resetn),
     .stream_start(stream_start),
-    .format_valid(audio_format_valid),
-    .sample_rate(audio_sample_rate),
+    .format_valid(playback_rate_valid),
+    .sample_rate(playback_rate),
     .playback_active(playback_active),
     .player_left(player_audio_left),
     .player_right(player_audio_right),
@@ -281,7 +286,8 @@ iosys_bl616 #(
 wav_stream_player audio_player (
     .clk(clk_pixel), .resetn(resetn),
     .stream_start(stream_start), .stream_end(stream_end),
-    .stream_cancel(stream_cancel), .stream_data(stream_data),
+    .stream_cancel(stream_cancel), .stream_id(stream_id),
+    .stream_data(stream_data),
     .stream_valid(stream_valid), .stream_ready(stream_ready),
     .sample_tick(sample_tick), .paused(pause_requested),
     .audio_left(player_audio_left),
@@ -291,7 +297,10 @@ wav_stream_player audio_player (
     .samples_played(samples_played), .total_samples(total_samples),
     .elapsed_seconds(elapsed_seconds), .duration_seconds(duration_seconds),
     .underrun_count(audio_underruns),
-    .error_code(audio_error), .detected_format(detected_format)
+    .error_code(audio_error), .detected_format(detected_format),
+    .playback_rate_valid(playback_rate_valid), .playback_rate(playback_rate),
+    .audible_stream_id(audible_stream_id), .boundary_count(boundary_count),
+    .boundary_gap_samples(boundary_gap_samples)
 );
 
 phosphor_ui_control ui_control (
@@ -357,6 +366,9 @@ debug_regs debug_registers (
     .ui_window_start(ui_window_start),
     .elapsed_seconds(elapsed_seconds),
     .duration_seconds(duration_seconds),
+    .boundary_count(boundary_count),
+    .boundary_gap_samples(boundary_gap_samples),
+    .audible_stream_id(audible_stream_id),
     .request_rdata(debug_rdata)
 );
 

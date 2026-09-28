@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import random
 import struct
 import subprocess
@@ -71,6 +72,18 @@ def main() -> None:
     constant = [(0x1234, -0x2345)] * 192
     write_vector(args.output_dir, "constant44", 44_100, constant,
                  ["-0", "-b", "192", "--no-mid-side"])
+
+    # One continuous signal split between two files at a sample that is not a
+    # frame boundary. Gapless playback must reproduce it without a seam.
+    continuous = [
+        (round(12000 * math.sin(index * 0.031)),
+         round(9000 * math.sin(index * 0.047 + 1.0)))
+        for index in range(700)
+    ]
+    write_vector(args.output_dir, "gapless_a44", 44_100, continuous[:333],
+                 ["-5", "-b", "192"])
+    write_vector(args.output_dir, "gapless_b44", 44_100, continuous[333:],
+                 ["-5", "-b", "192"])
 
     rejected = [(index - 96, 96 - index) for index in range(192)]
     write_vector(args.output_dir, "profile96", 96_000, rejected,

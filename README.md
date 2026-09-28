@@ -14,6 +14,7 @@ The first bring-up core provides:
 - streamed 16-bit stereo 44.1/48 kHz PCM WAV parsing and playback with buffered backpressure
 - streamed 16-bit stereo 44.1/48 kHz native FLAC decoding with CRC-gated frame admission
 - content-based WAV/FLAC identification with bounded, byte-exact prefix replay
+- sample-contiguous gapless playlist playback between same-rate WAV/FLAC tracks
 - a native 720p album/playlist screen with per-track album, artist, title, and
   embedded JPEG cover metadata, a six-track window, exact elapsed/total time,
   and progress
@@ -26,11 +27,16 @@ The first bring-up core provides:
 - experimental core ID `0x50`
 
 The test tones provide a startup diagnostic until the first audio stream begins.
-Stream prefill, playlist boundaries, completion, cancellation, and errors are
-silent so the diagnostic source cannot leak into file playback. The last valid
-sample rate is retained between tracks; the sample cadence, HDMI clock
-regeneration packet, and IEC channel status switch together only when the next
-source has valid native-rate metadata. MP3 and Ogg Vorbis are outside the
+Stream prefill, completion, cancellation, and errors are silent so the
+diagnostic source cannot leak into file playback. Playlist tracks are gapless:
+once a track's final sample is queued, Tang-Control appends the next track's
+stream behind it, and the 16,384-sample PCM FIFO carries the tail while the
+successor starts decoding. The successor's first sample follows the
+predecessor's last sample on the next sample period, and its rate, length,
+clocks, and display metadata switch at that exact boundary. A successor at a
+different native rate switches the sample cadence, HDMI clock regeneration
+packet, and IEC channel status together at the boundary, so only same-rate
+transitions are sample-contiguous. MP3 and Ogg Vorbis are outside the
 current project scope; DDR3 and the AE350 are not enabled.
 
 The current register map is documented in
@@ -38,7 +44,7 @@ The current register map is documented in
 The bounded audio architecture is documented in
 [`docs/audio-pipeline.md`](docs/audio-pipeline.md).
 
-Tang-Control's `feature/usb-cdc-file-transfer` branch at `fa5f912` supplies the
+Tang-Control's `feature/usb-cdc-file-transfer` branch at `26e975b` supplies the
 SD-card file loader for core ID `0x50`. Its Phosphor menu can open standalone
 WAV/FLAC files or VLC-style M3U/M3U8 playlists whose entries remain separate
 SD files; no TAR container is required. TangCore's OSD is intentionally limited
@@ -53,7 +59,15 @@ an independent double buffer. Audio backpressure remains authoritative while
 the shared UART is interleaved, and no partially uploaded image is exposed.
 Text and artwork travel as CRC-validated 64-word block writes (transport
 capability bit 4), so a cover appears within about a second of a track
-starting instead of waiting for one register write per audio frame.
+starting instead of waiting for one register write per audio frame. For a
+gapless successor, text and artwork are prepared early in the inactive banks
+and published when the core reports that stream as audible.
+
+`tools/generate_gapless_test.py <dir>` writes a deterministic six-track
+playlist that splits one continuous tone at non-frame-aligned samples across
+FLAC and WAV tracks with covers and large metadata padding. Any seam is audible
+as a click, and debug registers `0x9c`/`0xa0` count the boundaries and any
+silence inserted at them.
 
 ## Build
 

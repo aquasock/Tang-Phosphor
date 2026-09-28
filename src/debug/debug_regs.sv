@@ -26,7 +26,7 @@ module debug_regs (
     input         audio_format_valid,
     input         playback_active,
     input  [31:0] audio_sample_rate,
-    input  [11:0] pcm_fifo_level,
+    input  [14:0] pcm_fifo_level,
     input  [31:0] samples_played,
     input  [31:0] audio_underruns,
     input   [7:0] audio_error,
@@ -40,6 +40,9 @@ module debug_regs (
     input   [7:0] ui_window_start,
     input  [31:0] elapsed_seconds,
     input  [31:0] duration_seconds,
+    input  [31:0] boundary_count,
+    input  [31:0] boundary_gap_samples,
+    input  [15:0] audible_stream_id,
     output reg [31:0] request_rdata
 );
 
@@ -79,9 +82,9 @@ end
 always @(posedge clk) begin
     case (request_address)
         32'h0000_0000: request_rdata <= MAGIC;
-        32'h0000_0004: request_rdata <= 32'h0001_0006; // register ABI 1.6
+        32'h0000_0004: request_rdata <= 32'h0001_0007; // register ABI 1.7
         32'h0000_0008: request_rdata <= BUILD_DATE;
-        32'h0000_000c: request_rdata <= 32'h0000_007f;
+        32'h0000_000c: request_rdata <= 32'h0000_00ff;
         32'h0000_0010: request_rdata <= uptime_cycles;
         32'h0000_0014: request_rdata <= frame_count;
         32'h0000_0018: request_rdata <= request_count;
@@ -103,7 +106,7 @@ always @(posedge clk) begin
         32'h0000_005c: request_rdata <= {18'b0, audio_error,
             playback_active, audio_format_valid, player_state};
         32'h0000_0060: request_rdata <= audio_sample_rate;
-        32'h0000_0064: request_rdata <= {20'b0, pcm_fifo_level};
+        32'h0000_0064: request_rdata <= {17'b0, pcm_fifo_level};
         32'h0000_0068: request_rdata <= samples_played;
         32'h0000_006c: request_rdata <= audio_underruns;
         32'h0000_0070: request_rdata <= hdmi_audio_rate;
@@ -114,6 +117,9 @@ always @(posedge clk) begin
             ui_track_count, ui_current_track};
         32'h0000_008c: request_rdata <= elapsed_seconds;
         32'h0000_0090: request_rdata <= duration_seconds;
+        32'h0000_009c: request_rdata <= boundary_count;
+        32'h0000_00a0: request_rdata <= boundary_gap_samples;
+        32'h0000_00a4: request_rdata <= {16'b0, audible_stream_id};
         default:       request_rdata <= 32'hdead_beef;
     endcase
 end
