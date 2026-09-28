@@ -14,6 +14,11 @@ The first bring-up core provides:
 - streamed 16-bit stereo 44.1/48 kHz PCM WAV parsing and playback with buffered backpressure
 - streamed 16-bit stereo 44.1/48 kHz native FLAC decoding with CRC-gated frame admission
 - content-based WAV/FLAC identification with bounded, byte-exact prefix replay
+- a native 720p album/playlist screen with per-track album, artist, title, and
+  embedded JPEG cover metadata, a six-track window, exact elapsed/total time,
+  and progress
+- controller playback actions: Start pauses/resumes, Left/Right select the
+  previous/next playlist track, and X shows or hides the native screen
 - a distinctive animated test pattern
 - the standard TangCore BL616 UART interface and OSD
 - a CRC-protected USB-to-FPGA debug register channel
@@ -33,22 +38,36 @@ The current register map is documented in
 The bounded audio architecture is documented in
 [`docs/audio-pipeline.md`](docs/audio-pipeline.md).
 
-Tang-Control's `feature/usb-cdc-file-transfer` branch at `cbbfcc8` supplies the
+Tang-Control's `feature/usb-cdc-file-transfer` branch at `983fa27` supplies the
 SD-card file loader for core ID `0x50`. Its Phosphor menu can open standalone
 WAV/FLAC files or VLC-style M3U/M3U8 playlists whose entries remain separate
-SD files; no TAR container is required.
+SD files; no TAR container is required. TangCore's OSD is intentionally limited
+to choosing audio or returning to the main menu; playback controls live in the
+native Phosphor screen and are suppressed while the OSD is open.
+
+Tang-Control reads FLAC Vorbis comments and front-cover PICTURE blocks, plus
+standard WAV `LIST/INFO` text. Per-track tags override VLC `#EXTINF`, playlist
+name, and filename fallbacks. JPEG covers are decoded on the BL616 to the same
+92x92 RGB332 representation used by MiSTer-Phosphor and are published through
+an independent double buffer. Audio backpressure remains authoritative while
+the shared UART is interleaved, and no partially uploaded image is exposed.
 
 ## Build
 
 Gowin EDA 1.9.11.x with support for the GW5AST-138 is required.
 
 ```sh
-scripts/build.sh
+GOWIN_VARIANT_CPUS="0 2 8 10" scripts/build-variants.sh
 ```
 
 Set `GOWIN_SH` to the full path of `gw_sh` if it is not on `PATH`. The helper
 also applies the Linux Qt/FreeType compatibility settings needed by some Gowin
-EDA installations.
+EDA installations. The release-build helper runs Gowin placement options 0-3
+in parallel, rejects any timing-failing result, and publishes the variant with
+the strongest worst-case setup slack as the deployment artifact. Its comparison
+is retained in `impl/variant-summary.tsv`, with the individual logs and reports
+under `impl/variant-reports/`. `scripts/build.sh` remains available for a quick
+single diagnostic build; `GOWIN_PLACE_OPTION` selects its placement option.
 
 The TangCore-loadable image is generated at:
 

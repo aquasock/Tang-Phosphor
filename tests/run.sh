@@ -12,8 +12,12 @@ detector_output_dir="$output_dir/detector"
 flac_output_dir="$output_dir/flac"
 flac_vector_dir="$output_dir/flac_vectors"
 hdmi_audio_output_dir="$output_dir/hdmi_audio"
+ui_control_output_dir="$output_dir/ui_control"
+ui_time_output_dir="$output_dir/ui_time"
+ui_album_output_dir="$output_dir/ui_album"
 mkdir "$iosys_output_dir" "$audio_output_dir" "$audio_policy_output_dir" "$wav_output_dir" "$detector_output_dir" \
-    "$flac_output_dir" "$flac_vector_dir" "$hdmi_audio_output_dir"
+    "$flac_output_dir" "$flac_vector_dir" "$hdmi_audio_output_dir" "$ui_control_output_dir" "$ui_time_output_dir" \
+    "$ui_album_output_dir"
 trap 'find "$output_dir" -depth -delete' EXIT
 
 verilator --binary --timing -Wno-fatal -DSIM \
@@ -21,6 +25,25 @@ verilator --binary --timing -Wno-fatal -DSIM \
     "$test_dir/iosys_debug_tb.sv" \
     "$project_dir/src/iosys/iosys_bl616.v"
 "$iosys_output_dir/Viosys_debug_tb"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module phosphor_ui_control_tb --Mdir "$ui_control_output_dir" \
+    "$test_dir/phosphor_ui_control_tb.sv" \
+    "$project_dir/src/ui/phosphor_ui_control.sv"
+"$ui_control_output_dir/Vphosphor_ui_control_tb"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module phosphor_time_digits_tb --Mdir "$ui_time_output_dir" \
+    "$test_dir/phosphor_time_digits_tb.sv" \
+    "$project_dir/src/ui/phosphor_time_digits.sv"
+"$ui_time_output_dir/Vphosphor_time_digits_tb"
+
+verilator --binary --timing -Wno-fatal -DSIM \
+    --top-module phosphor_album_ui_tb --Mdir "$ui_album_output_dir" \
+    "$test_dir/phosphor_album_ui_tb.sv" \
+    "$project_dir/src/ui/phosphor_album_ui.sv" \
+    "$project_dir/src/ui/phosphor_time_digits.sv"
+"$ui_album_output_dir/Vphosphor_album_ui_tb"
 
 verilator --binary --timing -Wno-fatal \
     --top-module audio_test_source_tb --Mdir "$audio_output_dir" \

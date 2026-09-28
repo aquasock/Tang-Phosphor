@@ -11,6 +11,7 @@ logic [7:0] stream_data = 0;
 logic stream_valid = 1'b0;
 logic stream_ready;
 logic sample_tick = 1'b0;
+logic paused = 1'b0;
 logic [15:0] audio_left;
 logic [15:0] audio_right;
 logic playback_active;
@@ -19,6 +20,9 @@ logic format_valid;
 logic [31:0] sample_rate;
 logic [3:0] fifo_level;
 logic [31:0] samples_played;
+logic [35:0] total_samples;
+logic [31:0] elapsed_seconds;
+logic [31:0] duration_seconds;
 logic [31:0] underrun_count;
 logic [7:0] error_code;
 logic [2:0] detected_format;
@@ -36,11 +40,13 @@ wav_stream_player #(
     .stream_start(stream_start), .stream_end(stream_end),
     .stream_cancel(stream_cancel), .stream_data(stream_data),
     .stream_valid(stream_valid), .stream_ready(stream_ready),
-    .sample_tick(sample_tick), .audio_left(audio_left),
+    .sample_tick(sample_tick), .paused(paused), .audio_left(audio_left),
     .audio_right(audio_right), .playback_active(playback_active),
     .player_state(player_state), .format_valid(format_valid),
     .sample_rate(sample_rate), .fifo_level(fifo_level),
-    .samples_played(samples_played), .underrun_count(underrun_count),
+    .samples_played(samples_played), .total_samples(total_samples),
+    .elapsed_seconds(elapsed_seconds), .duration_seconds(duration_seconds),
+    .underrun_count(underrun_count),
     .error_code(error_code), .detected_format(detected_format)
 );
 
@@ -196,6 +202,19 @@ initial begin
         end
         begin : valid_consumer
             wait (playback_active);
+            paused = 1'b1;
+            begin
+                logic [3:0] held_level;
+                logic [31:0] held_samples;
+                held_level = fifo_level;
+                held_samples = samples_played;
+                pulse_sample();
+                if (audio_left !== 0 || audio_right !== 0 ||
+                        fifo_level !== held_level || samples_played !== held_samples ||
+                        underrun_count !== 0)
+                    $fatal(1, "pause did not hold PCM consumption silently");
+            end
+            paused = 1'b0;
             for (integer i = 0; i < 12; i++) begin
                 repeat (8) @(posedge clk);
                 pulse_sample();
@@ -218,6 +237,17 @@ initial begin
     end
     if (!format_valid || sample_rate !== 48000 || detected_format !== 3'd1)
         $fatal(1, "valid WAV metadata was not retained");
+
+    // Duration comes from the exact container sample count through the
+    // sequential divider, independent of playback progress.
+    pulse_start();
+    send_wave_header(32'd48000, 96000);
+    wait (format_valid);
+    repeat (40) @(posedge clk);
+    if (total_samples !== 96000 || duration_seconds !== 2)
+        $fatal(1, "exact duration metadata was %0d samples / %0d seconds",
+            total_samples, duration_seconds);
+    pulse_cancel();
 
     // Once playback has started, an empty FIFO must produce a counted silent
     // sample and then recover without losing the next decoded PCM pair.

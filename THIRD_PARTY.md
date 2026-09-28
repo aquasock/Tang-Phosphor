@@ -1,5 +1,17 @@
 # Third-party components
 
+## MiSTer-Phosphor design reference
+
+Tang-Phosphor's bounded audio profile and album-screen presentation use the
+project's MiSTer implementation as a behavioral and visual reference:
+
+- Project: https://github.com/aquasock/MiSTer-Phosphor
+- Reference commit: `183b514ceb98afd373d2bd8d8b9425e1df74bd15`
+- License: GNU General Public License v3.0 or later
+
+The Tang implementation is newly written for TangCore's transport, Gowin
+memories, clocks, and HDMI path; no MiSTer RTL file is copied into this tree.
+
 ## TangCore Monitor Core
 
 The files under `src/iosys/`, the Gowin-generated PLL wrappers under

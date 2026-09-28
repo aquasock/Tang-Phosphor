@@ -158,6 +158,23 @@ wire [31:0] samples_played;
 wire [31:0] audio_underruns;
 wire [7:0] audio_error;
 wire [2:0] detected_format;
+wire pause_requested;
+wire ui_visible;
+wire ui_playlist;
+wire [7:0] ui_current_track;
+wire [7:0] ui_track_count;
+wire [7:0] ui_window_start;
+wire [31:0] ui_lengths_0_3;
+wire [31:0] ui_lengths_4_7;
+wire [7:0] ui_length_8;
+wire [8:0] ui_text_address;
+wire [7:0] ui_text_data;
+wire ui_artwork_valid;
+wire [13:0] ui_artwork_address;
+wire [7:0] ui_artwork_data;
+wire [35:0] total_samples;
+wire [31:0] elapsed_seconds;
+wire [31:0] duration_seconds;
 
 audio_output_policy output_policy (
     .clk(clk_pixel),
@@ -192,6 +209,25 @@ phosphor_video video (
     .clk_audio(clk_audio),
     .audio_rate_48k(hdmi_audio_rate_48k),
     .audio_sample_word(audio_sample_word),
+    .ui_visible(ui_visible),
+    .ui_playlist(ui_playlist),
+    .ui_paused(pause_requested),
+    .ui_player_state(player_state),
+    .ui_current_track(ui_current_track),
+    .ui_track_count(ui_track_count),
+    .ui_window_start(ui_window_start),
+    .ui_lengths_0_3(ui_lengths_0_3),
+    .ui_lengths_4_7(ui_lengths_4_7),
+    .ui_length_8(ui_length_8),
+    .ui_text_address(ui_text_address),
+    .ui_text_data(ui_text_data),
+    .ui_artwork_valid(ui_artwork_valid),
+    .ui_artwork_address(ui_artwork_address),
+    .ui_artwork_data(ui_artwork_data),
+    .ui_samples_played(samples_played),
+    .ui_total_samples(total_samples),
+    .ui_elapsed_seconds(elapsed_seconds),
+    .ui_duration_seconds(duration_seconds),
     .overlay(overlay),
     .overlay_x(overlay_x),
     .overlay_y(overlay_y),
@@ -247,12 +283,28 @@ wav_stream_player audio_player (
     .stream_start(stream_start), .stream_end(stream_end),
     .stream_cancel(stream_cancel), .stream_data(stream_data),
     .stream_valid(stream_valid), .stream_ready(stream_ready),
-    .sample_tick(sample_tick), .audio_left(player_audio_left),
+    .sample_tick(sample_tick), .paused(pause_requested),
+    .audio_left(player_audio_left),
     .audio_right(player_audio_right), .playback_active(playback_active),
     .player_state(player_state), .format_valid(audio_format_valid),
     .sample_rate(audio_sample_rate), .fifo_level(pcm_fifo_level),
-    .samples_played(samples_played), .underrun_count(audio_underruns),
+    .samples_played(samples_played), .total_samples(total_samples),
+    .elapsed_seconds(elapsed_seconds), .duration_seconds(duration_seconds),
+    .underrun_count(audio_underruns),
     .error_code(audio_error), .detected_format(detected_format)
+);
+
+phosphor_ui_control ui_control (
+    .clk(clk_pixel), .resetn(resetn),
+    .request_valid(debug_valid), .request_write(debug_write),
+    .request_address(debug_address), .request_wdata(debug_wdata),
+    .pause_requested(pause_requested), .ui_visible(ui_visible),
+    .playlist(ui_playlist), .current_track(ui_current_track),
+    .track_count(ui_track_count), .window_start(ui_window_start),
+    .lengths_0_3(ui_lengths_0_3), .lengths_4_7(ui_lengths_4_7),
+    .length_8(ui_length_8), .text_address(ui_text_address),
+    .text_data(ui_text_data), .artwork_valid(ui_artwork_valid),
+    .artwork_address(ui_artwork_address), .artwork_data(ui_artwork_data)
 );
 
 stream_debug_sink stream_monitor (
@@ -297,6 +349,14 @@ debug_regs debug_registers (
     .audio_error(audio_error),
     .hdmi_audio_rate(hdmi_audio_rate),
     .detected_format(detected_format),
+    .pause_requested(pause_requested),
+    .ui_visible(ui_visible),
+    .ui_playlist(ui_playlist),
+    .ui_current_track(ui_current_track),
+    .ui_track_count(ui_track_count),
+    .ui_window_start(ui_window_start),
+    .elapsed_seconds(elapsed_seconds),
+    .duration_seconds(duration_seconds),
     .request_rdata(debug_rdata)
 );
 

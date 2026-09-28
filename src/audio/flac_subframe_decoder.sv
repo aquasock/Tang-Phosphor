@@ -70,6 +70,7 @@ logic [8:0] partition_count;
 logic [8:0] partition_index;
 logic rice_method;
 logic [4:0] rice_parameter;
+logic [31:0] rice_quotient_limit;
 logic rice_escape;
 logic [4:0] escape_width;
 logic [31:0] unary_quotient;
@@ -273,6 +274,7 @@ always_ff @(posedge clk) begin
         partition_index <= 0;
         rice_method <= 0;
         rice_parameter <= 0;
+        rice_quotient_limit <= 0;
         rice_escape <= 0;
         escape_width <= 0;
         unary_quotient <= 0;
@@ -448,6 +450,7 @@ always_ff @(posedge clk) begin
 
             STATE_RICE_PARAM: begin
                 rice_parameter <= bit_field[4:0];
+                rice_quotient_limit <= 32'hffff_fffe >> bit_field[4:0];
                 rice_escape <= bit_field[4:0] == (rice_method ? 5'd31 : 5'd15);
                 if (bit_field[4:0] == (rice_method ? 5'd31 : 5'd15))
                     read_bits(6'd5, STATE_ESCAPE_WIDTH);
@@ -484,7 +487,7 @@ always_ff @(posedge clk) begin
                             state <= STATE_MAC_START;
                         end else
                             read_bits({1'b0, rice_parameter}, STATE_REMAINDER);
-                    end else if (unary_quotient >= (32'hffff_fffe >> rice_parameter))
+                    end else if (unary_quotient >= rice_quotient_limit)
                         fail();
                     else
                         unary_quotient <= unary_quotient + 1'b1;

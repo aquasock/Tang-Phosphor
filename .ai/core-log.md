@@ -371,3 +371,53 @@ Run the uploaded 26-track `The Wall - Phosphor.m3u8` playlist to evaluate indepe
 - User Test: N/A
 
 ---
+
+## 11 COMMIT Unreleased 2026-09-27T19:34:27-07:00
+
+#### Coming From:
+
+Unreleased bccaf0f
+
+#### Purpose:
+
+Implement and hardware-qualify a MiSTer-Phosphor-inspired native album and playlist interface with per-track metadata, cover artwork, progress, and controller playback actions.
+
+#### Outcome:
+
+The FPGA now renders a native 720p album screen with a six-row playlist window, three-line album/artist/track metadata panel, exact sample-derived elapsed and total time, progress, pause state, a corrected left-to-right font path, ASCII apostrophe and grave-accent glyphs, and double-buffered text and 92x92 RGB332 artwork memories exposed through register ABI 1.6. Start pauses and resumes without consuming PCM or counting an underrun, Left/Right change playlist tracks, and X toggles the native screen while TangCore's OSD remains limited to file selection. Tang-Control `feature/usb-cdc-file-transfer` commit `983fa27` adds bounded FLAC Vorbis-comment/PICTURE and WAV `LIST/INFO` parsing, per-track precedence over playlist fallbacks, baseline-JPEG conversion through SDK TJpgDec, atomic UI uploads, FatFs reentrancy, shared-UART request/response serialization, and coordinated software/FPGA pause handling; its `249536`-byte firmware with SHA-256 `1b32ba6f5a8a70e9344649e88ab1b50a7bf6be5413204fc5b8baa646aa92e316` was application-only flashed at `0x40000` and passed device SHA verification. The release build helper ran Gowin placement options 0-3 concurrently and all four completed with zero setup or hold violations; option 3 was selected with pixel Fmax `74.489 MHz`, worst setup slack `+0.043 ns`, worst hold slack `+0.144 ns`, and artifact SHA-256 `c76ec099b26a0894e1c9c4f4490c36ed516b9bb3ca6584d72b7e5040c61c2249`. The `4796618`-byte artifact was uploaded as `cores/console138k/tang-phosphor.bin` and matched controller CRC-32 `78bf0cba`. The user confirmed correct orientation, metadata and artwork, track navigation, and stable pause/resume; live diagnostics proved the same FLAC session remained active while paused, resumed from its parked offset, retained a full 2,048-sample FIFO, and accumulated zero underruns, timeouts, CRC errors, malformed packets, or unexpected responses. All FPGA and Tang-Control regressions passed, and the required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Define and implement a bounded PCM-driven visualizer that integrates with the qualified album screen while preserving the proven WAV/FLAC playback, metadata, controller, timing, and HDMI boundaries.
+
+#### Files Modified:
+
+- README.md
+- THIRD_PARTY.md
+- build.tcl
+- docs/audio-pipeline.md
+- docs/debug-registers.md
+- scripts/build-variants.sh
+- src/audio/flac_decoder.sv
+- src/audio/flac_subframe_decoder.sv
+- src/audio/wav_stream_player.sv
+- src/debug/debug_regs.sv
+- src/phosphor_video.sv
+- src/tang_phosphor_top.sv
+- src/ui/phosphor_album_ui.sv
+- src/ui/phosphor_time_digits.sv
+- src/ui/phosphor_ui_control.sv
+- tang_phosphor_console138k.gprj
+- tests/phosphor_album_ui_tb.sv
+- tests/phosphor_time_digits_tb.sv
+- tests/phosphor_ui_control_tb.sv
+- tests/run.sh
+- tests/wav_stream_player_tb.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

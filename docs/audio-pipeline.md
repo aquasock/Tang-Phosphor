@@ -44,6 +44,21 @@ state. Playlists may mix WAV and FLAC. Paths are resolved against the playlist
 directory, so separately stored files do not need a TAR wrapper. `#EXTINF`
 duration is metadata and never controls the audio transition.
 
+Tang-Control also owns playlist navigation and bounded display metadata. It
+normalizes UTF-8 typography to the FPGA font and publishes nine fixed 32-byte
+ASCII slots through a double-buffered register window; one commit swaps the
+complete snapshot. A background UI task reads FLAC Vorbis comments and PICTURE
+blocks or WAV `LIST/INFO` tags while the audio stream proceeds. Per-track album,
+album-artist/artist, title, and front-cover fields override playlist and
+filename fallbacks. Baseline JPEG covers are decoded on the BL616, center-fit
+to 92x92 RGB332, uploaded to a separate inactive FPGA bank, and made visible
+only by an independent artwork commit. FatFS volume mutexes serialize the two
+readers without coupling UI completion to playback. The FPGA owns the native 720p
+rendering, exact sample-derived elapsed/total clocks, progress, and the pause
+gate. Start pauses/resumes, Left/Right move within a playlist, and X toggles the
+native screen. These actions are ignored while TangCore's OSD is visible; that
+OSD only launches files/playlists or returns to the main menu.
+
 The content detector buffers at most 12 bytes: four bytes identify the FLAC
 `fLaC` marker, while RIFF/WAVE identification also checks `RIFF` at byte zero
 and `WAVE` at byte eight. A recognized prefix is replayed byte-for-byte from
@@ -94,6 +109,9 @@ without discarding or duplicating data. The FLAC decoder additionally uses two
 FIFO emptiness during active playback emits zero for that sample and increments
 the underrun counter. Completion is terminal until a new stream starts,
 preventing a retained EOF indication from restarting an empty player.
+Pause also emits zero, but it neither consumes FIFO data nor advances the
+played-sample clock and is therefore not counted as an underrun. Playlist
+completion remains non-looping.
 
 ## Diagnostics
 

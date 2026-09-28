@@ -8,11 +8,31 @@ module phosphor_video (
     input audio_rate_48k,
     input logic [15:0] audio_sample_word [1:0],
 
+    input        ui_visible,
+    input        ui_playlist,
+    input        ui_paused,
+    input  [3:0] ui_player_state,
+    input  [7:0] ui_current_track,
+    input  [7:0] ui_track_count,
+    input  [7:0] ui_window_start,
+    input [31:0] ui_lengths_0_3,
+    input [31:0] ui_lengths_4_7,
+    input  [7:0] ui_length_8,
+    output [8:0] ui_text_address,
+    input  [7:0] ui_text_data,
+    input        ui_artwork_valid,
+    output [13:0] ui_artwork_address,
+    input  [7:0] ui_artwork_data,
+    input [31:0] ui_samples_played,
+    input [35:0] ui_total_samples,
+    input [31:0] ui_elapsed_seconds,
+    input [31:0] ui_duration_seconds,
+
     input overlay,
     output reg [7:0] overlay_x,
     output reg [7:0] overlay_y,
     input [14:0] overlay_color,
-    output       frame_tick,
+    output reg   frame_tick,
 
     output       tmds_clk_p,
     output       tmds_clk_n,
@@ -25,9 +45,9 @@ localparam integer OSD_RIGHT = 1120;
 
 wire [10:0] cx;
 wire [9:0] cy;
-assign frame_tick = (cx == 0) && (cy == 0);
 reg [23:0] rgb;
 reg [23:0] pattern_rgb;
+wire [23:0] album_rgb;
 reg osd_active = 1'b0;
 reg [10:0] x_accum = 0;
 reg [10:0] y_accum = 0;
@@ -36,6 +56,7 @@ reg [9:0] sweep_y = 0;
 // Fractionally scale TangCore's 256x224 OSD to a centered 960x720 image.
 always @(posedge clk_pixel) begin
     if (!resetn) begin
+        frame_tick <= 0;
         overlay_x <= 0;
         overlay_y <= 0;
         x_accum <= 0;
@@ -43,6 +64,7 @@ always @(posedge clk_pixel) begin
         osd_active <= 0;
         sweep_y <= 0;
     end else begin
+        frame_tick <= (cx == 0) && (cy == 0);
         if (cx == 0) begin
             overlay_x <= 0;
             x_accum <= 0;
@@ -98,13 +120,27 @@ always @* begin
         pattern_rgb = 24'h40ff80;
 end
 
+phosphor_album_ui album_ui (
+    .clk(clk_pixel), .resetn(resetn), .x(cx), .y(cy),
+    .rgb_in(pattern_rgb), .visible(ui_visible), .playlist(ui_playlist),
+    .paused(ui_paused), .player_state(ui_player_state),
+    .current_track(ui_current_track), .track_count(ui_track_count),
+    .window_start(ui_window_start), .lengths_0_3(ui_lengths_0_3),
+    .lengths_4_7(ui_lengths_4_7), .length_8(ui_length_8),
+    .text_address(ui_text_address), .text_data(ui_text_data),
+    .artwork_valid(ui_artwork_valid), .artwork_address(ui_artwork_address),
+    .artwork_data(ui_artwork_data), .samples_played(ui_samples_played),
+    .total_samples(ui_total_samples), .elapsed_seconds(ui_elapsed_seconds),
+    .duration_seconds(ui_duration_seconds), .rgb_out(album_rgb)
+);
+
 always @(posedge clk_pixel) begin
     if (overlay && osd_active)
         rgb <= {overlay_color[4:0], 3'b0,
                 overlay_color[9:5], 3'b0,
                 overlay_color[14:10], 3'b0};
     else
-        rgb <= pattern_rgb;
+        rgb <= album_rgb;
 end
 
 logic [2:0] tmds;

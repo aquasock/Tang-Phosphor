@@ -13,6 +13,9 @@ add_file -type verilog "src/audio/flac_decoder.sv"
 add_file -type verilog "src/audio/wav_stream_player.sv"
 add_file -type verilog "src/debug/debug_regs.sv"
 add_file -type verilog "src/stream/stream_debug_sink.sv"
+add_file -type verilog "src/ui/phosphor_ui_control.sv"
+add_file -type verilog "src/ui/phosphor_album_ui.sv"
+add_file -type verilog "src/ui/phosphor_time_digits.sv"
 add_file -type verilog "src/usb_hid_host.v"
 
 add_file -type verilog "src/hdmi/audio_clock_regeneration_packet.sv"
@@ -46,6 +49,10 @@ set_option -use_sspi_as_gpio 1
 set_option -use_mspi_as_gpio 1
 set_option -use_cpu_as_gpio 1
 set_option -multi_boot 1
-set_option -place_option 2
+set place_option 2
+if {[info exists ::env(GOWIN_PLACE_OPTION)]} {
+    set place_option $::env(GOWIN_PLACE_OPTION)
+}
+set_option -place_option $place_option
 
 run all

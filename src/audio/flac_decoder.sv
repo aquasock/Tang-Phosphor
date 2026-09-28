@@ -99,6 +99,7 @@ logic [3:0] channel_assignment;
 logic [12:0] frame_size;
 logic [35:0] frame_number;
 logic [35:0] frame_position;
+logic [36:0] frame_end_position;
 logic [35:0] coded_number;
 logic [35:0] coded_number_minimum;
 logic [2:0] coded_continuations;
@@ -342,6 +343,7 @@ always_ff @(posedge clk) begin
         frame_size <= 0;
         frame_number <= 0;
         frame_position <= 0;
+        frame_end_position <= 0;
         coded_number <= 0;
         coded_number_minimum <= 0;
         coded_continuations <= 0;
@@ -700,6 +702,7 @@ always_ff @(posedge clk) begin
                     short_frame <= {3'b0, frame_size} < min_block_size ||
                         (blocking_known && !variable_block &&
                             frame_size != fixed_frame_size);
+                    frame_end_position <= next_frame_position;
                     sample_channel <= 1'b0;
                     write_index <= 0;
                     state <= STATE_SUBFRAME_START;
@@ -735,9 +738,9 @@ always_ff @(posedge clk) begin
             STATE_FRAME_CRC_CHECK: begin
                 if (frame_crc != 0)
                     fail(ERROR_CRC);
-                else if (next_frame_position[36] ||
+                else if (frame_end_position[36] ||
                         (total_samples != 0 &&
-                            next_frame_position > {1'b0, total_samples}))
+                            frame_end_position > {1'b0, total_samples}))
                     fail(ERROR_HEADER);
                 else begin
                     frame_crc_active <= 1'b0;
@@ -745,11 +748,11 @@ always_ff @(posedge clk) begin
                     bank_size[write_bank] <= frame_size;
                     bank_assignment[write_bank] <= channel_assignment;
                     bank_eof[write_bank] <= total_samples != 0 &&
-                        next_frame_position[35:0] == total_samples;
+                        frame_end_position[35:0] == total_samples;
                     last_committed_valid <= 1'b1;
                     last_committed_bank <= write_bank;
                     write_bank <= !write_bank;
-                    frame_position <= next_frame_position[35:0];
+                    frame_position <= frame_end_position[35:0];
                     frame_number <= frame_number + 1'b1;
                     state <= STATE_WAIT_FRAME;
                 end

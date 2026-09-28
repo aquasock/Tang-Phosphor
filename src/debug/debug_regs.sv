@@ -32,6 +32,14 @@ module debug_regs (
     input   [7:0] audio_error,
     input  [31:0] hdmi_audio_rate,
     input   [2:0] detected_format,
+    input         pause_requested,
+    input         ui_visible,
+    input         ui_playlist,
+    input   [7:0] ui_current_track,
+    input   [7:0] ui_track_count,
+    input   [7:0] ui_window_start,
+    input  [31:0] elapsed_seconds,
+    input  [31:0] duration_seconds,
     output reg [31:0] request_rdata
 );
 
@@ -69,9 +77,9 @@ end
 always @* begin
     case (request_address)
         32'h0000_0000: request_rdata = MAGIC;
-        32'h0000_0004: request_rdata = 32'h0001_0004; // register ABI 1.4
+        32'h0000_0004: request_rdata = 32'h0001_0006; // register ABI 1.6
         32'h0000_0008: request_rdata = BUILD_DATE;
-        32'h0000_000c: request_rdata = 32'h0000_001f;
+        32'h0000_000c: request_rdata = 32'h0000_007f;
         32'h0000_0010: request_rdata = uptime_cycles;
         32'h0000_0014: request_rdata = frame_count;
         32'h0000_0018: request_rdata = request_count;
@@ -98,6 +106,12 @@ always @* begin
         32'h0000_006c: request_rdata = audio_underruns;
         32'h0000_0070: request_rdata = hdmi_audio_rate;
         32'h0000_0074: request_rdata = {29'b0, detected_format};
+        32'h0000_0078: request_rdata = {31'b0, pause_requested};
+        32'h0000_007c: request_rdata = {30'b0, ui_playlist, ui_visible};
+        32'h0000_0080: request_rdata = {8'b0, ui_window_start,
+            ui_track_count, ui_current_track};
+        32'h0000_008c: request_rdata = elapsed_seconds;
+        32'h0000_0090: request_rdata = duration_seconds;
         default:       request_rdata = 32'hdead_beef;
     endcase
 end
