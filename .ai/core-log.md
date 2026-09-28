@@ -421,3 +421,34 @@ Define and implement a bounded PCM-driven visualizer that integrates with the qu
 - User Test: PASS
 
 ---
+
+## 12 COMMIT Unreleased 2026-09-27T20:20:12-07:00
+
+#### Coming From:
+
+Unreleased 533a3f3
+
+#### Purpose:
+
+Record the Tang-Control FPGA UART receive-path update made after entry 11 and verify that the Console 138K BL616 is running exactly that firmware.
+
+#### Outcome:
+
+Tang-Control `feature/usb-cdc-file-transfer` commit `816aa93` raises `uart1_rx_task` to priority 5 above every SD-card task so USB CDC uploads no longer starve the 32-byte FPGA UART receive FIFO, clears the FIFO and resynchronizes the parser on overflow instead of reading misaligned frames, and adds receive health counters exposed by `status` and a new `rxstats` console and `tangctl.py` subcommand, while `26a6ff7` only documents those counters; the commit notes that some overflows remain under load and that an interrupt-driven receive path is still needed. A clean rebuild of `26a6ff7` with the cached Bouffalo SDK and T-Head toolchain reproduced the previously built `251856`-byte application image with SHA-256 `65f130067683137395b91e243f668cb9efcc8f73549ae8a6c1d68812a143f8c6`, and the complete Tang-Control test runner passed. With the BL616 in user-entered BOOT mode, `BLFlashCommand` read back `0x3D7D0` bytes from application offset `0x40000`, and the readback was byte-identical to that image, proving that the device runs Tang-Control HEAD and superseding the `983fa27` firmware recorded in entry 11. Before the readback, the running firmware answered `rxstats` over `/dev/ttyACM0` with active core `0x50`, `4570` FPGA requests and responses, zero timeouts, CRC errors, malformed packets, unexpected responses, FIFO overflows, or resync bytes, a FIFO high-water mark of `25`, and a maximum receive poll gap of `4435113` µs that far exceeds the `2.2` ms upload worst case claimed by `816aa93` and remains unexplained. Tang-Phosphor documentation now pins the authoritative client at `26a6ff7`, and the required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Characterize the `4435113` µs maximum FPGA UART receive poll gap by resetting `rxstats` and sampling it across idle, core load, upload, and playback phases, then resume the proposed timing-recovery cycle ahead of the bounded PCM-driven waveform visualizer.
+
+#### Files Modified:
+
+- README.md
+- docs/debug-registers.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: N/A
+
+---

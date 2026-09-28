@@ -65,7 +65,7 @@ profile, `0x22` invalid frame header, `0x23` CRC failure, `0x24` invalid
 subframe, `0x25` truncated stream, and `0x26` internal range failure.
 
 Examples use the authoritative host client from the sibling Tang-Control
-repository. Check out its `feature/usb-cdc-file-transfer` branch at `983fa27`, then run
+repository. Check out its `feature/usb-cdc-file-transfer` branch at `26a6ff7`, then run
 these commands from the Tang-Phosphor repository root:
 
 ```bash
