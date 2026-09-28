@@ -452,3 +452,33 @@ Characterize the `4435113` µs maximum FPGA UART receive poll gap by resetting `
 - User Test: N/A
 
 ---
+
+## 13 COMMIT Unreleased 2026-09-27T20:23:21-07:00
+
+#### Coming From:
+
+Unreleased 2779790
+
+#### Purpose:
+
+Identify the source of the multi-second FPGA UART receive poll gap left unexplained in entry 12.
+
+#### Outcome:
+
+After the user returned the BL616 from BOOT mode to TangCore, `status` at `19167` ms uptime, with active core `0`, `core_running` false, and no upload or playback, already reported a `4038974` µs maximum receive poll gap with zero FIFO overflows. Tang-Control `fpga/programmer.cpp` streams the JTAG core bitstream inside `taskENTER_CRITICAL()`, which blocks the scheduler and therefore `uart1_rx_task` for the entire core load, and `fpga_rx_max_gap_us` accumulates from task start without excluding that interval. After `tangctl.py rxstats --reset`, five consecutive idle samples reported a maximum gap of `1008`–`1009` µs, consistent with the task's 1 ms poll delay. The `4435113` µs value in entry 12 and the `4038974` µs boot value are therefore attributed to scheduler-blocking FPGA core programming, during which the FPGA is being reconfigured and cannot transmit, rather than to upload starvation or data loss; this resolves the question recorded in entry 12, although the attribution was inferred from the code path and the idle baseline rather than timed directly around a core load. Upload and playback phases were not sampled in this cycle, no FPGA or firmware change was made, and the required `.ai` core-syntax audit passed without changing `.ai/core.md` or settled history.
+
+#### Next Steps:
+
+Before each characterization run, reset `rxstats` after the core finishes loading so upload and playback gaps are measured independently of JTAG programming, and consider a Tang-Control change that resets or excludes the receive-gap measurement across core programming; then resume the proposed timing-recovery cycle ahead of the bounded PCM-driven waveform visualizer.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
