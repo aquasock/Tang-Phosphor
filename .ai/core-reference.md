@@ -76,6 +76,24 @@ supported profile. Project-specific limits remain implementation limits.
 - Relevant behavior: The wrapper directly instantiates `AE350_SOC`, maps the fixed `0x80000000` reset vector and extended fabric bus, and the Tang target demonstrates AE350 firmware and interrupts on hardware.
 - Tang-Phosphor use: Reuse the BSD-2-Clause primitive wiring and dedicated-PLL approach while keeping White Rabbit gateware and firmware outside this project.
 
+### AE350 core clock is `PLL_R[0]` `CLKOUT1`
+
+- Sources: Tang-PSX `.ai/core-reference.md` record AE350-007 and core-log entry 26, commit `c3aaf811d059`, `gateware/ae350_pll.v` and `software/programs/clock/main.c` (https://github.com/aquasock/Tang-PSX).
+- Authority: Hardware measurement on this board; no primary Gowin document naming `CLKOUT1` was found. Treat as a verified board fact, not a Gowin-documented limit.
+- Relevant behavior: The A25 runs at the frequency of `PLL_R[0]` `CLKOUT1` regardless of which PLL output the netlist connects to `AE350_SOC` `CORE_CLK`. With 750 MHz on `CLKOUT0` wired to `CORE_CLK` and 75 MHz on `CLKOUT1`, a counted dependent-`addi` loop measured 74.85 MHz; changing only `CLKOUT1` to 50 MHz measured 49.85 MHz; generating 750 MHz on `CLKOUT1` and wiring it to `CORE_CLK` measured at least 725 MHz. Gowin timing analysis constrains the declared `CORE_CLK` net and does not detect the mismatch.
+- Tang-Phosphor use: Generate the CPU clock on `CLKOUT1`, connect `CORE_CLK` to that output, and put the fabric bus clock on `CLKOUT0`. Do not accept a CPU frequency from the PLL configuration or timing report alone; confirm it on hardware with a counted-cycle measurement against wall time. `src/ae350/ae350_pll.v` at `292ae77` still places 750 MHz on `CLKOUT0` and 75 MHz on `CLKOUT1`, so the entry 18 smoke test ran the A25 at 75 MHz; correct it before the next AE350 build.
+
+---
+
+## GW5AST Device Revision
+
+### Tang Console 138K silicon revision
+
+- Sources: Sipeed TangMega-138K-example repository, commit `06e7d8b118d345915ab6f257b7c22226f81575cd`, README and generated DDR3 IP; Tang-PSX `.ai/core-reference.md` record DEV-001 (https://github.com/aquasock/Tang-PSX).
+- Authority: Sipeed board-vendor documentation plus a user photograph of the installed device, 2026-09-28.
+- Relevant rule: The device revision is the fifth character of the package's second marking line. The installed device is marked `GW5AST-LV138PG484AC1/I0`, `2518CA0N`, `TS0E44.00`, so it is revision C. Sipeed's generated DDR3 IP targets revision C, and its README directs revision-B users to regenerate all Gowin IP.
+- Tang-Phosphor use: Build for revision C (`set_device GW5AST-LV138PG484AC1/I0 -device_version C`) and generate all Gowin IP for revision C. Tang-Phosphor artifacts through entry 18 were built for revision B.
+
 ---
 
 ## USB Full-Speed Host

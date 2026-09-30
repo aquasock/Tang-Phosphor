@@ -661,3 +661,33 @@ Use the hardware-proven AE350 clock, reset, reset-vector, and fabric-bus foundat
 - User Test: PASS
 
 ---
+
+## 19 COMMIT Unreleased 2026-09-30T12:42:44-07:00
+
+#### Coming From:
+
+Unreleased 292ae77
+
+#### Purpose:
+
+Record the user's direction to target device revision C and correct the AE350 core-clock claim in entry 18 using hardware evidence from the Tang-PSX project.
+
+#### Outcome:
+
+A review of the sibling Tang-PSX repository, which shares this board and grew its AE350 work from Tang-Phosphor's smoke test, found two facts that affect this project. First, a user photograph recorded in Tang-PSX identifies the installed device as revision C from its `2518CA0N` package marking, Sipeed's DDR3 IP is generated for revision C, and every Tang-PSX image built for revision C ran on this board; at the user's explicit direction `.ai/core.md` now names device revision C, and all future builds target it. Second, Tang-PSX commit `c3aaf811d059` showed on hardware that the A25 takes its core clock from `PLL_R[0]` `CLKOUT1` rather than from whichever output the netlist wires to `CORE_CLK`, measuring 74.85 MHz with the configuration Tang-Phosphor still uses and at least 725 MHz after moving 750 MHz to `CLKOUT1`. Tang-Phosphor's `src/ae350/ae350_pll.v` at `292ae77` places 750 MHz on `CLKOUT0` and 75 MHz on `CLKOUT1`, so the entry 18 smoke test ran the A25 at 75 MHz rather than the recorded 750 MHz; its boot, reset-vector, and fabric-write results remain valid, and only the core-frequency claim is superseded. The Gowin timing report cannot detect this fault because it constrains the declared net. `.ai/core-reference.md` gained a board-measured AE350 core-clock record that requires the CPU clock on `CLKOUT1` and a counted-cycle hardware check of the CPU frequency after any AE350 clock change, plus a device-revision record. `build.tcl`, `build-ae350-smoke.tcl`, `tang_phosphor_console138k.gprj`, and `src/ae350/ae350_pll.v` still carry revision B and the old PLL wiring because no build was run in this cycle. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that the only `.ai/core.md` change is the user-requested revision line, validated this entry as number 19 of 100 with exactly six sections, and confirmed that no settled history was rewritten; it also noted, without editing, that the Current Log Conformance section of `.ai/core-syntax.md` still describes the active log as empty.
+
+#### Next Steps:
+
+Hold for the user's statement of the project goal before planning further work. Any following AE350 hardware cycle must first retarget the build files to revision C, move the CPU clock to `CLKOUT1`, and confirm the CPU frequency on hardware with a counted-cycle measurement, and it must requalify the deployment core on a revision-C build.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
