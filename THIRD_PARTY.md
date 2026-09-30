@@ -81,3 +81,28 @@ wrapper and the LiteX-WR-NIC Tang Mega 138K Pro target:
 The required notice is provided in `third_party/litex/LICENSE-BSD-2-Clause`.
 Tang-Phosphor does not include the separately licensed White Rabbit gateware
 or firmware.
+
+## Rockbox
+
+`third_party/rockbox` is a Git submodule of the Rockbox open-source firmware.
+Its codecs, codec support libraries, metadata parsers, DSP, and supporting
+firmware and library sources are compiled unmodified by `software/rbhost`:
+
+- Project: https://www.rockbox.org/ (mirror https://github.com/Rockbox/rockbox)
+- Reference commit: `e45936397ee3677c910c9a0c6473184e9755040c`
+- License: GNU General Public License version 2 or later; bundled codec
+  libraries carry their own GPL-compatible licenses in their directories
+
+`software/rbhost/host/rbhost.c` follows Rockbox's
+`lib/rbcodec/test/warble.c`, and the headers in `software/rbhost/config` are
+derived from `lib/rbcodec/rbcodecconfig-example.h`,
+`lib/rbcodec/rbcodecplatform-unix.h`, and `lib/rbcodec/test/file.h`; those
+files remain GPL-2.0-or-later. The combined rbhost and codec binaries are
+distributed under GPL-3.0 as permitted by the "or later" terms.
+
+## QEMU (development tooling only)
+
+`tools/build-qemu-cache-model.sh` builds QEMU 10.2.1 (GPL-2.0) and its
+`contrib/plugins/cache.c` cache model from the signed release tarball for
+local performance estimates. No QEMU code is included in this repository or
+in any Tang-Phosphor artifact.

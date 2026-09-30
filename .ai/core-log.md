@@ -731,3 +731,53 @@ Begin step 2 of the approved Rockbox plan: pin Rockbox as a submodule, build `li
 - User Test: PASS
 
 ---
+
+## 21 COMMIT Unreleased 2026-09-30T13:59:38-07:00
+
+#### Coming From:
+
+Unreleased 83c6f1b
+
+#### Purpose:
+
+Build Rockbox's codecs for the AE350 A25 and run them through Rockbox's codec API under `qemu-riscv32`, starting with FLAC, to prove bit-exact decoding and estimate CPU load for each external-memory option before choosing the memory for step 3.
+
+#### Outcome:
+
+Rockbox is pinned as the shallow submodule `third_party/rockbox` at `e45936397ee3677c910c9a0c6473184e9755040c` and used unmodified. `software/rbhost` compiles `lib/rbcodec` (codecs, metadata, DSP), the codec support libraries, `lib/fixedpoint`, `lib/tlsf`, and a few firmware helpers for `rv32imafdc`/`ilp32d`, the only RV32 hard-float multilib in the Xuantie toolchain, using the standalone configuration of Rockbox's `warble` test program with project `rbcodecconfig.h`, `rbcodecplatform.h`, `autoconf.h`, `file.h`, and an `endian.h` shim in `software/rbhost/config`. Rockbox has no RISC-V target, so its prebuilt `.codec` files cannot run on the A25; each codec is instead built from source as a static RV32 ELF linked at a 1 MiB codec buffer at `0x41000000` with target ID `0x5450`, and the host's ELF loader validates magic, target ID, API version 50, and `codec_api` size before calling it, as Rockbox native players load one codec at a time. Codecs link only their libraries, Rockbox's `codeclib`, and libgcc, plus newlib's lone `setjmp.o` for Vorbis; their maps contain no other libc code, and the largest image, AAC, is 464,800 bytes. The host `rbhost.c` follows `warble.c`, keeps the DSP output at the source rate for 44.1 and 48 kHz, and runs under `qemu-riscv32` through a Linux system-call layer in `platform_qemu.c`. `make -C software/rbhost check` decodes the FPGA FLAC regression vectors and reproduced the reference PCM exactly for all five 44.1/48 kHz vectors, and a complete 274.3-second 44.1 kHz track decoded to 12,096,013 samples identical to libFLAC's output. `tools/build-qemu-cache-model.sh` builds a plugin-enabled QEMU 10.2.1 from its signature-verified tarball, `tools/build-warble-reference.sh` builds x86 warble from the same Rockbox revision, and `tools/rbhost_profile.py` encodes a 60-second excerpt of a source file with FFmpeg and checks eleven formats: FLAC, ALAC, WavPack, TTA, MP3 at 320 kbps and VBR quality 2, MP2 at 256 kbps, Vorbis quality 6, AAC at 256 kbps, WMA at 192 kbps, and AC-3 at 448 kbps. On an excerpt of the user's track with SHA-256 `479572337e15cec184560d6152de058090387b80586ba821edd5d4ec4efc1f40`, every format's RV32 raw codec output was bit-identical to x86 warble and every lossless format's 16-bit output matched the source. The A25 cache model found 14.0 to 26.1 million instructions per audio second and almost no instruction misses, so data misses from streaming buffers dominate. Estimated A25 load at 750 MHz, bracketed between 1.0 cycle per instruction without write-backs and 1.5 with a write-back per data miss, was highest for WMA at 14.0 to 26.8 percent on DDR3, 11.0 to 20.8 percent on the Tang SDRAM module with an unmeasured 425-cycle miss estimate, and 8.8 to 16.5 percent with a 128 KiB fabric L2 in front of DDR3; AAC followed at 12.8 to 23.8 percent on DDR3, Vorbis and MP3 stayed below 14.5 percent, and FLAC used 4.4 to 8.0 percent. Every memory option therefore leaves the A25 at least 73 percent idle for these codecs, and the fabric L2 changes the estimate more than DDR3 versus SDRAM. Opus was deferred at the user's direction: its RV32 output passed libopus's `opus_compare` conformance test on a 10-second excerpt with a 98.6 percent quality metric but was not bit-identical to x86 warble, which matches upstream libopus, and the cause was not isolated after optimization level, `char` signedness, uninitialized memory, floating-point contraction, and `OPUS_FAST_INT64` were excluded; both builds also report a codec error at the end of that stream. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 21 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Present the step 3 memory decision to the user: DDR3 is hardware-proven on this board through Tang-PSX, while the SDRAM module needs a new burst controller, and the estimates show that either leaves ample headroom. Then implement the chosen external memory, a low-latency SystemVerilog AE350 RAM bridge, and a program loader in a separate build, set `mstatus.FS` before running `ilp32d` code, and measure the real miss cost against the model. Revisit Opus bit-exactness when Opus is scheduled.
+
+#### Files Modified:
+
+- .gitmodules
+- README.md
+- THIRD_PARTY.md
+- software/rbhost/Makefile
+- software/rbhost/config/autoconf.h
+- software/rbhost/config/endian.h
+- software/rbhost/config/file.h
+- software/rbhost/config/rbcodecconfig.h
+- software/rbhost/config/rbcodecplatform.h
+- software/rbhost/host/codec.ld
+- software/rbhost/host/codec_loader.c
+- software/rbhost/host/codec_loader.h
+- software/rbhost/host/crt0_qemu.S
+- software/rbhost/host/host.ld
+- software/rbhost/host/memory.ld
+- software/rbhost/host/platform_qemu.c
+- software/rbhost/host/rbhost.c
+- third_party/rockbox
+- tools/build-qemu-cache-model.sh
+- tools/build-warble-reference.sh
+- tools/rbhost_profile.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---

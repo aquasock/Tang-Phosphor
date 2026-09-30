@@ -137,6 +137,33 @@ a mismatch, so repeat this measurement after any AE350 clock change. This
 diagnostic image does not drive HDMI or either USB port. Power-cycle or select
 the deployment core again after testing.
 
+### Rockbox codecs on the AE350
+
+`software/rbhost` runs Rockbox's codecs on the AE350's RV32 A25 through
+Rockbox's own codec API (`codec_api` version 50). Rockbox is pinned as the
+`third_party/rockbox` submodule and used unmodified. Its codecs, metadata
+parsers, and DSP are compiled for `rv32imafdc`/`ilp32d` with the
+standalone-codec configuration that Rockbox's `warble` test program uses; the
+headers in `software/rbhost/config` take the place of warble's. Each codec is
+a static RV32 ELF linked at a fixed 1 MiB codec buffer (target ID `0x5450`),
+loaded by the host at run time as Rockbox native players load `.codec`
+files. The current host runs under `qemu-riscv32`; a hardware host follows
+once the AE350 has external memory.
+
+```sh
+git submodule update --init third_party/rockbox
+make -C software/rbhost          # build/rbhost/rbhost-qemu and codecs/*.codec
+make -C software/rbhost check    # FPGA FLAC regression vectors, bit-exact
+qemu-riscv32 build/rbhost/rbhost-qemu build/rbhost/codecs in.flac out.wav
+```
+
+`tools/rbhost_profile.py` encodes an excerpt of any audio file in eleven
+formats, requires the RV32 raw codec output to match x86 `warble` (built by
+`tools/build-warble-reference.sh`) and lossless output to match the source,
+and estimates AE350 CPU load with an A25 cache model built by
+`tools/build-qemu-cache-model.sh`. The RISC-V toolchain is the Xuantie
+`riscv64-unknown-elf` GCC used by the BL616 and Tang-PSX builds.
+
 ## Licensing and provenance
 
 Tang-Phosphor is distributed under GPL-3.0. The initial board-support, BL616

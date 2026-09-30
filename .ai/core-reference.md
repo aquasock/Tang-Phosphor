@@ -132,3 +132,19 @@ supported profile. Project-specific limits remain implementation limits.
 - Tang-Phosphor use: Place the PHY between the FPGA pins and the selected UTMI host controller, with host scheduling and enumeration performed by RTL and AE350 firmware.
 
 ---
+
+## Rockbox Codec Interface
+
+### Rockbox rbcodec and codec API
+
+- Sources: Rockbox `e45936397ee3677c910c9a0c6473184e9755040c` (`third_party/rockbox`), `lib/rbcodec/codecs/codecs.h`, `firmware/export/load_code.h`, `lib/rbcodec/test/warble.c`, and `lib/rbcodec/codecs/codecs.make`.
+- Authority: Upstream Rockbox source, the only definition of its codec ABI.
+- Relevant rule: A codec exports `struct codec_header` (`__header`): `lc_header` magic `CODEC_MAGIC` (`0x52434F44`), an `unsigned short` target ID, API version `CODEC_API_VERSION` (50), load and end addresses, `entry_point`, `run_proc`, a pointer to the codec's `ci`, and `sizeof(struct codec_api)`. The host must reject any mismatch. The `codec_api` layout depends on `NUM_CORES`, `DEBUG`/`SIMULATOR`, `ROCKBOX_HAS_LOGF`, `RB_PROFILE`, and `HAVE_RECORDING`, so host and codecs must be built with one configuration. Rockbox has no RISC-V target; codec binaries built for other targets cannot run on the A25.
+- Tang-Phosphor use: Build codecs from source with warble's standalone configuration (`SDLAPP`, `APPLICATION`, `__PCTOOL__`, `WARBLE`) and target ID `0x5450`, link each as a static RV32 ELF at the 1 MiB codec buffer, and compare raw codec output with x86 warble built from the same revision. Rockbox native optimization levels (`-Os` base, per-library levels from `codecs.make`, `-O2` DSP) are kept.
+
+### A25 cache model for performance estimates
+
+- Sources: QEMU 10.2.1 `contrib/plugins/cache.c` (GPL-2.0), built by `tools/build-qemu-cache-model.sh`; Tang-PSX `.ai/core-reference.md` records AE350-004, AE350-009, and AE350-010.
+- Authority: Simulation model parameterized by board measurements; not a cycle-accurate model of the A25 pipeline.
+- Relevant behavior: The plugin models set-associative L1 instruction and data caches and a unified L2 with LRU replacement and counts misses per instruction; it does not model dirty write-backs, pipeline stalls, or miss overlap. The A25 caches are 32 KiB, 4-way, 32-byte lines; measured miss costs are about 570 core cycles to DDR3 through Tang-PSX's RAM path and about 240 for a hit in its 128 KiB fabric L2.
+- Tang-Phosphor use: `tools/rbhost_profile.py` reports a CPU-load range bracketed by 1.0 cycle per instruction without write-backs and 1.5 cycles per instruction with a write-back for every data miss; any SDRAM figure is an estimate until measured on hardware.
