@@ -1,4 +1,4 @@
-set_device GW5AST-LV138PG484AC1/I0 -device_version B
+set_device -name GW5AST-138C GW5AST-LV138PG484AC1/I0
 
 add_file -type verilog "src/ae350/ae350_smoke_top.sv"
 add_file -type verilog "src/ae350/ae350_soc_smoke.sv"

@@ -76,12 +76,15 @@ wire usb_error2_raw;
 wire [5:0] controller_status_raw = {
     usb_error2_raw, usb_type2_raw, usb_error1_raw, usb_type1_raw
 };
-reg [11:0] joy_usb1_meta;
-reg [11:0] joy_usb1;
-reg [11:0] joy_usb2_meta;
-reg [11:0] joy_usb2;
-reg [5:0] controller_status_meta;
-reg [5:0] controller_status;
+// Keep both synchronizer stages in flip-flops. Revision-C synthesis otherwise
+// folds each two-stage chain into an SSRAM shift register, which provides no
+// metastability protection and escapes the first-stage false path.
+reg [11:0] joy_usb1_meta /* synthesis syn_srlstyle = "registers" */;
+reg [11:0] joy_usb1 /* synthesis syn_srlstyle = "registers" */;
+reg [11:0] joy_usb2_meta /* synthesis syn_srlstyle = "registers" */;
+reg [11:0] joy_usb2 /* synthesis syn_srlstyle = "registers" */;
+reg [5:0] controller_status_meta /* synthesis syn_srlstyle = "registers" */;
+reg [5:0] controller_status /* synthesis syn_srlstyle = "registers" */;
 
 // Controller reports change many orders of magnitude more slowly than either
 // clock. Synchronize them before the 74.25 MHz control/OSD domain uses them.

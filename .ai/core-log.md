@@ -691,3 +691,43 @@ None.
 - User Test: N/A
 
 ---
+
+## 20 COMMIT Unreleased 2026-09-30T13:18:26-07:00
+
+#### Coming From:
+
+Unreleased 72219c7
+
+#### Purpose:
+
+Retarget every build to device revision C, move the AE350 CPU clock to `PLL_R[0]` `CLKOUT1`, measure the CPU frequency on hardware, and requalify the deployment core on a revision-C build.
+
+#### Outcome:
+
+`build.tcl`, `build-ae350-smoke.tcl`, and `tang_phosphor_console138k.gprj` now target `GW5AST-138C`; the `src/pll/` wrappers were left as generated for revision B because they instantiate the same `PLL` primitive with the same parameter set as Gowin's revision-C generator output, and place-and-route accepted them. `src/ae350/ae350_pll.v` now generates the 750 MHz CPU clock on `CLKOUT1` and the 75 MHz bus clock on `CLKOUT0`. The smoke ROM grew to six instructions that report start and then repeatedly store `mcycle` to the fabric, where each value is paired with a Gray-coded count of the independent 50 MHz board oscillator; a debug write to `0x10` freezes a pair for reading at `0x04` and `0x08`, and the new `tools/ae350_clock_probe.py` derives the frequency from consecutive pairs through Tang-Control. The first revision-C builds exposed a latent defect: GowinSynthesis folded the two-stage controller synchronizers in `src/tang_phosphor_top.sv`, and the new smoke reference synchronizer, into SSRAM shift registers, which removed metastability protection and escaped the `get_regs` first-stage false paths, so all four deployment placements failed with 24 hold violations and worst setup slack between `-0.032` and `-0.801` ns. Marking every synchronizer stage `syn_srlstyle = "registers"` cleared them, and all ten FPGA regressions passed. All four eight-core deployment placements then met timing; option 1 was selected with worst setup slack `+1.151` ns, worst hold slack `+0.143` ns, pixel Fmax `81.185` MHz, and 94 of 340 BSRAMs, and its `4812490`-byte artifact with SHA-256 `ee22e3a738a4d437fe1066853901418f6286696603b96f75d558a8f7c3dc97eb` was uploaded as `cores/console138k/tang-phosphor.bin` with a matching SD readback, CRC-32 `e685308e`. The revision-C smoke image met timing with bus Fmax `80.124` MHz, worst setup slack `+0.853` ns, and worst hold slack `+0.275` ns; its `4330802`-byte artifact with SHA-256 `9835991f5a1728a2981a0f4b688577eb439fd07ac6d1e1aed867e02336115fce` was uploaded as `cores/console138k/tang-phosphor-ae350-smoke.bin` with a matching SD readback, CRC-32 `3c302d67`. On hardware the probe measured exactly `750.0000` MHz over six two-second intervals with host wall-clock agreement between `749.61` and `750.30` MHz, and the uncached ROM loop completed about 2.34 million fabric writes per second, confirming the correction recorded in entry 19. The user reported that everything in the deployment core worked, covering the album screen, direct WAV and FLAC playback, mixed and gapless playlists, controller playback actions, and both USB controller ports. Post-test probes of a session loaded about 53 seconds earlier reported magic `0x54504830`, ABI 1.7, capabilities `0x000000ff`, a scratch write/readback restored to zero, an active 44.1 kHz FLAC stream with a full `16384`-sample FIFO and zero underruns, zero FPGA-side CRC or malformed-request counts, and `126` Tang-Control requests matched by responses with no timeouts, CRC errors, malformed packets, unexpected responses, or receive-FIFO overflows. The running BL616 firmware has app SHA-256 `2efb7242cc83d2d50b7d2401e7458f115541ec3d093741d732157e26483f6b7e`, the Tang-Control `fbbddc6` image installed by Tang-PSX, so the documentation now pins `fbbddc6` as the proven client. `.ai/core-reference.md` records the measured core clock, the revision-C build rule, and the synchronizer rule. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 20 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Begin step 2 of the approved Rockbox plan: pin Rockbox as a submodule, build `lib/rbcodec` for `rv32imafdc`/`ilp32` with a project configuration header, run a bare-metal warble-style codec host under `qemu-riscv32` starting with FLAC so its output can be compared bit for bit with host warble and the proven FPGA FLAC decoder, and add an A25 cache model to estimate real-time performance for DDR3, the Tang SDRAM module, and fabric L2 options before choosing the memory for step 3.
+
+#### Files Modified:
+
+- README.md
+- build-ae350-smoke.tcl
+- build.tcl
+- docs/debug-registers.md
+- src/ae350/ae350_pll.v
+- src/ae350/ae350_smoke_top.sv
+- src/ae350/ae350_soc_smoke.sv
+- src/boards/console138k_ae350_smoke.sdc
+- src/tang_phosphor_top.sv
+- tang_phosphor_console138k.gprj
+- tools/ae350_clock_probe.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

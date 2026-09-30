@@ -47,7 +47,7 @@ The current register map is documented in
 The bounded audio architecture is documented in
 [`docs/audio-pipeline.md`](docs/audio-pipeline.md).
 
-Tang-Control's `feature/usb-cdc-file-transfer` branch at `26e975b` supplies the
+Tang-Control's `feature/usb-cdc-file-transfer` branch at `fbbddc6` supplies the
 SD-card file loader for core ID `0x50`. Its Phosphor menu can open standalone
 WAV/FLAC files or VLC-style M3U/M3U8 playlists whose entries remain separate
 SD files; no TAR container is required. TangCore's OSD is intentionally limited
@@ -74,7 +74,9 @@ silence inserted at them.
 
 ## Build
 
-Gowin EDA 1.9.11.x with support for the GW5AST-138 is required.
+Gowin EDA 1.9.11.x with support for the GW5AST-138 is required. Builds target
+device revision C (`GW5AST-138C`), the revision of the Tang Console 138K's
+installed FPGA.
 
 ```sh
 GOWIN_VARIANT_CPUS="0 2 8 10" scripts/build-variants.sh
@@ -102,9 +104,11 @@ The stock `monitor.bin` does not need to be replaced.
 ### AE350 proof of life
 
 The opt-in smoke image instantiates the hardened AE350 directly, clocks its A25
-core at 750 MHz with a 75 MHz fabric bus, fetches a four-instruction program at
-the fixed `0x80000000` reset vector, and writes a status bit through the
-extended AHB interface. It is isolated from the deployment build:
+core at 750 MHz with a 75 MHz fabric bus, fetches a six-instruction program at
+the fixed `0x80000000` reset vector, and writes a status bit and then its
+`mcycle` count through the extended AHB interface. The fabric pairs each count
+with a count of the 50 MHz board oscillator so the core frequency can be
+measured on hardware. It is isolated from the deployment build:
 
 ```sh
 scripts/build-ae350-smoke.sh
@@ -119,14 +123,19 @@ Tang-Control USB CDC client connected, the hardware result is checked with:
 ```sh
 python3 ../Tang-Control/scripts/tangctl.py status
 python3 ../Tang-Control/scripts/tangctl.py peek 0
+python3 tools/ae350_clock_probe.py
 ```
 
 `status` must report active core `80` (`0x50`), and `peek 0` must return
 `0x00000001`. The latter value is produced only after the AE350 executes the
 boot ROM and completes its CPU-to-fabric write; the deployment Phosphor core
-instead returns its `0x54504830` magic at address zero. This diagnostic image
-does not drive HDMI or either USB port. Power-cycle or select the deployment
-core again after testing.
+instead returns its `0x54504830` magic at address zero. The clock probe freezes
+count pairs with a debug write to `0x10`, reads them from `0x04` and `0x08`,
+and must report 750 MHz. The A25 runs at the frequency of `PLL_R[0]` `CLKOUT1`
+whatever the netlist connects to `CORE_CLK`, and timing analysis cannot detect
+a mismatch, so repeat this measurement after any AE350 clock change. This
+diagnostic image does not drive HDMI or either USB port. Power-cycle or select
+the deployment core again after testing.
 
 ## Licensing and provenance
 

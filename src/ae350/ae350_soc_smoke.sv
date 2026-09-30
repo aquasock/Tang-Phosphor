@@ -5,21 +5,29 @@
 // Copyright (c) 2024-2026 Florent Kermarrec <florent@enjoy-digital.fr>
 // SPDX-License-Identifier: BSD-2-Clause
 
-// Minimal AE350 system used to prove reset-vector fetches and CPU-to-fabric
-// writes before the USB host is connected. The four-word ROM performs:
+// Minimal AE350 system used to prove reset-vector fetches, CPU-to-fabric
+// writes, and the A25 core frequency. The six-word ROM performs:
 //
-//   lui  t0, 0xe8000       # Extended AHB peripheral aperture
-//   addi t1, zero, 1
-//   sw   t1, 0(t0)         # Enable the fabric heartbeat
-//   j    .
+//       lui  t0, 0xe8000       # Extended AHB peripheral aperture
+//       addi t1, zero, 1
+//       sw   t1, 0(t0)         # Report that the CPU started
+//   1:  csrr t1, mcycle
+//       sw   t1, 4(t0)         # Publish the core cycle count
+//       j    1b
 //
-// The ROM is intentionally combinational and tiny. Production firmware will
-// use BSRAM once the hard-core integration has passed this gate.
+// Each cycle-count write is paired with the fabric's reference count taken
+// in the same bus cycle, so two pairs give the core clock against the board
+// oscillator. The ROM is intentionally combinational and tiny. Production
+// firmware will use BSRAM once the hard-core integration has passed this gate.
 module ae350_soc_smoke (
     input  wire bus_clk,
     input  wire core_clk,
     input  wire resetn,
-    output logic cpu_started
+    input  wire [31:0] ref_count,
+    output logic cpu_started,
+    output logic [31:0] cpu_cycles,
+    output logic [31:0] ref_cycles,
+    output logic [31:0] cycle_samples
 );
 
 wire [31:0] rom_haddr;
@@ -36,14 +44,17 @@ wire [1:0]  exts_htrans;
 wire [31:0] exts_hwdata;
 wire        exts_hwrite;
 
-logic fabric_write_pending;
+logic       fabric_write_pending;
+logic [2:0] fabric_write_word;
 
 always_comb begin
-    unique case (rom_haddr[3:2])
-        2'd0: rom_hrdata = 32'he80002b7; // lui  t0, 0xe8000
-        2'd1: rom_hrdata = 32'h00100313; // addi t1, zero, 1
-        2'd2: rom_hrdata = 32'h0062a023; // sw   t1, 0(t0)
-        default: rom_hrdata = 32'h0000006f; // jal zero, 0
+    unique case (rom_haddr[4:2])
+        3'd0: rom_hrdata = 32'he80002b7; // lui  t0, 0xe8000
+        3'd1: rom_hrdata = 32'h00100313; // addi t1, zero, 1
+        3'd2: rom_hrdata = 32'h0062a023; // sw   t1, 0(t0)
+        3'd3: rom_hrdata = 32'hb0002373; // csrr t1, mcycle
+        3'd4: rom_hrdata = 32'h0062a223; // sw   t1, 4(t0)
+        default: rom_hrdata = 32'hff9ff06f; // jal zero, -8
     endcase
 end
 
@@ -51,13 +62,25 @@ end
 always_ff @(posedge bus_clk or negedge resetn) begin
     if (!resetn) begin
         fabric_write_pending <= 1'b0;
+        fabric_write_word <= 3'd0;
         cpu_started <= 1'b0;
+        cpu_cycles <= 32'd0;
+        ref_cycles <= 32'd0;
+        cycle_samples <= 32'd0;
     end else begin
-        if (fabric_write_pending && exts_hwdata[0])
-            cpu_started <= 1'b1;
+        if (fabric_write_pending) begin
+            if (fabric_write_word == 3'd0 && exts_hwdata[0])
+                cpu_started <= 1'b1;
+            if (fabric_write_word == 3'd1) begin
+                cpu_cycles <= exts_hwdata;
+                ref_cycles <= ref_count;
+                cycle_samples <= cycle_samples + 1'b1;
+            end
+        end
 
         fabric_write_pending <= exts_hsel && exts_htrans[1] && exts_hwrite &&
             (exts_haddr[31:16] == 16'he800);
+        fabric_write_word <= exts_haddr[4:2];
     end
 end
 

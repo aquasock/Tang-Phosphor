@@ -1,4 +1,4 @@
-set_device GW5AST-LV138PG484AC1/I0 -device_version B
+set_device -name GW5AST-138C GW5AST-LV138PG484AC1/I0
 
 add_file -type verilog "src/tang_phosphor_top.sv"
 add_file -type verilog "src/phosphor_video.sv"

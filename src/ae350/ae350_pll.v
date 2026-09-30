@@ -1,9 +1,15 @@
 //Copyright (C)2014-2025 Gowin Semiconductor Corporation.
 //All rights reserved.
 //
-// Tang-Phosphor AE350 smoke-test PLL configuration.
-// 50 MHz input, 750 MHz CPU clock on CLKOUT0, and 75 MHz bus clock on
-// CLKOUT1. The instance must be placed at PLL_R[0], the dedicated AE350 PLL.
+// Tang-Phosphor AE350 PLL configuration.
+// 50 MHz input, 750 MHz VCO, 750 MHz CPU clock on CLKOUT1, and 75 MHz bus
+// clock on CLKOUT0. The instance must be placed at PLL_R[0], the dedicated
+// AE350 PLL.
+//
+// The A25 always runs at the frequency of PLL_R[0] CLKOUT1, whichever output
+// the netlist connects to CORE_CLK, and timing analysis cannot detect a
+// mismatch (.ai/core-reference.md). Keep the CPU clock on CLKOUT1 and confirm
+// any change with tools/ae350_clock_probe.py on hardware.
 
 module ae350_pll (
     output wire lock,
@@ -23,8 +29,8 @@ wire gw_gnd = 1'b0;
 
 PLL PLL_inst (
     .LOCK(lock),
-    .CLKOUT0(cpu_clk),
-    .CLKOUT1(bus_clk),
+    .CLKOUT0(bus_clk),
+    .CLKOUT1(cpu_clk),
     .CLKOUT2(clkout2),
     .CLKOUT3(clkout3),
     .CLKOUT4(clkout4),
@@ -77,9 +83,9 @@ defparam PLL_inst.IDIV_SEL = 1;
 defparam PLL_inst.FBDIV_SEL = 1;
 defparam PLL_inst.MDIV_SEL = 15;
 defparam PLL_inst.MDIV_FRAC_SEL = 0;
-defparam PLL_inst.ODIV0_SEL = 1;
+defparam PLL_inst.ODIV0_SEL = 10;
 defparam PLL_inst.ODIV0_FRAC_SEL = 0;
-defparam PLL_inst.ODIV1_SEL = 10;
+defparam PLL_inst.ODIV1_SEL = 1;
 defparam PLL_inst.ODIV2_SEL = 8;
 defparam PLL_inst.ODIV3_SEL = 8;
 defparam PLL_inst.ODIV4_SEL = 8;

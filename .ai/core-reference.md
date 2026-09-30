@@ -81,7 +81,7 @@ supported profile. Project-specific limits remain implementation limits.
 - Sources: Tang-PSX `.ai/core-reference.md` record AE350-007 and core-log entry 26, commit `c3aaf811d059`, `gateware/ae350_pll.v` and `software/programs/clock/main.c` (https://github.com/aquasock/Tang-PSX).
 - Authority: Hardware measurement on this board; no primary Gowin document naming `CLKOUT1` was found. Treat as a verified board fact, not a Gowin-documented limit.
 - Relevant behavior: The A25 runs at the frequency of `PLL_R[0]` `CLKOUT1` regardless of which PLL output the netlist connects to `AE350_SOC` `CORE_CLK`. With 750 MHz on `CLKOUT0` wired to `CORE_CLK` and 75 MHz on `CLKOUT1`, a counted dependent-`addi` loop measured 74.85 MHz; changing only `CLKOUT1` to 50 MHz measured 49.85 MHz; generating 750 MHz on `CLKOUT1` and wiring it to `CORE_CLK` measured at least 725 MHz. Gowin timing analysis constrains the declared `CORE_CLK` net and does not detect the mismatch.
-- Tang-Phosphor use: Generate the CPU clock on `CLKOUT1`, connect `CORE_CLK` to that output, and put the fabric bus clock on `CLKOUT0`. Do not accept a CPU frequency from the PLL configuration or timing report alone; confirm it on hardware with a counted-cycle measurement against wall time. `src/ae350/ae350_pll.v` at `292ae77` still places 750 MHz on `CLKOUT0` and 75 MHz on `CLKOUT1`, so the entry 18 smoke test ran the A25 at 75 MHz; correct it before the next AE350 build.
+- Tang-Phosphor use: Generate the CPU clock on `CLKOUT1`, connect `CORE_CLK` to that output, and put the fabric bus clock on `CLKOUT0`. Do not accept a CPU frequency from the PLL configuration or timing report alone; confirm it on hardware with a counted-cycle measurement against wall time. `src/ae350/ae350_pll.v` at `292ae77` placed 750 MHz on `CLKOUT0` and 75 MHz on `CLKOUT1`, so the entry 18 smoke test ran the A25 at 75 MHz; entry 20 moved the CPU clock to `CLKOUT1`, and `tools/ae350_clock_probe.py` measured exactly 750.0000 MHz against the 50 MHz board oscillator.
 
 ---
 
@@ -92,7 +92,19 @@ supported profile. Project-specific limits remain implementation limits.
 - Sources: Sipeed TangMega-138K-example repository, commit `06e7d8b118d345915ab6f257b7c22226f81575cd`, README and generated DDR3 IP; Tang-PSX `.ai/core-reference.md` record DEV-001 (https://github.com/aquasock/Tang-PSX).
 - Authority: Sipeed board-vendor documentation plus a user photograph of the installed device, 2026-09-28.
 - Relevant rule: The device revision is the fifth character of the package's second marking line. The installed device is marked `GW5AST-LV138PG484AC1/I0`, `2518CA0N`, `TS0E44.00`, so it is revision C. Sipeed's generated DDR3 IP targets revision C, and its README directs revision-B users to regenerate all Gowin IP.
-- Tang-Phosphor use: Build for revision C (`set_device GW5AST-LV138PG484AC1/I0 -device_version C`) and generate all Gowin IP for revision C. Tang-Phosphor artifacts through entry 18 were built for revision B.
+- Tang-Phosphor use: Build for revision C (`set_device -name GW5AST-138C GW5AST-LV138PG484AC1/I0`) and generate all new Gowin IP for revision C. Tang-Phosphor artifacts through entry 18 were built for revision B; every build from entry 20 targets revision C. The committed `src/pll/` wrappers were generated for revision B but instantiate the same `PLL` primitive with the same parameter set as Gowin 1.9.11.03's revision-C generator output, and place-and-route accepted them for revision C.
+
+---
+
+## Gowin Synthesis
+
+### Shift-register extraction breaks clock-domain synchronizers
+
+- Sources: Gowin SUG550-2.0.1E GowinSynthesis User Guide, section 5.17 `syn_srlstyle` (installed with Gowin EDA 1.9.11.03 at `IDE/doc/EN/SUG550-2.0.1E_GowinSynthesis User Guide.pdf`); Tang-Phosphor core-log entry 20.
+- Authority: Gowin primary tool documentation plus observed revision-C synthesis results.
+- Relevant rule: GowinSynthesis infers shift registers by size and may implement them in SSRAM, BSRAM, or registers; `/* synthesis syn_srlstyle = "registers" */` on a register forces flip-flops.
+- Observed behavior: For revision C, GowinSynthesis 1.9.11.03 folded the two-stage `joy_usb*_meta`/`controller_status_meta` synchronizers and the AE350 smoke reference-count synchronizer into SSRAM shift registers. The first stage then had no metastability protection, and because `get_regs` does not match SSRAM cells the SDC first-stage false path no longer applied, producing cross-clock setup and hold failures in every placement.
+- Tang-Phosphor use: Mark every stage of every clock-domain synchronizer with `syn_srlstyle = "registers"`, and confirm after each build that no timing path ends at an SSRAM `DI` pin of a synchronizer.
 
 ---
 
