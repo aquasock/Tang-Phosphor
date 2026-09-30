@@ -781,3 +781,100 @@ Present the step 3 memory decision to the user: DDR3 is hardware-proven on this 
 - User Test: N/A
 
 ---
+
+## 22 COMMIT Unreleased 2026-09-30T14:55:11-07:00
+
+#### Coming From:
+
+Unreleased 26bba68
+
+#### Purpose:
+
+Implement step 3 of the approved Rockbox-codec plan, the user's choice of the on-board DDR3 over the SDRAM module, as a separate AE350 build with a low-latency SystemVerilog RAM bridge and a program loader, and measure real miss cost and codec load on hardware.
+
+#### Outcome:
+
+The cycle was paused at the user's request while the first hardware failure was being diagnosed. `build-ae350-ddr3.tcl`, run by `scripts/build-ae350-ddr3.sh` over four placements in parallel, builds a separate image with top `src/ae350/ae350_ddr3_top.sv`: Gowin's x32 DDR3 controller and 400 MHz PLL with Tang-PSX's proven configuration (`src/ddr3`, generated locally by `scripts/gen-ddr3-ip.sh` for revision C, whose `.ipc` matched the committed reference), the Sipeed pin map in `src/boards/console138k_ae350_ddr3.cst`, and Tang-Control on the 50 MHz board clock with `CORE_ID` `0x0353`. Every AE350 bus is clocked by the controller's 100 MHz user clock, so a miss crosses no clock domain; the 750 MHz core clock still comes from `PLL_R[0]` `CLKOUT1`. `src/ae350/ae350_soc.sv` brings out the ROM, EXTS, and RAM AHB ports; `ae350_boot_rom.sv` holds the 8 KiB boot ROM built from `software/ae350/boot`, which enables both caches and `mstatus.FS`, receives `TPI1` images (Tang-PSX's format, `tools/ae350_run.py pack`) from a Tang-Control stream through `ae350_stream_loader.sv` (a port of Tang-PSX's stream loader) and `async_fifo.sv`, checks their CRC-32, runs them, and publishes state; `ae350_exts_regs.sv` holds the loader, result, byte-writable log-ring, and bridge-counter registers at `0xe8000000`, which Tang-Control reads through the handshake in `debug_read_cdc.sv`. `ae350_ram_bridge.sv` maps DDR3 at `0x40000000`, answers other RAM-port addresses with an AHB ERROR, reads one 256-bit native word per 32-byte line, serves burst continuations from a line buffer, and merges write beats into one masked native write. The first 100 MHz builds failed timing because the AE350 macro's AHB outputs arrive after about 4 ns of routing, so the bridge was redesigned to capture every transfer and decide one cycle later from registers, predicting only SEQ continuations (whose data is always lane `p_beat + 1`) so line bursts keep zero wait states; with the register block's read split over two cycles, precomputed byte enables, and `syn_maxfan` on its address, all four placements met timing and placement 1 (100 MHz user clock Fmax 114.2 MHz, SHA-256 `4c23999188270b47c62371e78960a621f0ab6ce56828f4b991fc17223c6ba6b1`) was uploaded as `cores/console138k/tang-phosphor-ae350-ddr3.bin` with verified SD readback. `tests/ae350_ram_bridge_tb.sv` (randomized pipelined AHB master with bursts, BUSY, narrow and out-of-range transfers against a stalling, variable-latency controller model; twelve seeds; three of four injected faults caught, the fourth being logically redundant) and `tests/ae350_loader_tb.sv` (stream sessions with partial words, cancels and back-to-back starts across unrelated clocks, plus register and debug reads) pass and are in `tests/run.sh`. `software/ae350/programs/ddr3check` and `memlat` (ported from Tang-PSX) and eleven codec images from `tools/rbhost_bench.py prepare` were uploaded to `ae350/` on the SD card; each codec image is rbhost with its codec and a 10-second excerpt of the step 2 source track embedded (`make -C software/rbhost bench`, `host/platform_ae350.c`), and `host/bench_qemu.c` runs the same program under QEMU, whose output matched `rbhost-qemu` byte for byte, to give reference CRCs. The cache model now runs `rbhost-qemu` on the same file so it covers `main()` only, like the hardware measurement, and estimates 2.5 to 3.9 percent (AC-3) up to 14.6 to 28.0 percent (WMA) at 750 MHz on DDR3 for these excerpts. `software/rbhost/host/host.ld` had a pre-existing error, `. = HEAP_END` inside `.heap` being section-relative so `__heap_end` was `0x84100000`; it now reserves `HEAP_END - HEAP_BASE` and `make -C software/rbhost check` still passes. On hardware the image calibrated DDR3 in 27.3 ms and the boot ROM ran and loaded `ddr3check` over the stream; walking address bits over 1 GiB, byte and halfword lanes, and 65,536 write-then-read pairs passed, but the CPU stopped early in the 64 MiB pattern pass, which is the first check to evict dirty lines by replacement, with every bridge counter frozen, no trap recorded, and eight ERROR responses of unknown origin. A 16-entry transfer trace, first-ERROR address, and bridge state word were added (debug `0x0b8`-`0x0c0` and `0x300`-`0x37c`, `tools/ae350_run.py trace`); both testbenches pass with it, and the rebuilt placement 0 met timing (Fmax 105.1 MHz, SHA-256 `0d7e817463fb698762b7990972983125d09d474edec5139bc95d62f787e36174`) but has not been uploaded. `memlat` and the codec benchmarks have not run. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 22 of 100 with exactly six sections, and confirmed that no settled history was rewritten; the changes are local and uncommitted at the user's direction.
+
+#### Next Steps:
+
+With the Tang at the TangCore main menu, upload `build/ae350-ddr3/place0/tang_phosphor_ae350_ddr3.bin` as `cores/console138k/tang-phosphor-ae350-ddr3.bin` (the images in `ae350/` remain valid), have the user load it, run `tools/ae350_run.py run ddr3check.tpi`, and read `tools/ae350_run.py trace`: if the bridge is stuck with HREADY low its flags identify the waiting condition, and the trace shows the eviction and fill sequence and the ERROR addresses; if the bus is idle, route the AE350 debug JTAG to header pins for the user's Pico2 debugger to halt the core and read its PC. After `ddr3check` passes, run `memlat` to measure the miss cost against Tang-PSX's 570 cycles and `tools/rbhost_bench.py run` to compare codec load and output CRCs with QEMU and the model, then record the results and commit.
+
+#### Files Modified:
+
+- build-ae350-ddr3.tcl
+- scripts/build-ae350-ddr3.sh
+- scripts/gen-ddr3-ip.sh
+- software/ae350/Makefile
+- software/ae350/boot/boot.c
+- software/ae350/boot/boot.ld
+- software/ae350/boot/start.S
+- software/ae350/include/ae350.h
+- software/ae350/lib/crt0.S
+- software/ae350/lib/program.ld
+- software/ae350/programs/ddr3check/main.c
+- software/ae350/programs/memlat/main.c
+- software/rbhost/Makefile
+- software/rbhost/host/bench_qemu.c
+- software/rbhost/host/bench_qemu_start.S
+- software/rbhost/host/crt0_ae350.S
+- software/rbhost/host/host.ld
+- software/rbhost/host/platform_ae350.c
+- src/ae350/ae350_boot_rom.sv
+- src/ae350/ae350_ddr3_top.sv
+- src/ae350/ae350_exts_regs.sv
+- src/ae350/ae350_ram_bridge.sv
+- src/ae350/ae350_soc.sv
+- src/ae350/ae350_stream_loader.sv
+- src/ae350/async_fifo.sv
+- src/ae350/debug_read_cdc.sv
+- src/boards/console138k_ae350_ddr3.cst
+- src/boards/console138k_ae350_ddr3.sdc
+- src/ddr3/ddr3_ip.tcl
+- src/ddr3/ddr3_memory_interface.ipc
+- src/ddr3/gowin_pll.mod
+- tests/ae350_loader_tb.sv
+- tests/ae350_ram_bridge_tb.sv
+- tests/run.sh
+- tools/ae350_run.py
+- tools/gowin_timing_summary.py
+- tools/rbhost_bench.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
+
+## 23 COMMIT Unreleased 2026-09-30T16:23:21-07:00
+
+#### Coming From:
+
+Unreleased 26bba68
+
+#### Purpose:
+
+Complete the paused step-3 AE350+DDR3 cycle by diagnosing the loader hang, correcting the run harness, and recording the codec and memory benchmark results.
+
+#### Outcome:
+
+The paused cycle was resumed and finished. The loader hang was diagnosed as a CPU-side wedge rather than a RAM-bridge fault: while wedged the loader stays in run, the bridge is idle with HTRANS IDLE and nothing pending, and the CPU issues no bus traffic and does not trap. The wedge is deterministic per binary but layout- and timing-dependent, a Heisenbug demonstrated by `dstep`, the instrumented `ddr3check`, passing the full early-check and 64 MiB pattern suite while the original `ddr3check` hangs at the pattern start; it also hits `vorbis-q6` inside `get_metadata` before its banner, and every wedging run records four to eight bridge ERROR responses from one or two out-of-range line accesses through address zero, while an uncached out-of-range load traps as a load access fault. `tools/ae350_run.py` now detects completion with the completed-runs counter instead of polling the transient returned state, which always timed out and false-failed, and `tools/rbhost_bench.py` restarts before each codec and survives a wedged image. Running `tools/rbhost_bench.py run` against the deployed build from the resumed cycle wrote `build/rbbench/results.json`: ten of eleven codecs decode bit-identically to QEMU with loads in or near the cache model's DDR3 range, `vorbis-q6` is blocked by the wedge, `memlat`'s measurements were captured (L16K 3.1, L64K 357.1 tenths of a cycle) but its report hangs on the same wedge, and `rdinstret` reads five to fourteen percent above QEMU despite identical output, consistent with speculative-instruction counting. The user authorized committing with the wedge documented as likely transient. The core-syntax audit passed: `.ai/core.md` was unchanged and the entry conforms to the template.
+
+#### Next Steps:
+
+Investigate the wedge, first by making the RAM bridge return a fixed known value instead of stale data on an AHB ERROR so the silent hang becomes a visible trap that confirms the mechanism, then locate and fix the out-of-range address-zero access; re-run `vorbis-q6` and `memlat` afterward, and defer a fresh hardware acceptance test until then since the user suspects the wedge is transient.
+
+#### Files Modified:
+
+- tools/ae350_run.py
+- tools/rbhost_bench.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---

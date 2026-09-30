@@ -23,12 +23,17 @@ SECTIONS
 		KEEP(*(SORT(.init_array.*))) KEEP(*(.init_array))
 		PROVIDE_HIDDEN(__init_array_end = .);
 	} :image
-	.bss (NOLOAD) : { *(.sbss .sbss.*) *(.bss .bss.*) *(COMMON) } :image
+	.bss (NOLOAD) : {
+		__bss_start = .;
+		*(.sbss .sbss.*) *(.bss .bss.*) *(COMMON)
+		. = ALIGN(4);
+		__bss_end = .;
+	} :image
 	ASSERT(. <= CODEC_BASE, "host image overlaps the codec buffer")
 
 	. = CODEC_BASE;
 	.codec (NOLOAD) : { __codec_start = .; . += CODEC_SIZE; __codec_end = .; } :image
 
 	. = HEAP_BASE;
-	.heap (NOLOAD) : { __heap_start = .; . = HEAP_END; __heap_end = .; } :image
+	.heap (NOLOAD) : { __heap_start = .; . += HEAP_END - HEAP_BASE; __heap_end = .; } :image
 }

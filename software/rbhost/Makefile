@@ -12,6 +12,10 @@
 #
 #   make                  host (qemu-riscv32 build) and codecs
 #   make BUILD=<dir>      choose the output directory
+#   make bench BENCH_INPUT=<file> BENCH_CODEC=<codec> [BENCH_NAME=<name>]
+#                         rbhost as an AE350 program (software/ae350) with
+#                         one codec and one input file embedded:
+#                         $(BUILD)/bench/<name>.tpi for tools/ae350_run.py
 
 ROOT      := $(abspath ../..)
 .DEFAULT_GOAL := all
@@ -61,6 +65,8 @@ CODECLIB_OBJ := $(call obj,$(CODECLIB_SRC))
 
 HOST_OBJ := $(BUILD)/host/crt0_qemu.o $(BUILD)/host/platform_qemu.o \
             $(BUILD)/host/rbhost.o $(BUILD)/host/codec_loader.o
+AE350_OBJ := $(BUILD)/host/crt0_ae350.o $(BUILD)/host/platform_ae350.o \
+             $(BUILD)/host/rbhost.o $(BUILD)/host/codec_loader.o
 
 # Codec support libraries: name, flags appended (Rockbox's -O level last, as
 # in codecs.make and each library's .make fragment), flags prepended.
@@ -161,11 +167,66 @@ $(BUILD)/rb/%.o: $(RB)/%.c
 
 $(BUILD)/host/%.o: host/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -O2 -Wall -Ihost -c $< -o $@
+	$(CC) $(CFLAGS) -O2 -Wall -Ihost -I$(ROOT)/software/ae350/include -c $< -o $@
 
 $(BUILD)/host/%.o: host/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(ARCHFLAGS) -c $< -o $@
+
+# Hardware benchmark image.  The codec and the input are embedded with
+# .incbin; the input keeps its file name, since rbhost probes the format
+# from the extension.
+BENCH_NAME ?= bench
+BENCH_DIR  := $(BUILD)/bench
+BENCH_ELF  := $(BENCH_DIR)/$(BENCH_NAME).elf
+
+bench: $(BENCH_DIR)/$(BENCH_NAME).tpi
+
+$(BENCH_DIR)/$(BENCH_NAME).S: $(BUILD)/codecs/$(BENCH_CODEC).codec $(BENCH_INPUT) FORCE
+	@test -n "$(BENCH_INPUT)" -a -n "$(BENCH_CODEC)" || \
+		{ echo "set BENCH_INPUT and BENCH_CODEC" >&2; exit 1; }
+	@mkdir -p $(dir $@)
+	printf '%s\n' \
+		'	.section .rodata.bench_files, "a"' \
+		'	.balign 8' \
+		'codec_data: .incbin "$(BUILD)/codecs/$(BENCH_CODEC).codec"' \
+		'codec_end:' \
+		'	.balign 8' \
+		'input_data: .incbin "$(abspath $(BENCH_INPUT))"' \
+		'input_end:' \
+		'	.balign 4' \
+		'	.globl bench_files' \
+		'bench_files:' \
+		'	.word codec_name, codec_data, codec_end - codec_data' \
+		'	.word bench_input_name, input_data, input_end - input_data' \
+		'	.word 0, 0, 0' \
+		'codec_name: .asciz "codecs/$(BENCH_CODEC).codec"' \
+		'	.globl bench_input_name' \
+		'bench_input_name: .asciz "$(notdir $(BENCH_INPUT))"' > $@
+
+$(BENCH_ELF): $(AE350_OBJ) $(BENCH_DIR)/$(BENCH_NAME).S $(BUILD)/librbcodec.a \
+		host/host.ld host/memory.ld
+	$(CC) $(ARCHFLAGS) -nostartfiles -static -L$(HERE)/host -T host.ld \
+		-Wl,--gc-sections -Wl,-Map,$(@:.elf=.map) -o $@ $(AE350_OBJ) \
+		$(BENCH_DIR)/$(BENCH_NAME).S $(BUILD)/librbcodec.a -lc -lm -lgcc
+
+$(BENCH_DIR)/$(BENCH_NAME).tpi: $(BENCH_ELF)
+	$(OBJCOPY) -O binary $< $(@:.tpi=.bin)
+	python3 $(ROOT)/tools/ae350_run.py pack $(@:.tpi=.bin) -o $@
+
+# The same program under qemu-riscv32 (host/bench_qemu.c), for reference
+# results.
+bench: $(BENCH_DIR)/$(BENCH_NAME)-qemu.elf
+
+$(BENCH_DIR)/$(BENCH_NAME)-qemu.elf: $(AE350_OBJ) $(BUILD)/host/bench_qemu.o \
+		$(BUILD)/host/bench_qemu_start.o $(BENCH_DIR)/$(BENCH_NAME).S \
+		$(BUILD)/librbcodec.a host/host.ld host/memory.ld
+	$(CC) $(ARCHFLAGS) -nostartfiles -static -L$(HERE)/host -T host.ld \
+		-Wl,-e,_start_qemu -Wl,--gc-sections -o $@ \
+		$(BUILD)/host/bench_qemu_start.o $(BUILD)/host/bench_qemu.o $(AE350_OBJ) \
+		$(BENCH_DIR)/$(BENCH_NAME).S $(BUILD)/librbcodec.a -lc -lm -lgcc
+
+FORCE:
 
 # Decode the FPGA FLAC decoder's regression vectors (tools/
 # generate_flac_test_vectors.py) and require the same PCM it must produce.
@@ -188,4 +249,4 @@ check: all
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all check clean
+.PHONY: all bench check clean FORCE

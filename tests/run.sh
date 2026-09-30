@@ -15,9 +15,11 @@ hdmi_audio_output_dir="$output_dir/hdmi_audio"
 ui_control_output_dir="$output_dir/ui_control"
 ui_time_output_dir="$output_dir/ui_time"
 ui_album_output_dir="$output_dir/ui_album"
+ae350_bridge_output_dir="$output_dir/ae350_bridge"
+ae350_loader_output_dir="$output_dir/ae350_loader"
 mkdir "$iosys_output_dir" "$audio_output_dir" "$audio_policy_output_dir" "$wav_output_dir" "$detector_output_dir" \
     "$flac_output_dir" "$flac_vector_dir" "$hdmi_audio_output_dir" "$ui_control_output_dir" "$ui_time_output_dir" \
-    "$ui_album_output_dir"
+    "$ui_album_output_dir" "$ae350_bridge_output_dir" "$ae350_loader_output_dir"
 trap 'find "$output_dir" -depth -delete' EXIT
 
 verilator --binary --timing -Wno-fatal -DSIM \
@@ -96,3 +98,18 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/audio/flac_frame_ram.sv" \
     "$project_dir/src/audio/pcm_sample_fifo.sv"
 "$wav_output_dir/Vwav_stream_player_tb" +VECTOR_DIR="$flac_vector_dir"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module ae350_ram_bridge_tb --Mdir "$ae350_bridge_output_dir" \
+    "$test_dir/ae350_ram_bridge_tb.sv" \
+    "$project_dir/src/ae350/ae350_ram_bridge.sv"
+"$ae350_bridge_output_dir/Vae350_ram_bridge_tb"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module ae350_loader_tb --Mdir "$ae350_loader_output_dir" \
+    "$test_dir/ae350_loader_tb.sv" \
+    "$project_dir/src/ae350/ae350_stream_loader.sv" \
+    "$project_dir/src/ae350/async_fifo.sv" \
+    "$project_dir/src/ae350/ae350_exts_regs.sv" \
+    "$project_dir/src/ae350/debug_read_cdc.sv"
+"$ae350_loader_output_dir/Vae350_loader_tb"
