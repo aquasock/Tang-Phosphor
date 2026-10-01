@@ -9,6 +9,6 @@
 // (src/ae350/async_fifo.sv, src/ae350/debug_read_cdc.sv).
 
 create_clock -name clk50 -period 20 -waveform {0 10} [get_ports {clk}]
-create_clock -name clk400 -period 2.5 -waveform {0 1.25} [get_nets {memory_clk}]
-create_clock -name ui_clk -period 10 -waveform {0 5} [get_pins {u_ddr3/gw3_top/u_ddr_phy_top/fclkdiv/CLKOUT}]
+create_clock -name clk400 -period 2.5 -waveform {0 1.25} [get_nets {subsystem/memory_clk}]
+create_clock -name ui_clk -period 10 -waveform {0 5} [get_pins {subsystem/u_ddr3/gw3_top/u_ddr_phy_top/fclkdiv/CLKOUT}]
 set_clock_groups -exclusive -group [get_clocks {clk400}] -group [get_clocks {clk50}] -group [get_clocks {ui_clk}]

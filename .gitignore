@@ -6,3 +6,7 @@ impl/
 *.user
 *.tmp
 *.log
+
+# Python bytecode
+__pycache__/
+*.pyc

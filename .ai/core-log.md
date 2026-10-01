@@ -878,3 +878,43 @@ Investigate the wedge, first by making the RAM bridge return a fixed known value
 - User Test: NOT RUN
 
 ---
+
+## 24 COMMIT Unreleased 2026-09-30T17:16:43-07:00
+
+#### Coming From:
+
+Unreleased 8e016af
+
+#### Purpose:
+
+Merge the AE350 + DDR3 subsystem into the FPGA player so a single bitstream carries both the RISC-V CPU and the HDMI/audio/UI path.
+
+#### Outcome:
+
+Extracted the AE350 and DDR3 logic of `ae350_ddr3_top` into a shared `ae350_subsystem` module (a 50 MHz `clk` plus a transport-domain `tclk`), instantiated it from both the standalone image and `tang_phosphor_top`, and added the DDR3 pins and the single `iosys_bl616` transport to the player top. The transport feeds the FPGA player by default; a `cpu_mode` register (player debug `0x00c0`, bit 0) routes the stream to the AE350 program loader and gates the AE350 debug view into a 1 KiB window at `0x4000-0x43ff`. The merged image builds cleanly with Gowin EDA 1.9.11.03 at placement option 4 with `ui_clk` 103.3 MHz, `clk_pixel` 76.5 MHz, `clk50` 238.7 MHz, and `clk400` 2016.1 MHz and zero setup and zero hold violations, producing `tang_phosphor_merged.bin` SHA-256 `f6531a67e12936cdd5dc8471826037974a232eed0238ad224a4ab5e7b531d4a2`; placement options 0-3 route marginally and 5-7 produce no bitstream, so `build-merged.sh` defaults to option 4. All FPGA player Verilator tests pass, and the standalone AE350 image still builds after the refactor. `tools/ae350_run.py` gained `--base` and `--cpu` so the merged image can be driven on hardware. The required core-syntax audit passed with `.ai/core.md` unchanged.
+
+#### Next Steps:
+
+Deploy the merged bitstream to the Tang and verify on hardware that FPGA WAV/FLAC playback is unchanged and that the AE350 boots `ddr3check` with `tools/ae350_run.py run --base 0x4000 --cpu`, then proceed to the RAM-bridge wedge fix and the CPU-to-PCM handoff.
+
+#### Files Modified:
+
+- build-ae350-ddr3.tcl
+- build-merged.tcl
+- scripts/build-merged.sh
+- src/ae350/ae350_ddr3_top.sv
+- src/ae350/ae350_subsystem.sv
+- src/boards/console138k_ae350_ddr3.cst
+- src/boards/console138k_ae350_ddr3.sdc
+- src/boards/console138k_merged.cst
+- src/boards/console138k_merged.sdc
+- src/tang_phosphor_top.sv
+- tools/ae350_run.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

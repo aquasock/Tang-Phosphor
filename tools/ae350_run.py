@@ -74,6 +74,13 @@ BRIDGE_STATE_NAMES = ["hready", "hresp", "c_valid", "c_eval", "c_merge", "rbuf_o
 HTRANS_NAMES = ["IDLE", "BUSY", "NONSEQ", "SEQ"]
 HBURST_NAMES = ["SINGLE", "INCR", "WRAP4", "INCR4", "WRAP8", "INCR8", "WRAP16", "INCR16"]
 
+# Merged image support: the AE350 debug view is gated into a 1 KiB window at
+# 0x4000-0x43ff, and the transport stream/debug is routed to the CPU only
+# while cpu_mode is set (player debug register 0x00c0, bit 0).  --base adds
+# to every AE350 register address; --cpu toggles cpu_mode around run/restart.
+BASE = 0
+CPU_MODE = 0x00c0
+
 
 def pack(payload, load, entry):
     payload += b"\0" * (-len(payload) % 4)
@@ -96,7 +103,7 @@ def peek(port, address, count=1):
     values = []
     while count > 0:
         chunk = min(count, 32)
-        lines = quiet(port, f"peek 0x{address:08x} {chunk}")
+        lines = quiet(port, f"peek 0x{address + BASE:08x} {chunk}")
         values += [int(line.split(":")[1], 16) for line in lines]
         address += 4 * chunk
         count -= chunk
@@ -104,6 +111,10 @@ def peek(port, address, count=1):
 
 
 def poke(port, address, value):
+    quiet(port, f"poke 0x{address + BASE:08x} 0x{value:08x}")
+
+
+def poke_raw(port, address, value):
     quiet(port, f"poke 0x{address:08x} 0x{value:08x}")
 
 
@@ -209,6 +220,8 @@ def restart(port, timeout):
 
 
 def command_run(args, port):
+    if args.cpu:
+        poke_raw(port, CPU_MODE, 1)
     remote = args.remote if "/" in args.remote else f"{REMOTE_DIR}/{args.remote}"
     if args.restart or (peek(port, STATE)[0] & 0xff) != 0x01:
         restart(port, args.timeout)
@@ -228,6 +241,8 @@ def command_run(args, port):
         lambda s: (s >> 16) != before_runs or (s & 0xff) >= 0x81, args.timeout)
     print(f"finished   {time.monotonic() - started:.2f} s after stream start")
     print_status(port)
+    if args.cpu:
+        poke_raw(port, CPU_MODE, 0)
     return 0 if (state >> 16) != before_runs else 1
 
 
@@ -235,6 +250,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", help="serial device; auto-detected when omitted")
+    parser.add_argument("--base", type=lambda v: int(v, 0), default=0,
+                        help="add to every AE350 register address (merged image: 0x4000)")
+    parser.add_argument("--cpu", action="store_true",
+                        help="toggle cpu_mode (player register 0x00c0) around run/restart")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("pack")
     p.add_argument("binary")
@@ -256,6 +275,8 @@ def main():
 
     if args.command == "pack":
         return command_pack(args)
+    global BASE
+    BASE = args.base
     port = tangctl().open_port(args.port or tangctl().find_port())
     try:
         if args.command == "upload":

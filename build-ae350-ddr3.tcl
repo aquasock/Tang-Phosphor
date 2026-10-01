@@ -4,6 +4,7 @@
 set_device -name GW5AST-138C GW5AST-LV138PG484AC1/I0
 
 add_file -type verilog "src/ae350/ae350_ddr3_top.sv"
+add_file -type verilog "src/ae350/ae350_subsystem.sv"
 add_file -type verilog "src/ae350/ae350_soc.sv"
 add_file -type verilog "src/ae350/ae350_pll.v"
 add_file -type verilog "src/ae350/ae350_boot_rom.sv"

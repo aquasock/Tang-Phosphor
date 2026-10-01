@@ -14,7 +14,23 @@ module tang_phosphor_top (
     output       tmds_clk_p,
     output       tmds_clk_n,
     output [2:0] tmds_d_p,
-    output [2:0] tmds_d_n
+    output [2:0] tmds_d_n,
+
+    output logic [14:0] ddr_addr,
+    output logic [2:0]  ddr_bank,
+    output logic        ddr_cs,
+    output logic        ddr_ras,
+    output logic        ddr_cas,
+    output logic        ddr_we,
+    output logic        ddr_ck,
+    output logic        ddr_ck_n,
+    output logic        ddr_cke,
+    output logic        ddr_odt,
+    output logic        ddr_reset_n,
+    output logic [3:0]  ddr_dm,
+    inout  wire  [31:0] ddr_dq,
+    inout  wire  [3:0]  ddr_dqs,
+    inout  wire  [3:0]  ddr_dqs_n
 );
 
 localparam integer LOGIC_FREQ = 74_250_000;
@@ -136,6 +152,8 @@ wire debug_valid;
 wire debug_write;
 wire [31:0] debug_address;
 wire [31:0] debug_wdata;
+wire [31:0] player_debug_rdata;
+wire [31:0] ae350_debug_rdata;
 wire [31:0] debug_rdata;
 wire [31:0] debug_crc_errors;
 wire [31:0] debug_bad_requests;
@@ -288,10 +306,10 @@ iosys_bl616 #(
 
 wav_stream_player audio_player (
     .clk(clk_pixel), .resetn(resetn),
-    .stream_start(stream_start), .stream_end(stream_end),
-    .stream_cancel(stream_cancel), .stream_id(stream_id),
+    .stream_start(player_stream_start), .stream_end(player_stream_end),
+    .stream_cancel(player_stream_cancel), .stream_id(stream_id),
     .stream_data(stream_data),
-    .stream_valid(stream_valid), .stream_ready(stream_ready),
+    .stream_valid(player_stream_valid), .stream_ready(player_stream_ready),
     .sample_tick(sample_tick), .paused(pause_requested),
     .audio_left(player_audio_left),
     .audio_right(player_audio_right), .playback_active(playback_active),
@@ -321,10 +339,10 @@ phosphor_ui_control ui_control (
 
 stream_debug_sink stream_monitor (
     .clk(clk_pixel), .resetn(resetn),
-    .stream_start(stream_start), .stream_end(stream_end),
-    .stream_cancel(stream_cancel), .stream_id(stream_id),
+    .stream_start(player_stream_start), .stream_end(player_stream_end),
+    .stream_cancel(player_stream_cancel), .stream_id(stream_id),
     .stream_offset(stream_offset), .stream_data(stream_data),
-    .stream_valid(stream_valid), .stream_ready(stream_ready),
+    .stream_valid(player_stream_valid), .stream_ready(player_stream_ready),
     .session_count(stream_sessions), .byte_count(stream_bytes),
     .end_count(stream_ends), .cancel_count(stream_cancels),
     .last_offset(stream_last_offset), .stream_crc32(stream_crc32)
@@ -372,7 +390,75 @@ debug_regs debug_registers (
     .boundary_count(boundary_count),
     .boundary_gap_samples(boundary_gap_samples),
     .audible_stream_id(audible_stream_id),
-    .request_rdata(debug_rdata)
+    .request_rdata(player_debug_rdata)
+);
+
+// ---------------------------------------------------------------------------
+// AE350 + DDR3 subsystem and single-transport sharing.
+//
+// The BL616 transport feeds the FPGA player by default (cpu_mode = 0).
+// Writing bit 0 of debug register 0x00c0 selects the CPU: the stream then
+// goes to the AE350 program loader and the AE350 debug view appears at
+// 0x4000-0x43ff (the subsystem's 1 KiB view aliases every 1 KiB; this
+// window gates it away from the player's 0x0000-0x3fff registers).
+// ---------------------------------------------------------------------------
+reg cpu_mode = 1'b0;
+
+wire in_ae350_window = debug_address[15:10] == 6'b01_0000;
+wire cpu_debug_valid = debug_valid && in_ae350_window;
+
+always @(posedge clk_pixel) begin
+    if (!resetn)
+        cpu_mode <= 1'b0;
+    else if (debug_valid && debug_write && debug_address == 32'h0000_00c0)
+        cpu_mode <= debug_wdata[0];
+end
+
+wire player_stream_start  = cpu_mode ? 1'b0 : stream_start;
+wire player_stream_end    = cpu_mode ? 1'b0 : stream_end;
+wire player_stream_cancel = cpu_mode ? 1'b0 : stream_cancel;
+wire player_stream_valid  = cpu_mode ? 1'b0 : stream_valid;
+
+wire cpu_stream_start  = cpu_mode ? stream_start  : 1'b0;
+wire cpu_stream_end    = cpu_mode ? stream_end    : 1'b0;
+wire cpu_stream_cancel = cpu_mode ? stream_cancel : 1'b0;
+wire cpu_stream_valid  = cpu_mode ? stream_valid  : 1'b0;
+
+wire player_stream_ready;
+wire cpu_stream_ready;
+assign stream_ready = cpu_mode ? cpu_stream_ready : player_stream_ready;
+
+assign debug_rdata = in_ae350_window ? ae350_debug_rdata : player_debug_rdata;
+
+ae350_subsystem cpu_subsystem (
+    .clk           (sys_clk),
+    .tclk          (clk_pixel),
+    .ddr_addr      (ddr_addr),
+    .ddr_bank      (ddr_bank),
+    .ddr_cs        (ddr_cs),
+    .ddr_ras       (ddr_ras),
+    .ddr_cas       (ddr_cas),
+    .ddr_we        (ddr_we),
+    .ddr_ck        (ddr_ck),
+    .ddr_ck_n      (ddr_ck_n),
+    .ddr_cke       (ddr_cke),
+    .ddr_odt       (ddr_odt),
+    .ddr_reset_n   (ddr_reset_n),
+    .ddr_dm        (ddr_dm),
+    .ddr_dq        (ddr_dq),
+    .ddr_dqs       (ddr_dqs),
+    .ddr_dqs_n     (ddr_dqs_n),
+    .stream_start  (cpu_stream_start),
+    .stream_end    (cpu_stream_end),
+    .stream_cancel (cpu_stream_cancel),
+    .stream_data   (stream_data),
+    .stream_valid  (cpu_stream_valid),
+    .stream_ready  (cpu_stream_ready),
+    .debug_valid   (cpu_debug_valid),
+    .debug_write   (debug_write),
+    .debug_address (debug_address),
+    .debug_wdata   (debug_wdata),
+    .debug_rdata   (ae350_debug_rdata)
 );
 
 endmodule
