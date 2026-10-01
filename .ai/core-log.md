@@ -1182,3 +1182,33 @@ Pipeline the subframe decoder's predictor_order-to-bit_field path and the iosys_
 - User Test: NOT RUN
 
 ---
+
+## 32 COMMIT Unreleased 2026-10-01T15:09:58-07:00
+
+#### Coming From:
+
+Unreleased 87f4c5d
+
+#### Purpose:
+
+Close out the merged-image timing issue: attempt to make clk_pixel close independently of placement, re-verify every placement seed on the committed netlist, and record the accepted deployable state.
+
+#### Outcome:
+
+Floorplanning was attempted and found not viable through Gowin's scripted primitive-group constraints: a hierarchy wildcard ("video/*") also matches the ELVDS_OBUF hard macro and errors CT1005, whole-block wildcards ("audio_player/*", "tangcore_io/*") exhaust the constraint reader and are killed, and even a 74-register group drove placement to 11 GB and 11 minutes against a 3.1 GB / 2-minute normal build, so the floorplan experiment was reverted with no source change kept. Re-verification of the committed netlist shows the merged image closes timing at placement option 2 (clk_pixel Fmax 77.7 MHz, ui_clk 123.8 MHz, bus_clk 96.2 MHz) and that ui_clk and bus_clk meet on every seed, while the remaining seeds still miss on placement-dependent paths: options 1 and 3 on clk_pixel (subframe and transport) and option 4 on a ui_clk path through the ram_link forward FIFO read side (cmd_en), the only domain where the two structural fixes from entry 31 leave a marginal path. The user closed the issue at this point, accepting placement option 2 as the deployable build. All fourteen Verilator regressions still pass.
+
+#### Next Steps:
+
+If the remaining placement sensitivity is pursued later: register the ram_link forward FIFO's cmd_en/b_issue logic so the block-RAM read output does not feed it combinationally, and/or floorplan the player's clk_pixel blocks with the interactive FloorPlanner rather than scripted GRP_LOC. Before a hardware cycle, requalify the option-2 build with FPGA WAV/FLAC playback, the mp3play.tpi MP3 path, and Tang-Control debug_regs reads.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
