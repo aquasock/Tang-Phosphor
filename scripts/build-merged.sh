@@ -81,7 +81,7 @@ for option in $place_options; do
     rm -rf "$dest"
     mkdir -p "$dest"
     cp "$work/build.log" "$dest/"
-    cp "$work"/impl/pnr/tang_phosphor_merged.{bin,rpt.txt} \
+    cp "$work"/impl/pnr/tang_phosphor_merged.{bin,fs,rpt.txt} \
        "$work"/impl/pnr/tang_phosphor_merged_tr_content.html \
        "$work"/impl/pnr/tang_phosphor_merged.timing_paths "$dest/" 2>/dev/null || true
     if [[ -s "$dest/tang_phosphor_merged.bin" ]]; then

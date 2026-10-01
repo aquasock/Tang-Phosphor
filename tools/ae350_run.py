@@ -40,6 +40,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TANG_CONTROL = Path(os.environ.get("TANG_CONTROL_DIR", ROOT.parent / "Tang-Control"))
 sys.path.insert(0, str(TANG_CONTROL / "scripts"))
+sys.path.insert(0, str(ROOT / "tools"))
+import fpga_uart
 
 IMAGE_MAGIC = 0x31495054
 HEADER_SIZE = 32
@@ -80,6 +82,7 @@ HBURST_NAMES = ["SINGLE", "INCR", "WRAP4", "INCR4", "WRAP8", "INCR8", "WRAP16", 
 # to every AE350 register address; --cpu toggles cpu_mode around run/restart.
 BASE = 0
 CPU_MODE = 0x00c0
+DIRECT = False
 
 
 def pack(payload, load, entry):
@@ -100,6 +103,8 @@ def quiet(port, command, timeout=5):
 
 
 def peek(port, address, count=1):
+    if DIRECT:
+        return [fpga_uart.peek(port, address + BASE + 4 * i)[1] for i in range(count)]
     values = []
     while count > 0:
         chunk = min(count, 32)
@@ -111,10 +116,16 @@ def peek(port, address, count=1):
 
 
 def poke(port, address, value):
+    if DIRECT:
+        fpga_uart.poke(port, address + BASE, value)
+        return
     quiet(port, f"poke 0x{address + BASE:08x} 0x{value:08x}")
 
 
 def poke_raw(port, address, value):
+    if DIRECT:
+        fpga_uart.poke(port, address, value)
+        return
     quiet(port, f"poke 0x{address:08x} 0x{value:08x}")
 
 
@@ -222,18 +233,21 @@ def restart(port, timeout):
 def command_run(args, port):
     if args.cpu:
         poke_raw(port, CPU_MODE, 1)
-    remote = args.remote if "/" in args.remote else f"{REMOTE_DIR}/{args.remote}"
+    remote = args.remote if DIRECT or "/" in args.remote else f"{REMOTE_DIR}/{args.remote}"
     if args.restart or (peek(port, STATE)[0] & 0xff) != 0x01:
         restart(port, args.timeout)
     before = peek(port, STATE)[0]
     before_runs = before >> 16
     started = time.monotonic()
-    for line in quiet(port, f"stream {remote}", timeout=600):
-        match = re.search(r"STREAM bytes=(\d+) ms=(\d+) crc32=([0-9a-f]+)", line)
-        if match:
-            size, ms = int(match.group(1)), int(match.group(2))
-            rate = size / (ms / 1000) / 1024 if ms else 0
-            print(f"streamed   {remote}: {size} bytes in {ms} ms ({rate:.1f} KiB/s)")
+    if DIRECT:
+        print(f"streamed   {remote}: {fpga_uart.stream_file(port, remote)} bytes")
+    else:
+        for line in quiet(port, f"stream {remote}", timeout=600):
+            match = re.search(r"STREAM bytes=(\d+) ms=(\d+) crc32=([0-9a-f]+)", line)
+            if match:
+                size, ms = int(match.group(1)), int(match.group(2))
+                rate = size / (ms / 1000) / 1024 if ms else 0
+                print(f"streamed   {remote}: {size} bytes in {ms} ms ({rate:.1f} KiB/s)")
     # A normal return bumps the completed-runs count (bits 31:16) and the
     # loader falls straight back to WAIT, so 'returned' is too transient to
     # poll.  An error or trap leaves the state byte at 0x81..0x88.
@@ -254,6 +268,8 @@ def main():
                         help="add to every AE350 register address (merged image: 0x4000)")
     parser.add_argument("--cpu", action="store_true",
                         help="toggle cpu_mode (player register 0x00c0) around run/restart")
+    parser.add_argument("--direct", action="store_true",
+                        help="talk straight to the FPGA over the FT2232 UART (single cable)")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("pack")
     p.add_argument("binary")
@@ -275,9 +291,13 @@ def main():
 
     if args.command == "pack":
         return command_pack(args)
-    global BASE
+    global BASE, DIRECT
     BASE = args.base
-    port = tangctl().open_port(args.port or tangctl().find_port())
+    DIRECT = args.direct
+    if DIRECT:
+        port = fpga_uart.open_port(args.port or "/dev/ttyUSB1")
+    else:
+        port = tangctl().open_port(args.port or tangctl().find_port())
     try:
         if args.command == "upload":
             return command_upload(args, port)
