@@ -23,7 +23,7 @@
 #define AE350_MAGIC            0x00u
 #define AE350_ABI              0x04u
 #define AE350_FLAGS            0x08u
-#define AE350_TIME_LOW         0x0cu   /* 100 MHz; reading latches the high word */
+#define AE350_TIME_LOW         0x0cu   /* 75 MHz bus clock; reading latches the high word */
 #define AE350_TIME_HIGH        0x10u
 #define AE350_STATE            0x20u
 #define AE350_IMAGE_BYTES      0x24u
@@ -47,7 +47,7 @@
 #define AE350_LOG_BYTES        512u
 
 #define AE350_REGS_MAGIC       0x54504133u  /* "TPA3" */
-#define AE350_TIME_HZ          100000000u
+#define AE350_TIME_HZ          75000000u
 
 /* Stream entry tags. */
 #define AE350_TAG_DATA         0u

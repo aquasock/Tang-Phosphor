@@ -57,7 +57,8 @@ localparam logic [5:0]
     STATE_FRAME_CRC_CHECK   = 6'd28,
     STATE_FAILED            = 6'd29,
     STATE_FINISHED          = 6'd30,
-    STATE_RATE_DECODE       = 6'd31;
+    STATE_RATE_DECODE       = 6'd31,
+    STATE_NUMBER_APPLY      = 6'd32;
 
 localparam logic [7:0]
     ERROR_PROFILE   = 8'h21,
@@ -103,6 +104,8 @@ logic [36:0] frame_end_position;
 logic [35:0] coded_number;
 logic [35:0] coded_number_minimum;
 logic [2:0] coded_continuations;
+logic        number_valid;      // registered coded-number check result
+logic        frame_position_ok; // registered frame-position check result
 
 logic sf_reset;
 logic sf_start;
@@ -146,7 +149,13 @@ wire padding_bit_demand = state == STATE_PADDING && byte_bits != 0;
 wire consume_bit = byte_bits != 0 &&
     (parser_bit_demand || subframe_bit_demand || padding_bit_demand);
 wire input_transfer = input_valid && input_ready;
-wire sf_bit_valid = state == STATE_SUBFRAME && byte_bits != 0;
+// bit_valid is simply "a bit is buffered": the subframe only asserts
+// bit_ready while the main is in STATE_SUBFRAME (it starts on STATE_SUBFRAME
+// and finishes before the main leaves that state), so gating this on the
+// main state is redundant and put the 6-bit state decode on the subframe's
+// bit-reader path.  Dropping the gate keeps the handshake identical while
+// removing state from the bit_field/bit_accumulator critical path.
+wire sf_bit_valid = byte_bits != 0;
 wire sf_bit_end = end_seen && !input_valid && byte_bits == 0;
 wire sf_sample_transfer = sf_sample_valid && sf_sample_ready;
 wire [36:0] next_frame_position =
@@ -353,6 +362,8 @@ always_ff @(posedge clk) begin
         coded_number <= 0;
         coded_number_minimum <= 0;
         coded_continuations <= 0;
+        number_valid <= 1'b0;
+        frame_position_ok <= 1'b0;
         sample_channel <= 1'b0;
         write_index <= 0;
         write_bank <= 1'b0;
@@ -639,10 +650,15 @@ always_ff @(posedge clk) begin
             end
 
             STATE_NUMBER_CHECK: begin
-                if (coded_number < coded_number_minimum ||
+                number_valid <= !(coded_number < coded_number_minimum ||
                         (!variable_block && coded_number[35:31] != 0) ||
                         (variable_block ? coded_number != frame_position :
-                            coded_number != frame_number))
+                            coded_number != frame_number));
+                state <= STATE_NUMBER_APPLY;
+            end
+
+            STATE_NUMBER_APPLY: begin
+                if (!number_valid)
                     fail(ERROR_HEADER);
                 else if (block_code == 6)
                     read_bits(7'd8, STATE_BLOCK_EXTRA);
@@ -738,15 +754,20 @@ always_ff @(posedge clk) begin
                     fail(ERROR_HEADER);
             end
 
-            STATE_FRAME_CRC_START:
+            STATE_FRAME_CRC_START: begin
+                // Register the frame-position validity check here so the
+                // 36-bit magnitude compare does not sit on the CRC-check
+                // state's path.
+                frame_position_ok <= !(frame_end_position[36] ||
+                        (total_samples != 0 &&
+                            frame_end_position > {1'b0, total_samples}));
                 read_bits(7'd16, STATE_FRAME_CRC_CHECK);
+            end
 
             STATE_FRAME_CRC_CHECK: begin
                 if (frame_crc != 0)
                     fail(ERROR_CRC);
-                else if (frame_end_position[36] ||
-                        (total_samples != 0 &&
-                            frame_end_position > {1'b0, total_samples}))
+                else if (!frame_position_ok)
                     fail(ERROR_HEADER);
                 else begin
                     frame_crc_active <= 1'b0;

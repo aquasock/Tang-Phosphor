@@ -99,16 +99,18 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/audio/pcm_sample_fifo.sv"
 "$wav_output_dir/Vwav_stream_player_tb" +VECTOR_DIR="$flac_vector_dir"
 
-# The bridge with its DDR3 link at the merged image's depth (1), with no
-# transit registers (0), and with a longer link (3).
-for link_stages in 1 0 3; do
+# The bridge with its dual-clock link at two forward-FIFO depths.  Both
+# clocks and both FIFOs (command and response) are exercised, including the
+# reset that clears them.
+for fifo_depth in 3 2; do
     verilator --binary --timing -Wno-fatal \
-        --top-module ae350_ram_bridge_tb -GLINK_STAGES=$link_stages \
-        --Mdir "$ae350_bridge_output_dir/stages$link_stages" \
+        --top-module ae350_ram_bridge_tb -GDEPTH_BITS=$fifo_depth \
+        --Mdir "$ae350_bridge_output_dir/depth$fifo_depth" \
         "$test_dir/ae350_ram_bridge_tb.sv" \
         "$project_dir/src/ae350/ae350_ram_bridge.sv" \
-        "$project_dir/src/ae350/ae350_ram_link.sv"
-    "$ae350_bridge_output_dir/stages$link_stages/Vae350_ram_bridge_tb"
+        "$project_dir/src/ae350/ae350_ram_link.sv" \
+        "$project_dir/src/ae350/async_fifo_rst.sv"
+    "$ae350_bridge_output_dir/depth$fifo_depth/Vae350_ram_bridge_tb"
 done
 
 verilator --binary --timing -Wno-fatal \

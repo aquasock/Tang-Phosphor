@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Randomized check of ae350_ram_bridge and ae350_ram_link against a
-// byte-level reference memory.  LINK_STAGES sets the link's transit depth, so
-// run.sh repeats the check with different command and response latencies.
+// Randomized check of ae350_ram_bridge and the dual-clock ae350_ram_link
+// against a byte-level reference memory.  The bridge and its AHB master run
+// on bclk (75 MHz class); the Gowin native-port model runs on the unrelated,
+// faster cclk (100 MHz class), exercising both the slow->fast command FIFO
+// and the fast->slow response FIFO, plus the reset that clears both FIFOs.
 // A pipelined AHB-Lite master issues WRAP4/INCR4/INCR8/undefined-length
 // bursts with BUSY and IDLE cycles, narrow single transfers, and addresses
 // outside DDR3; a Gowin native-port model stalls cmd_ready and wr_data_rdy at
@@ -11,16 +13,20 @@
 `timescale 1ns/1ps
 
 module ae350_ram_bridge_tb #(
-    parameter int LINK_STAGES = 1
+    parameter int DEPTH_BITS = 3
 );
 
     localparam int LINES = 8;
     localparam int SLOTS = 60000;
     localparam logic [31:0] BASE = 32'h4123_4000;
 
-    logic clk = 1'b0;
+    // 75 MHz class bus clock and 100 MHz class controller clock, unrelated.
+    logic bclk = 1'b0;
+    logic cclk = 1'b0;
+    always #7 bclk = !bclk;   // 14 ns, ~71.4 MHz
+    always #5 cclk = !cclk;   // 10 ns, 100 MHz
+
     logic rst = 1'b1;
-    always #5 clk = !clk;
 
     logic [31:0]  haddr;
     logic [1:0]   htrans;
@@ -56,12 +62,14 @@ module ae350_ram_bridge_tb #(
     logic [31:0]  mem_cmd_mask;
     logic         mem_rsp_valid;
     logic [255:0] mem_rsp_data;
+    logic         rsp_ready;
 
-    ae350_ram_link #(.STAGES(LINK_STAGES)) link (
-        .clk(clk), .rst(rst),
+    ae350_ram_link #(.DEPTH_BITS(DEPTH_BITS)) link (
+        .bclk(bclk), .rst(rst), .cclk(cclk),
         .cmd_valid(mem_cmd_valid), .cmd_write(mem_cmd_write), .cmd_line(mem_cmd_line),
         .cmd_data(mem_cmd_data), .cmd_mask(mem_cmd_mask), .cmd_ready(mem_cmd_ready),
         .idle(mem_idle), .rsp_valid(mem_rsp_valid), .rsp_data(mem_rsp_data),
+        .rsp_ready(rsp_ready),
         .ctrl_cmd_ready(cmd_ready), .ctrl_cmd(cmd), .ctrl_cmd_en(cmd_en),
         .ctrl_addr(addr), .ctrl_wr_data_rdy(wr_data_rdy),
         .ctrl_wr_data(wr_data), .ctrl_wr_data_en(wr_data_en),
@@ -70,7 +78,7 @@ module ae350_ram_bridge_tb #(
     );
 
     ae350_ram_bridge dut (
-        .clk(clk), .rst(rst),
+        .clk(bclk), .rst(rst),
         .haddr(haddr), .htrans(htrans), .hwrite(hwrite), .hsize(hsize),
         .hburst(hburst), .hwdata(hwdata), .hrdata(hrdata), .hready(hready),
         .hresp(hresp),
@@ -78,7 +86,7 @@ module ae350_ram_bridge_tb #(
         .mem_cmd_line(mem_cmd_line), .mem_cmd_data(mem_cmd_data),
         .mem_cmd_mask(mem_cmd_mask), .mem_cmd_ready(mem_cmd_ready),
         .mem_idle(mem_idle), .mem_rsp_valid(mem_rsp_valid),
-        .mem_rsp_data(mem_rsp_data),
+        .mem_rsp_data(mem_rsp_data), .rsp_ready(rsp_ready),
         .reads(reads), .writes(writes), .latency_sum(latency_sum),
         .latency_max(latency_max), .buffer_hits(buffer_hits), .errors(errors),
         .trace_addr(trace_addr), .trace_info(trace_info), .trace_status(trace_status),
@@ -92,7 +100,7 @@ module ae350_ram_bridge_tb #(
     endfunction
 
     // ------------------------------------------------------------------
-    // Native-port model: memory indexed by 256-bit word.
+    // Native-port model (cclk domain): memory indexed by 256-bit word.
     // ------------------------------------------------------------------
     logic [255:0] ddr [logic [24:0]];
     logic [255:0] rq_data [$];
@@ -108,7 +116,7 @@ module ae350_ram_bridge_tb #(
         return w;
     endfunction
 
-    always_ff @(posedge clk) begin
+    always_ff @(posedge cclk) begin
         cycle <= cycle + 1;
         cmd_ready   <= ($urandom % 100) < 75;
         wr_data_rdy <= ($urandom % 100) < 80;
@@ -144,7 +152,7 @@ module ae350_ram_bridge_tb #(
     end
 
     // ------------------------------------------------------------------
-    // Reference memory and AHB master.
+    // Reference memory and AHB master (bclk domain).
     // ------------------------------------------------------------------
     logic [7:0] ref_mem [logic [31:0]];
 
@@ -244,7 +252,7 @@ module ae350_ram_bridge_tb #(
         return a[31:30] != 2'b01;
     endfunction
 
-    always_ff @(posedge clk) begin
+    always_ff @(posedge bclk) begin
         if (!rst && !done && hready) begin
             if (d_valid) begin
                 if (outside(d_slot.addr)) begin
@@ -290,18 +298,18 @@ module ae350_ram_bridge_tb #(
     initial begin
         a_slot = make(2'b00, 32'h0, 1'b0, 3'd0, 3'b000);
         generate_slots();
-        repeat (4) @(posedge clk);
+        repeat (8) @(posedge bclk);
         rst <= 1'b0;
         wait (done);
-        repeat (8) @(posedge clk);
-        // Posted writes may still be crossing the link; give their credits a
-        // bounded time to come home.
-        for (int i = 0; i < 200 && !mem_idle; i++)
-            @(posedge clk);
-        $display("ae350_ram_bridge_tb (link stages %0d): %0d transfers, %0d errors, %0d native reads, %0d writes, %0d buffer hits, latency max %0d",
-                 LINK_STAGES, completed, error_count, reads, writes, buffer_hits, latency_max);
+        repeat (8) @(posedge bclk);
+        // Posted writes may still be crossing the FIFOs; give them a bounded
+        // time to drain through the controller and back.
+        for (int i = 0; i < 800 && !mem_idle; i++)
+            @(posedge bclk);
+        $display("ae350_ram_bridge_tb (fifo depth %0d): %0d transfers, %0d errors, %0d native reads, %0d writes, %0d buffer hits, latency max %0d",
+                 1 << DEPTH_BITS, completed, error_count, reads, writes, buffer_hits, latency_max);
         if (!mem_idle) begin
-            $display("FAIL: link credits not all returned at the end");
+            $display("FAIL: link did not drain to idle at the end");
             failures++;
         end
         if (error_count != 0 && (first_error_addr[31:30] == 2'b01 || !trace_status[7])) begin

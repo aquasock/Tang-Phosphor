@@ -9,8 +9,9 @@
 //   0x000 R   magic "TPA3" (0x54504133)
 //   0x004 R   register ABI version
 //   0x008 R   flags: bit 0 stream loader overflow (sticky)
-//   0x00c R   100 MHz time, low word; a CPU read latches the high word
-//   0x010 R   100 MHz time, high word latched by the low-word read
+//   0x00c R   75 MHz bus-clock time, low word; a CPU read latches the high
+//             word
+//   0x010 R   75 MHz bus-clock time, high word latched by the low-word read
 //   0x020 RW  loader state: bits 7:0 state, bits 31:16 completed runs
 //   0x024 RW  payload bytes of the last image
 //   0x028 RW  CRC-32 of the last image payload
@@ -26,8 +27,8 @@
 //   0x098 W   play stream: one byte (bits 7:0)
 //             Writes to 0x090-0x098 wait while the play stream is full.
 //   0x0a0 R   RAM bridge: native reads, writes, read-latency sum and
-//             maximum (100 MHz cycles), line-buffer hits, ERROR responses
-//             (0x0a0-0x0b4)
+//             maximum (75 MHz bus-clock cycles), line-buffer hits, ERROR
+//             responses (0x0a0-0x0b4)
 //   0x100 W   log ring, 128 words (0x100-0x2fc); read by the debug view only
 //
 // Debug view only (RAM-bridge diagnostics, see ae350_ram_bridge.sv):

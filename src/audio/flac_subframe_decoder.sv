@@ -45,12 +45,28 @@ localparam logic [4:0]
     STATE_MAC_FINISH    = 5'd22,
     STATE_RESTORE       = 5'd23,
     STATE_FAILED        = 5'd24,
-    STATE_RESTORE_CHECK = 5'd25;
+    STATE_RESTORE_CHECK = 5'd25,
+    STATE_ADVANCE       = 5'd26,
+    STATE_ADVANCE2      = 5'd27;
 
 localparam logic [1:0]
     KIND_CONSTANT  = 2'd0,
     KIND_VERBATIM  = 2'd1,
     KIND_PREDICTOR = 2'd2;
+
+// Post-emit advance decision, computed in one registered step and applied in
+// the next (see STATE_ADVANCE/STATE_ADVANCE2), so the bit reader's setup does
+// not share one combinational path with the sample-index and residual-advance
+// comparisons.
+localparam logic [2:0]
+    ADVANCE_DONE     = 3'd0,
+    ADVANCE_CONSTANT = 3'd1,
+    ADVANCE_VALUE    = 3'd2,
+    ADVANCE_LPC      = 3'd3,
+    ADVANCE_RICE     = 3'd4,
+    ADVANCE_RESIDUAL = 3'd5;
+
+logic [2:0] advance_kind;
 
 logic [4:0] state;
 logic [4:0] return_state;
@@ -226,34 +242,9 @@ endtask
 
 task automatic next_after_sample;
 begin
-    if (sample_index + 1'b1 == block_size) begin
-        done <= 1'b1;
-        state <= STATE_IDLE;
-    end else if (subframe_kind == KIND_CONSTANT)
-        state <= STATE_EMIT;
-    else if (subframe_kind == KIND_VERBATIM)
-        read_bits({1'b0, coded_bits}, STATE_VALUE);
-    else if (sample_index + 1'b1 < predictor_order_wide)
-        read_bits({1'b0, coded_bits}, STATE_VALUE);
-    else if (sample_index + 1'b1 == predictor_order_wide) begin
-        if (subframe_type[5])
-            read_bits(6'd4, STATE_LPC_PRECISION);
-        else begin
-            if (predictor_order == 0)
-                read_bits(6'd2, STATE_RICE_METHOD);
-            else begin
-                coefficient_index <= 0;
-                state <= STATE_LPC_COEFF;
-            end
-        end
-    end else if (residual_left == 1) begin
-        partition_index <= partition_index + 1'b1;
-        residual_left <= partition_size;
-        read_bits(rice_method ? 6'd5 : 6'd4, STATE_RICE_PARAM);
-    end else begin
-        residual_left <= residual_left - 1'b1;
-        state <= STATE_RESIDUAL;
-    end
+    // Retired: the advance is now split across STATE_ADVANCE and
+    // STATE_ADVANCE2 so its comparisons and the bit reader's setup land in
+    // separate register stages.
 end
 endtask
 
@@ -296,6 +287,7 @@ always_ff @(posedge clk) begin
         shifted_prediction_reg <= 0;
         done <= 1'b0;
         error <= 1'b0;
+        advance_kind <= ADVANCE_DONE;
         for (integer i = 0; i < 12; i = i + 1)
             coefficients[i] <= 0;
         for (integer i = 0; i < 16; i = i + 1)
@@ -393,7 +385,7 @@ always_ff @(posedge clk) begin
                     history[history_pointer] <= reconstructed_sample[16:0];
                     history_pointer <= history_pointer + 1'b1;
                     sample_index <= sample_index + 1'b1;
-                    next_after_sample();
+                    state <= STATE_ADVANCE;
                 end
             end
 
@@ -561,6 +553,55 @@ always_ff @(posedge clk) begin
                 restored_sample <= restored_wide_q[16:0];
                 restored_sample_fits <= restored_fits;
                 state <= STATE_EMIT;
+            end
+
+            // Two-stage post-emit advance.  sample_index is already the new
+            // index here; the first stage only decides and updates the
+            // residual position, and the second stage sets the bit reader or
+            // next state from the registered decision.
+            STATE_ADVANCE: begin
+                if (sample_index == block_size)
+                    advance_kind <= ADVANCE_DONE;
+                else if (subframe_kind == KIND_CONSTANT)
+                    advance_kind <= ADVANCE_CONSTANT;
+                else if (subframe_kind == KIND_VERBATIM)
+                    advance_kind <= ADVANCE_VALUE;
+                else if (sample_index < predictor_order_wide)
+                    advance_kind <= ADVANCE_VALUE;
+                else if (sample_index == predictor_order_wide)
+                    advance_kind <= ADVANCE_LPC;
+                else if (residual_left == 1) begin
+                    partition_index <= partition_index + 1'b1;
+                    residual_left <= partition_size;
+                    advance_kind <= ADVANCE_RICE;
+                end else begin
+                    residual_left <= residual_left - 1'b1;
+                    advance_kind <= ADVANCE_RESIDUAL;
+                end
+                state <= STATE_ADVANCE2;
+            end
+
+            STATE_ADVANCE2: begin
+                case (advance_kind)
+                    ADVANCE_DONE: begin
+                        done <= 1'b1;
+                        state <= STATE_IDLE;
+                    end
+                    ADVANCE_CONSTANT: state <= STATE_EMIT;
+                    ADVANCE_VALUE:    read_bits({1'b0, coded_bits}, STATE_VALUE);
+                    ADVANCE_LPC: begin
+                        if (subframe_type[5])
+                            read_bits(6'd4, STATE_LPC_PRECISION);
+                        else if (predictor_order == 0)
+                            read_bits(6'd2, STATE_RICE_METHOD);
+                        else begin
+                            coefficient_index <= 0;
+                            state <= STATE_LPC_COEFF;
+                        end
+                    end
+                    ADVANCE_RICE:     read_bits(rice_method ? 6'd5 : 6'd4, STATE_RICE_PARAM);
+                    default:          state <= STATE_RESIDUAL;   // ADVANCE_RESIDUAL
+                endcase
             end
 
             STATE_FAILED: ;

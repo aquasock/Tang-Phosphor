@@ -12,8 +12,11 @@
 //              reference, and the diagnostic status counters.
 //   tclk       transport domain: the stream ingress and the Tang-Control
 //              debug view (stream counters, flags, register readback).
-//   ui_clk     100 MHz user clock of the Gowin DDR3 controller; it also
-//              clocks every AE350 bus.  Held in reset until calibration.
+//   ui_clk     100 MHz user clock of the Gowin DDR3 controller; only the
+//              controller's native port and the far side of the RAM link
+//              run here.  Held in reset until calibration.
+//   bus_clk    75 MHz AE350 bus clock from PLL_R[0] CLKOUT0; it clocks the
+//              AE350 AHB buses, the RAM bridge, and the register block.
 //   core_clk   750 MHz A25 core clock from PLL_R[0] CLKOUT1.
 //
 // The DDR3 controller, its 400 MHz PLL, and the x32 pin mapping follow
@@ -189,28 +192,23 @@ module ae350_subsystem (
         .IO_ddr_dqs_n        (ddr_dqs_n)
     );
 
-    // ui_clk reset: asserted while the controller is in reset or not yet
-    // calibrated, released synchronously.
-    logic [1:0] ui_rst_sync /* synthesis syn_srlstyle = "registers" */ = 2'b11;
-    wire        ui_rst = ui_rst_sync[1];
-
-    always_ff @(posedge ui_clk or posedge ddr_rst) begin
-        if (ddr_rst)
-            ui_rst_sync <= 2'b11;
-        else
-            ui_rst_sync <= {ui_rst_sync[0], !calib_done};
-    end
-
     // ------------------------------------------------------------------
-    // AE350 core clock and reset.
+    // AE350 core clock, bus clock, and reset.
+    //
+    // The A25 runs on core_clk (750 MHz from PLL_R[0] CLKOUT1); every AE350
+    // fabric bus runs on bus_clk (75 MHz from the same PLL's CLKOUT0).  The
+    // slower bus clock gives the macro's AHB output-to-input round trip
+    // (about 4 ns output plus 5 ns setup) enough of the 13.3 ns period for
+    // the bridge and register handshakes that failed at 100 MHz.
     // ------------------------------------------------------------------
     logic core_clk;
+    logic bus_clk;
     logic ae350_pll_lock;
 
     ae350_pll cpu_pll (
         .lock    (ae350_pll_lock),
         .cpu_clk (core_clk),
-        .bus_clk (),
+        .bus_clk (bus_clk),
         .clkin   (clk)
     );
 
@@ -220,15 +218,29 @@ module ae350_subsystem (
     logic [31:0] restarts;
     wire         restart = restart_count != 0;
 
-    logic [1:0] ae350_lock_ui /* synthesis syn_srlstyle = "registers" */;
-    logic [1:0] restart_ui    /* synthesis syn_srlstyle = "registers" */;
+    // The debug write that requests a restart is decoded into a register so
+    // the transport's debug address does not share a combinational path with
+    // the 16-bit restart counter on tclk.
+    logic restart_req;
+    always_ff @(posedge tclk)
+        restart_req <= debug_valid && debug_write &&
+                       debug_address[9:0] == 10'h3f0 && debug_wdata[0];
+
+    // The bus domain comes out of reset only once the AE350 PLL is locked
+    // and the DDR3 controller has finished calibration.  calib_done lives in
+    // the controller's user-clock domain, so it is synchronized into bus_clk
+    // with two stages; it is a slow level, not a pulse.
+    logic [1:0] calib_done_bus /* synthesis syn_srlstyle = "registers" */;
+    logic [1:0] ae350_lock_bus /* synthesis syn_srlstyle = "registers" */;
+    logic [1:0] restart_bus    /* synthesis syn_srlstyle = "registers" */;
     logic [7:0] cpu_reset_count = 8'hff;
     logic       cpu_resetn = 1'b0;
 
-    always_ff @(posedge ui_clk) begin
-        ae350_lock_ui <= {ae350_lock_ui[0], ae350_pll_lock};
-        restart_ui    <= {restart_ui[0], restart};
-        if (ui_rst || !ae350_lock_ui[1] || restart_ui[1]) begin
+    always_ff @(posedge bus_clk) begin
+        calib_done_bus <= {calib_done_bus[0], calib_done};
+        ae350_lock_bus <= {ae350_lock_bus[0], ae350_pll_lock};
+        restart_bus    <= {restart_bus[0], restart};
+        if (!calib_done_bus[1] || !ae350_lock_bus[1] || restart_bus[1]) begin
             cpu_reset_count <= 8'hff;
             cpu_resetn      <= 1'b0;
         end else if (cpu_reset_count != 0) begin
@@ -257,7 +269,7 @@ module ae350_subsystem (
     logic [63:0] ram_hwdata, ram_hrdata;
 
     ae350_soc soc (
-        .bus_clk     (ui_clk),
+        .bus_clk     (bus_clk),
         .core_clk    (core_clk),
         .resetn      (cpu_resetn),
         .rom_haddr   (rom_haddr),
@@ -284,7 +296,7 @@ module ae350_subsystem (
     );
 
     ae350_boot_rom boot_rom (
-        .clk    (ui_clk),
+        .clk    (bus_clk),
         .rst    (!cpu_resetn),
         .haddr  (rom_haddr),
         .htrans (rom_htrans),
@@ -308,12 +320,14 @@ module ae350_subsystem (
     logic [31:0]  mem_cmd_mask;
     logic         mem_rsp_valid;
     logic [255:0] mem_rsp_data;
+    logic         ram_rsp_ready;
 
     ae350_ram_link #(
-        .STAGES (1)
+        .DEPTH_BITS (3)
     ) ram_link (
-        .clk                (ui_clk),
+        .bclk               (bus_clk),
         .rst                (!cpu_resetn),
+        .cclk               (ui_clk),
         .cmd_valid          (mem_cmd_valid),
         .cmd_write          (mem_cmd_write),
         .cmd_line           (mem_cmd_line),
@@ -323,6 +337,7 @@ module ae350_subsystem (
         .idle               (mem_idle),
         .rsp_valid          (mem_rsp_valid),
         .rsp_data           (mem_rsp_data),
+        .rsp_ready          (ram_rsp_ready),
         .ctrl_cmd_ready     (cmd_ready),
         .ctrl_cmd           (cmd),
         .ctrl_cmd_en        (cmd_en),
@@ -339,7 +354,7 @@ module ae350_subsystem (
     // The bridge, the link, and the register block restart with the CPU, so
     // their counters and the log cover one boot.
     ae350_ram_bridge ram_bridge (
-        .clk                (ui_clk),
+        .clk                (bus_clk),
         .rst                (!cpu_resetn),
         .haddr              (ram_haddr),
         .htrans             (ram_htrans),
@@ -359,6 +374,7 @@ module ae350_subsystem (
         .mem_idle           (mem_idle),
         .mem_rsp_valid      (mem_rsp_valid),
         .mem_rsp_data       (mem_rsp_data),
+        .rsp_ready          (ram_rsp_ready),
         .reads              (bridge_reads),
         .writes             (bridge_writes),
         .latency_sum        (bridge_latency_sum),
@@ -401,16 +417,16 @@ module ae350_subsystem (
         .ends        (stream_ends),
         .cancels     (stream_cancels),
         .overflow    (stream_overflow),
-        .cclk        (ui_clk),
+        .cclk        (bus_clk),
         .entry_valid (entry_valid),
         .entry_tag   (entry_tag),
         .entry_data  (entry_data),
         .entry_pop   (entry_pop)
     );
 
-    logic [1:0] stream_overflow_ui /* synthesis syn_srlstyle = "registers" */;
-    always_ff @(posedge ui_clk)
-        stream_overflow_ui <= {stream_overflow_ui[0], stream_overflow};
+    logic [1:0] stream_overflow_bus /* synthesis syn_srlstyle = "registers" */;
+    always_ff @(posedge bus_clk)
+        stream_overflow_bus <= {stream_overflow_bus[0], stream_overflow};
 
     logic [7:0]  regs_dbg_addr;
     logic [31:0] regs_dbg_rdata;
@@ -420,7 +436,7 @@ module ae350_subsystem (
     logic [31:0] play_w_data;
 
     ae350_exts_regs regs (
-        .clk                (ui_clk),
+        .clk                (bus_clk),
         .rst                (!cpu_resetn),
         .haddr              (exts_haddr),
         .hsel               (exts_hsel),
@@ -434,7 +450,7 @@ module ae350_subsystem (
         .entry_tag          (entry_tag),
         .entry_data         (entry_data),
         .entry_pop          (entry_pop),
-        .stream_overflow    (stream_overflow_ui[1]),
+        .stream_overflow    (stream_overflow_bus[1]),
         .play_valid         (play_w_valid),
         .play_kind          (play_w_kind),
         .play_count         (play_w_count),
@@ -458,7 +474,7 @@ module ae350_subsystem (
     // ------------------------------------------------------------------
     // Transport-domain status and debug view.
     //
-    // The register readback crosses ui_clk -> tclk through debug_read_cdc.
+    // The register readback crosses bus_clk -> tclk through debug_read_cdc.
     // The single-bit status flags cross into tclk with two-stage
     // synchronizers; the diagnostic counters stay in the 50 MHz clk domain
     // so their rate is identical in the standalone and merged images, and
@@ -479,7 +495,7 @@ module ae350_subsystem (
         .dclk   (tclk),
         .daddr  (read_word),
         .drdata (regs_rdata),
-        .tclk   (ui_clk),
+        .tclk   (bus_clk),
         .taddr  (regs_dbg_addr),
         .trdata (regs_dbg_rdata)
     );
@@ -522,7 +538,7 @@ module ae350_subsystem (
 
         if (restart_count != 0)
             restart_count <= restart_count - 16'd1;
-        if (debug_valid && debug_write && debug_address[9:0] == 10'h3f0 && debug_wdata[0]) begin
+        if (restart_req) begin
             restart_count <= '1;
             restarts      <= restarts + 32'd1;
         end
@@ -538,7 +554,7 @@ module ae350_subsystem (
     assign por_sync_tclk = por_sync[1];
 
     ae350_play_stream play_stream (
-        .wclk      (ui_clk),
+        .wclk      (bus_clk),
         .wvalid    (play_w_valid),
         .wkind     (play_w_kind),
         .wcount    (play_w_count),

@@ -13,6 +13,7 @@
 create_clock -name clk50 -period 20 -waveform {0 10} [get_ports {sys_clk}]
 create_clock -name clk400 -period 2.5 -waveform {0 1.25} [get_nets {cpu_subsystem/memory_clk}]
 create_clock -name ui_clk -period 10 -waveform {0 5} [get_pins {cpu_subsystem/u_ddr3/gw3_top/u_ddr_phy_top/fclkdiv/CLKOUT}]
+create_clock -name bus_clk -period 13.333 -waveform {0 6.667} [get_nets {cpu_subsystem/bus_clk}]
 
 # Player PLL-derived clocks.
 create_clock -name clk27 -period 37.037 [get_nets {clk27}]
@@ -20,7 +21,7 @@ create_clock -name clk_pixel -period 13.468 [get_nets {clk_pixel}]
 create_clock -name clk_pixel_x5 -period 2.694 [get_nets {clk_pixel_x5}]
 create_clock -name clk12 -period 83.333 [get_nets {clk12}]
 
-set_clock_groups -exclusive -group [get_clocks {clk400}] -group [get_clocks {ui_clk}] -group [get_clocks {clk50 clk27 clk12}] -group [get_clocks {clk_pixel clk_pixel_x5}]
+set_clock_groups -exclusive -group [get_clocks {clk400}] -group [get_clocks {ui_clk}] -group [get_clocks {bus_clk}] -group [get_clocks {clk50 clk27 clk12}] -group [get_clocks {clk_pixel clk_pixel_x5}]
 
 # The controller USB engines and the video/control logic use independent PLLs.
 # Constrain only the asynchronous inputs to the explicit first synchronizer

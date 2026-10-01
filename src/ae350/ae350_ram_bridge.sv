@@ -66,6 +66,7 @@ module ae350_ram_bridge (
     input  logic         mem_idle,
     input  logic         mem_rsp_valid,
     input  logic [255:0] mem_rsp_data,
+    output logic         rsp_ready,    // bridge accepts a response (rd_wait)
 
     // Diagnostics: native reads and writes, read latency from issue to data
     // in clk cycles (sum, maximum), read beats served from rbuf, and ERROR
@@ -129,6 +130,11 @@ module ae350_ram_bridge (
     logic         rbuf_ok;
     logic         rd_pend;
     logic         rd_wait;
+
+    // The bridge is the only response consumer and always accepts a read
+    // response while rd_wait is set, so rd_wait doubles as the response
+    // FIFO's pop (ae350_ram_link.rsp_ready).
+    assign rsp_ready = rd_wait;
     logic [24:0]  rd_line;
 
     // Write-combining buffer.

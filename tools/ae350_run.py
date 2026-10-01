@@ -59,7 +59,7 @@ STREAM = 0x3C0
 FLAGS = 0x3E0
 RESTART = 0x3F0
 CORE_CLOCK_HZ = 750e6
-BUS_CLOCK_HZ = 100e6
+BUS_CLOCK_HZ = 75e6
 
 STATE_NAMES = {
     0x00: "boot", 0x01: "wait", 0x02: "receive", 0x03: "run", 0x04: "returned",

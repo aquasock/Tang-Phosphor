@@ -54,6 +54,7 @@ add_file -type verilog "src/ae350/ae350_play_stream.sv"
 add_file -type verilog "src/ae350/ae350_exts_regs.sv"
 add_file -type verilog "src/ae350/ae350_stream_loader.sv"
 add_file -type verilog "src/ae350/async_fifo.sv"
+add_file -type verilog "src/ae350/async_fifo_rst.sv"
 add_file -type verilog "src/ae350/debug_read_cdc.sv"
 
 add_file -type verilog "ip/ddr3_memory_interface/ddr3_memory_interface.v"

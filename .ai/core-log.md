@@ -1138,3 +1138,47 @@ Pursue the open-source toolchain adoption: mathieufro's `gw5ast-open-toolchain` 
 - User Test: PASS
 
 ---
+
+## 31 COMMIT Unreleased 2026-10-01T14:10:48-07:00
+
+#### Coming From:
+
+Unreleased 94c0ca2
+
+#### Purpose:
+
+Close the merged image's open setup-timing failures by moving the AE350 buses onto the AE350 PLL's 75 MHz output through a dual-clock RAM link, and pipeline the FLAC decoder so clk_pixel stops depending on placement.
+
+#### Outcome:
+
+The AE350 bus, RAM bridge, register block, boot ROM, and the loader/play-stream/CDC consumers now run on the AE350 PLL's 75 MHz CLKOUT0 instead of the 100 MHz DDR3 user clock, giving the macro's AHB output-to-input round trip enough of the 13.3 ns period for the bridge and register handshakes that missed at 100 MHz; ui_clk and bus_clk now meet timing on every placement tested. ae350_ram_link is now a dual-clock link (bridge at 75 MHz, controller at 100 MHz) built from two reset-capable Gray-pointer FIFOs (async_fifo_rst) with a registered command source, so commands and read responses cross the die without combinational paths and both FIFOs clear on CPU restart; the bridge exposes rsp_ready to pop the response FIFO and the transport's restart-request decode is registered. The bus-clock constraint was added to both SDCs and the fabric time constant moved from 100 MHz to 75 MHz. On the FLAC side the subframe decoder's post-emit advance is split into STATE_ADVANCE/STATE_ADVANCE2, the main decoder's subframe bit-valid no longer re-decodes the main state, the coded-number check is split into STATE_NUMBER_APPLY, and the frame-position validity check is pre-registered in STATE_FRAME_CRC_START; all fourteen Verilator regressions pass, including the bit-exact flac_decoder_tb and wav_stream_player_tb. The merged image now closes timing at placement options 2 and 4 (clk_pixel Fmax 77.7/76.4 MHz, ui_clk 123.8/138.1 MHz, bus_clk 96.2/91.3 MHz), while options 1 and 3 remain marginally open on clk_pixel (place1 -0.887 ns in the subframe decoder's predictor_order-to-bit_field path, place3 -0.089 ns in the iosys_bl616 transport's recv_state-to-stream_response_credit path), so clk_pixel does not yet close independently of placement.
+
+#### Next Steps:
+
+Pipeline the subframe decoder's predictor_order-to-bit_field path and the iosys_bl616 transport path that still miss on options 1 and 3, then rebuild all four placements; once all close with zero hold violations, requalify on hardware with FPGA WAV/FLAC playback, the mp3play.tpi MP3 path, and Tang-Control debug_regs reads.
+
+#### Files Modified:
+
+- build-ae350-ddr3.tcl
+- build-merged.tcl
+- software/ae350/include/ae350.h
+- src/ae350/ae350_exts_regs.sv
+- src/ae350/ae350_ram_bridge.sv
+- src/ae350/ae350_ram_link.sv
+- src/ae350/ae350_subsystem.sv
+- src/ae350/async_fifo_rst.sv
+- src/audio/flac_decoder.sv
+- src/audio/flac_subframe_decoder.sv
+- src/boards/console138k_ae350_ddr3.sdc
+- src/boards/console138k_merged.sdc
+- tests/ae350_ram_bridge_tb.sv
+- tests/run.sh
+- tools/ae350_run.py
+
+#### Status:
+
+- Build: FAIL
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
