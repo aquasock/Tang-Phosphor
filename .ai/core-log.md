@@ -1242,3 +1242,35 @@ None.
 - User Test: PASS
 
 ---
+
+## 34 COMMIT Unreleased 2026-10-01T16:03:42-07:00
+
+#### Coming From:
+
+Unreleased 930ec4a
+
+#### Purpose:
+
+Remove the FPGA-native WAV and FLAC decoders so all decode moves to the AE350, and re-measure the merged-image timing without them.
+
+#### Outcome:
+
+The FPGA player's WAV/FLAC decode path was removed: wav_stream_player is now a port-compatible silence stub (HDMI falls back to the diagnostic tones), the six decoder/detector/FIFO files were dropped from build-merged.tcl, and their three testbenches were dropped from tests/run.sh (the remaining eleven regressions pass). This freed about 6,000 LUTs and 69 BSRAMs (logic 14% to 10%, BSRAM 50% to 30%). Merged timing improved from one passing placement seed to three: options 1, 3, and 4 now meet timing (clk_pixel Fmax 74.6/84.1/75.3 MHz, ui_clk closing everywhere), and option 2 remains marginally open at -0.289 ns on the album-UI text path. A separate experiment pipelining that text path was correct but reshuffled placement and exposed the transport (iosys_bl616) and HDMI TMDS paths across more seeds, so it was reverted. This commits the decoder removal as the starting point for the SD-playback cycle; the raw-PCM sink that ae350_play_stream will feed replaces the stub next.
+
+#### Next Steps:
+
+Build the raw-PCM audio sink (fed by ae350_play_stream) in place of the stub, then implement SD-card playback: BL616 streams an SD file to the AE350, Rockbox decodes it, and the AE350 feeds the player. The album-UI text, transport, and TMDS clk_pixel paths remain marginally open and need their own pipelining for placement-independent closure.
+
+#### Files Modified:
+
+- build-merged.tcl
+- src/audio/wav_stream_player.sv
+- tests/run.sh
+
+#### Status:
+
+- Build: FAIL
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
