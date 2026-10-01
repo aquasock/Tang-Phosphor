@@ -1,190 +1,163 @@
-# Tang-Phosphor
+# Tang-Phosphor on the Tang Console 138K — User Guide
 
-Tang-Phosphor is a hardware audio player and visualizer for the Sipeed Tang
-Console 138K. The initial target is WAV and FLAC playback with FPGA-native
-decoding and visualization. The deployment core still leaves the GW5AST AE350
-CPU unused; a separate proof-of-life image now exercises it ahead of the
-full-speed USB-host integration.
+This is a user-facing guide to developing, flashing, and controlling the
+Tang-Phosphor core on a Sipeed **Tang Console 138K** (Gowin GW5AST-138 FPGA +
+BL616 MCU). It assumes no familiarity with the internals.
 
-## Current milestone
+---
 
-The first bring-up core provides:
+## The two repos, in one line
 
-- Tang Console 138K clock and HDMI pinout
-- 1280x720p60 video over the HDMI connector
-- deterministic native 44.1/48 kHz HDMI audio with distinct 1 kHz left and 2 kHz right test tones
-- streamed 16-bit stereo 44.1/48 kHz PCM WAV parsing and playback with buffered backpressure
-- streamed 16-bit stereo 44.1/48 kHz native FLAC decoding with CRC-gated frame admission
-- content-based WAV/FLAC identification with bounded, byte-exact prefix replay
-- sample-contiguous gapless playlist playback between same-rate WAV/FLAC tracks
-- a native 720p album/playlist screen with per-track album, artist, title, and
-  embedded JPEG cover metadata, a six-track window, exact elapsed/total time,
-  and progress
-- controller playback actions: Start pauses/resumes, Left/Right select the
-  previous/next playlist track, and X shows or hides the native screen
-- a distinctive animated test pattern
-- the standard TangCore BL616 UART interface and OSD
-- a CRC-protected USB-to-FPGA debug register channel
-- a credit-based SD-to-FPGA test stream with negotiated 5 Mbps transport
-- experimental core ID `0x50`
+- **Tang-Control** — the *firmware* (runs on the BL616) and its PC client
+  (`tangctl.py`). It owns the SD card, the USB, the menu, and the two-wire
+  control path.
+- **Tang-Phosphor** — the *FPGA core* (music player + AE350/DDR3) and the
+  tools that talk to the FPGA directly (one-wire path).
 
-The test tones provide a startup diagnostic until the first audio stream begins.
-Stream prefill, completion, cancellation, and errors are silent so the
-diagnostic source cannot leak into file playback. Playlist tracks are gapless:
-once a track's final sample is queued, Tang-Control appends the next track's
-stream behind it, and the 16,384-sample PCM FIFO carries the tail while the
-successor starts decoding. The successor's first sample follows the
-predecessor's last sample on the next sample period, and its rate, length,
-clocks, and display metadata switch at that exact boundary. A successor at a
-different native rate switches the sample cadence, HDMI clock regeneration
-packet, and IEC channel status together at the boundary, so only same-rate
-transitions are sample-contiguous. MP3 and Ogg Vorbis are outside the
-current playback scope; DDR3 and the AE350 are not enabled in the deployment
-core.
+---
 
-The current register map is documented in
-[`docs/debug-registers.md`](docs/debug-registers.md).
-The bounded audio architecture is documented in
-[`docs/audio-pipeline.md`](docs/audio-pipeline.md).
+## The two cables / two modes
 
-Tang-Control's `feature/usb-cdc-file-transfer` branch at `fbbddc6` supplies the
-SD-card file loader for core ID `0x50`. Its Phosphor menu can open standalone
-WAV/FLAC files or VLC-style M3U/M3U8 playlists whose entries remain separate
-SD files; no TAR container is required. TangCore's OSD is intentionally limited
-to choosing audio or returning to the main menu; playback controls live in the
-native Phosphor screen and are suppressed while the OSD is open.
+The board has two independent USB paths to two different chips. Everything
+follows from this.
 
-Tang-Control reads FLAC Vorbis comments and front-cover PICTURE blocks, plus
-standard WAV `LIST/INFO` text. Per-track tags override VLC `#EXTINF`, playlist
-name, and filename fallbacks. JPEG covers are decoded on the BL616 to the same
-92x92 RGB332 representation used by MiSTer-Phosphor and are published through
-an independent double buffer. Audio backpressure remains authoritative while
-the shared UART is interleaved, and no partially uploaded image is exposed.
-Text and artwork travel as CRC-validated 64-word block writes (transport
-capability bit 4), so a cover appears within about a second of a track
-starting instead of waiting for one register write per audio frame. For a
-gapless successor, text and artwork are prepared early in the inactive banks
-and published when the core reports that stream as audible.
+| Mode | Cable(s) | Talks to | What it can do |
+|------|----------|----------|----------------|
+| **One wire** | FT2232/OTG cable only | the **FPGA** (JTAG + UART) | flash a core, `peek`/`poke`/`stream` directly, run programs |
+| **Two wire** | power + CDC cable | the **BL616** (USB CDC) | SD files, firmware update, core loading, relayed control |
 
-`tools/generate_gapless_test.py <dir>` writes a deterministic six-track
-playlist that splits one continuous tone at non-frame-aligned samples across
-FLAC and WAV tracks with covers and large metadata padding. Any seam is audible
-as a click, and debug registers `0x9c`/`0xa0` count the boundaries and any
-silence inserted at them.
+- **One wire** bypasses the BL616 entirely, so it works no matter what the
+  BL616 is running.
+- **Two wire** goes through the BL616, so it **requires our Tang-Control
+  firmware** (the stock nand2mario firmware has none of the tangctl console).
 
-## Build
+---
 
-Gowin EDA 1.9.11.x with support for the GW5AST-138 is required. Builds target
-device revision C (`GW5AST-138C`), the revision of the Tang Console 138K's
-installed FPGA.
+## Quick start
 
-```sh
-GOWIN_VARIANT_CPUS="0 2 8 10" scripts/build-variants.sh
+### 1. Flash a core (one wire)
+
+Plug in **only the FT2232/OTG cable**, then:
+
+```bash
+# deployment core (Phosphor player, no AE350)
+scripts/flash-otg.sh
+
+# merged core (player + AE350 + DDR3, the MP3 build)
+scripts/flash-otg.sh build/merged/place4/tang_phosphor_merged.fs
 ```
 
-Set `GOWIN_SH` to the full path of `gw_sh` if it is not on `PATH`. The helper
-also applies the Linux Qt/FreeType compatibility settings needed by some Gowin
-EDA installations. The release-build helper runs Gowin placement options 0-3
-in parallel, rejects any timing-failing result, and publishes the variant with
-the strongest worst-case setup slack as the deployment artifact. Its comparison
-is retained in `impl/variant-summary.tsv`, with the individual logs and reports
-under `impl/variant-reports/`. `scripts/build.sh` remains available for a quick
-single diagnostic build; `GOWIN_PLACE_OPTION` selects its placement option.
+> **Always flash a `.fs` file, never a `.bin`.** openFPGALoader shifts a `.bin`
+> into SRAM but cannot *start* the FPGA, so the board stays unconfigured (no
+> signal, silent). The `.fs` flash stream starts it correctly.
 
-The TangCore-loadable image is generated at:
+### 2. Talk to the core
 
-```text
-impl/pnr/tang_phosphor_console138k.bin
-```
+```bash
+# one-wire: direct UART (no firmware needed)
+python3 tools/fpga_uart.py peek 0        # expect 0x54504830 ("TPH0")
 
-Copy it to the SD card under `cores/console138k/` (or `cores/`) with a unique
-name such as `tang-phosphor.bin`, then select it from TangCore's **Cores** menu.
-The stock `monitor.bin` does not need to be replaced.
-
-### AE350 proof of life
-
-The opt-in smoke image instantiates the hardened AE350 directly, clocks its A25
-core at 750 MHz with a 75 MHz fabric bus, fetches a six-instruction program at
-the fixed `0x80000000` reset vector, and writes a status bit and then its
-`mcycle` count through the extended AHB interface. The fabric pairs each count
-with a count of the 50 MHz board oscillator so the core frequency can be
-measured on hardware. It is isolated from the deployment build:
-
-```sh
-scripts/build-ae350-smoke.sh
-```
-
-The generated image and timing reports are written under `build/ae350-smoke/`.
-Copy `tang_phosphor_ae350_smoke.bin` to `cores/console138k/` and select it from
-TangCore's **Cores** menu. Its diagnostic tag is `0x0350`; the legacy TangCore
-status command carries only the low byte, so it reports core `0x50`. With the
-Tang-Control USB CDC client connected, the hardware result is checked with:
-
-```sh
-python3 ../Tang-Control/scripts/tangctl.py status
+# two-wire: through the BL616 (needs our firmware + power + CDC cable)
 python3 ../Tang-Control/scripts/tangctl.py peek 0
-python3 tools/ae350_clock_probe.py
 ```
 
-`status` must report active core `80` (`0x50`), and `peek 0` must return
-`0x00000001`. The latter value is produced only after the AE350 executes the
-boot ROM and completes its CPU-to-fabric write; the deployment Phosphor core
-instead returns its `0x54504830` magic at address zero. The clock probe freezes
-count pairs with a debug write to `0x10`, reads them from `0x04` and `0x08`,
-and must report 750 MHz. The A25 runs at the frequency of `PLL_R[0]` `CLKOUT1`
-whatever the netlist connects to `CORE_CLK`, and timing analysis cannot detect
-a mismatch, so repeat this measurement after any AE350 clock change. This
-diagnostic image does not drive HDMI or either USB port. Power-cycle or select
-the deployment core again after testing.
+### 3. Run the MP3 demo (merged core, one wire)
 
-### Rockbox codecs on the AE350
-
-`software/rbhost` runs Rockbox's codecs on the AE350's RV32 A25 through
-Rockbox's own codec API (`codec_api` version 50). Rockbox is pinned as the
-`third_party/rockbox` submodule and used unmodified. Its codecs, metadata
-parsers, and DSP are compiled for `rv32imafdc`/`ilp32d` with the
-standalone-codec configuration that Rockbox's `warble` test program uses; the
-headers in `software/rbhost/config` take the place of warble's. Each codec is
-a static RV32 ELF linked at a fixed 1 MiB codec buffer (target ID `0x5450`),
-loaded by the host at run time as Rockbox native players load `.codec`
-files. The current host runs under `qemu-riscv32`; a hardware host follows
-once the AE350 has external memory.
-
-```sh
-git submodule update --init third_party/rockbox
-make -C software/rbhost          # build/rbhost/rbhost-qemu and codecs/*.codec
-make -C software/rbhost check    # FPGA FLAC regression vectors, bit-exact
-qemu-riscv32 build/rbhost/rbhost-qemu build/rbhost/codecs in.flac out.wav
+```bash
+python3 scripts/mp3_single_cable.py --tpi build/rbhost/bench/mp3play.tpi
 ```
 
-`tools/rbhost_profile.py` encodes an excerpt of any audio file in eleven
-formats, requires the RV32 raw codec output to match x86 `warble` (built by
-`tools/build-warble-reference.sh`) and lossless output to match the source,
-and estimates AE350 CPU load with an A25 cache model built by
-`tools/build-qemu-cache-model.sh`. The RISC-V toolchain is the Xuantie
-`riscv64-unknown-elf` GCC used by the BL616 and Tang-PSX builds.
+Or, more generally, run any packaged AE350 program:
 
-#### Playing an MP3 through the AE350
-
-The merged image (`scripts/build-merged.sh`, player plus AE350 and DDR3)
-lets the AE350 feed the FPGA player: in `cpu_mode` the player takes the
-CPU's play stream (`src/ae350/ae350_play_stream.sv`, registers
-`0x090`-`0x098` in `src/ae350/ae350_exts_regs.sv`) instead of the BL616
-transport. A benchmark image built with `BENCH_PLAY=1` decodes its embedded
-file into DDR3 and then plays the resulting WAV through that port:
-
-```sh
-make -C software/rbhost bench BENCH_INPUT=$PWD/song.mp3 BENCH_CODEC=mpa \
-    BENCH_NAME=mp3play BENCH_PLAY=1
-python3 tools/ae350_run.py upload build/rbhost/bench/mp3play.tpi   # at the TangCore menu
-# load tang-phosphor-merged.bin from the Cores menu, then:
-python3 tools/ae350_run.py --base 0x4000 --cpu run mp3play.tpi --timeout 400
+```bash
+python3 tools/ae350_run.py --direct --base 0x4000 --cpu run <program.tpi>
 ```
 
-## Licensing and provenance
+---
 
-Tang-Phosphor is distributed under GPL-3.0. The initial board-support, BL616
-interface, OSD, PLL, and HDMI integration are derived from nand2mario's
-TangCore Monitor Core at commit `e4446093a754205f46e7000e6ef1bf37176bda19`.
-The AE350 primitive wiring is based on BSD-2-Clause LiteX integration work.
-See [THIRD_PARTY.md](THIRD_PARTY.md) for details.
+## Two-wire commands (`tangctl.py`)
+
+All of these need **two-wire** (power + CDC) and **our firmware**. Run from
+the `Tang-Control` repo: `python3 scripts/tangctl.py <command>`.
+
+| Command | What it does |
+|---------|--------------|
+| `ping` | verify the command channel |
+| `status` | board + loader state |
+| `rxstats [--reset]` | FPGA UART RX health counters |
+| `caps` | FPGA transport capabilities *(needs Phosphor core)* |
+| `peek <addr> [n]` | read debug register(s) *(needs Phosphor core)* |
+| `poke <addr> <val>` | write a debug register *(needs Phosphor core)* |
+| `baud <2\|5>` | switch FPGA UART rate *(needs Phosphor core)* |
+| `stream <sd-path>` | stream an SD file to the active core |
+| `bench [--size N]` | throughput benchmark |
+| `put <local> <remote>` | upload a file to the SD card |
+| `get <remote> <local>` | download a file from the SD card |
+| `ls [path]` | list an SD directory |
+| `rm <path>` | remove an SD file/directory |
+| `mkdir <path>` | create an SD directory |
+| `firmware <image>` | install a BL616 firmware image |
+
+There is **no `rename`**; rename = `get` + `put` (new name) + `rm`.
+
+---
+
+## One-wire tools (Tang-Phosphor)
+
+These talk to the FPGA directly and are **firmware-independent**.
+
+| Tool | Purpose |
+|------|---------|
+| `scripts/flash-otg.sh [fs]` | flash via the FT2232 (fast, ~1 min) |
+| `scripts/flash-pico.sh [fs]` | flash via a Pico 2 CMSIS-DAP probe (slow) |
+| `tools/fpga_uart.py` | direct-UART transport (`peek`/`poke`/`stream`) |
+| `tools/ae350_run.py --direct …` | load/run/status/restart AE350 programs |
+| `scripts/mp3_single_cable.py` | one-purpose MP3 player |
+| `scripts/uart_probe.py` | raw UART `listen`/`inject`/`contend` diagnostics |
+
+### Pico 2 JTAG probe
+
+The Pico 2 (`2e8a:000c`, CMSIS-DAP) works but has two limits:
+- JTAG clock must stay **≤ 2 MHz** (4 MHz and up read garbage IDCODEs).
+- Its bulk endpoint is only **64 bytes**, so a full flash takes ~10–20 minutes.
+
+Use `scripts/flash-pico.sh` (or the FT2232 for routine flashing). The Pico's
+real value is **GAO** (Gowin's internal logic analyzer) over the FPGA SOM
+debug connector, not bulk flashing.
+
+---
+
+## Which commands need what
+
+| Command(s) | Cable | Firmware | Phosphor core |
+|------------|-------|----------|---------------|
+| `flash-otg.sh` / `flash-pico.sh` | 1-wire | not needed | not needed |
+| `fpga_uart.py`, `uart_probe.py`, `mp3_single_cable.py` | 1-wire | not needed | yes |
+| `ae350_run.py --direct` | 1-wire | not needed | merged core |
+| `ping`/`status`/`rxstats`/`ls`/`get`/`put`/`rm`/`mkdir`/`firmware`/`stream`/`bench` | 2-wire | our firmware | no |
+| `caps`/`peek`/`poke`/`baud` | 2-wire | our firmware | yes |
+
+---
+
+## Common gotchas
+
+1. **`.bin` vs `.fs`** — always flash `.fs`. A `.bin` loads but never starts
+   the FPGA.
+2. **Two-wire needs our firmware** — the stock nand2mario firmware has no
+   tangctl console. Flash the Tang-Control `feature/usb-cdc-file-transfer`
+   image first.
+3. **`caps`/`peek`/`poke`/`baud` need a Phosphor core loaded** — they speak the
+   extended debug protocol (`0x10`), which only the Phosphor core implements.
+   The stock menu/game cores don't answer it.
+4. **One wire doesn't power the SD/DDR3 rails** — the menu shows no cores and
+   the merged (DDR3) core won't come up on FT2232 power alone; add the power
+   cable for those.
+5. **Stream speed** — two-wire (USB CDC) is ~4× faster than one-wire (2 Mbaud
+   UART) for bulk data.
+
+---
+
+## Repos
+
+- Core + one-wire tools: **this repo** (`Tang-Phosphor`)
+- Firmware + two-wire client: **Tang-Control** (sibling, `feature/usb-cdc-file-transfer`)

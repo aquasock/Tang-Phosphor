@@ -11,7 +11,9 @@ byte-for-byte.
 This is the shared transport used by scripts/mp3_single_cable.py and
 tools/ae350_run.py --direct.
 """
+import argparse
 import struct
+import sys
 import time
 
 import serial
@@ -175,3 +177,33 @@ def stream_file(port, path, progress=None):
     _stream_frame(port, STREAM_END, stream_id, offset, b"")
     _stream_ack(port, stream_id)
     return len(data)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Direct FPGA control over the FT2232 UART (one wire).")
+    ap.add_argument("--port", default="/dev/ttyUSB1")
+    ap.add_argument("--baud", type=int, default=2_000_000)
+    ap.add_argument("cmd", choices=["peek", "poke", "dump"])
+    ap.add_argument("args", nargs="*")
+    args = ap.parse_args()
+
+    port = open_port(args.port, args.baud)
+
+    if args.cmd == "peek":
+        addr = int(args.args[0], 0)
+        status, value = peek(port, addr)
+        print(f"0x{addr:08x}: 0x{value:08x} (status {status})")
+    elif args.cmd == "poke":
+        addr, value = int(args.args[0], 0), int(args.args[1], 0)
+        status = poke(port, addr, value)
+        print(f"poked 0x{addr:08x} = 0x{value:08x} (status {status})")
+    elif args.cmd == "dump":
+        start, count = int(args.args[0], 0), int(args.args[1], 0)
+        for i in range(count):
+            addr = start + 4 * i
+            status, value = peek(port, addr)
+            print(f"0x{addr:08x}: 0x{value:08x}")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
