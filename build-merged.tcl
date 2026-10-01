@@ -49,6 +49,7 @@ add_file -type verilog "src/ae350/ae350_soc.sv"
 add_file -type verilog "src/ae350/ae350_pll.v"
 add_file -type verilog "src/ae350/ae350_boot_rom.sv"
 add_file -type verilog "src/ae350/ae350_ram_bridge.sv"
+add_file -type verilog "src/ae350/ae350_ram_link.sv"
 add_file -type verilog "src/ae350/ae350_exts_regs.sv"
 add_file -type verilog "src/ae350/ae350_stream_loader.sv"
 add_file -type verilog "src/ae350/async_fifo.sv"
@@ -77,5 +78,9 @@ if {[info exists ::env(GOWIN_PLACE_OPTION)]} {
     set place_option $::env(GOWIN_PLACE_OPTION)
 }
 set_option -place_option $place_option
+# GW5A only (SUG100 8.3): let place and route replicate high-fanout drivers.
+# The merged image spreads the player and the AE350 interface across the
+# die, which turns fanout into long routes.
+set_option -replicate_resources 1
 
 run all

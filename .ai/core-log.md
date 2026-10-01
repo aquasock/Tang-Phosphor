@@ -949,3 +949,50 @@ Close timing on the merged image by floorplanning the AE350 fabric interface nea
 - User Test: NOT RUN
 
 ---
+
+## 26 COMMIT Unreleased 2026-09-30T21:22:33-07:00
+
+#### Coming From:
+
+Unreleased 8756ffa
+
+#### Purpose:
+
+Close timing on the merged player + AE350 + DDR3 image by pipelining the marginal paths and constraining placement, then requalify it on hardware.
+
+#### Outcome:
+
+The cycle was stopped by the user before timing closed, and the work is committed as a checkpoint without deployment so the next cycle can pursue audible MP3 playback first. Entry 24's passing merged build had been missing the logic that entry 25 restored, so the complete merged design had never met timing; the hardware fixes are concentrated where the fixed AE350 macro (R0C160), the DDR3 pins (left edge), and the HDMI pads (bottom right) stretch placement across a die that is only 14 percent used. The RTL changes are cycle-equivalent unless noted: `calib_time`/`uptime` synchronizers marked `syn_srlstyle = "registers"` (GowinSynthesis had folded them into SSRAM and merged their address counter with a UART tick counter), registered debug read multiplexers and read address in `ae350_subsystem` and the top level, `ae350_exts_regs` capturing the address phase on its local `hready` with a `syn_keep` `accept` term, a two-stage write commit and a three-stage read (two and three wait states), a locally registered debug address with `debug_read_cdc` at `TARGET_LATENCY` 3, registered full/empty flags in `pcm_sample_fifo`, registered `data_cnt` comparisons in `iosys_bl616`, a registered `wready` in `async_fifo`, `syn_maxfan` on the player reset, and a registered, replicated decoder reset in `wav_stream_player` that masks every decoder and detector output the player consumes and holds `stream_ready` low for its extra cycle. The RAM bridge was split from the DDR3 controller by the new `src/ae350/ae350_ram_link.sv`, which carries line commands and read lines through source, transit, and landing registers only, with a four-entry command FIFO and credit return beside the controller; bridge state bits 13 and 14 now report link ready and link idle. `tests/ae350_loader_tb.sv` had aborted in Verilator 5.032's `VlForkSync::join` and, once running, raced the design at the clock edge, so its fork and its AHB and stream drivers were rewritten to work on falling edges; `tests/ae350_ram_bridge_tb.sv` now covers bridge and link at link depths 0, 1, and 3 and checks credit return. All fourteen regression runs pass, mutations of the register read select, the write decode, the link credits, and the write-data handshake were caught, and the loader bench does not detect a missing `hready` gate on address capture or a short `TARGET_LATENCY` because its master never pipelines and holds addresses stable. One primitive group in `src/boards/console138k_merged.cst` keeps the register-block handshake beside the macro; larger groups made Gowin's constraint reader exhaust memory, which, with the link's chained registers folded into SSRAM, was the cause of the round-6 and round-7 out-of-memory failures, and several later probe readings were contaminated by an orphaned probe process, so only their parse successes are reliable. `build-merged.tcl` enables `-replicate_resources 1`, and both parallel build scripts refuse more than four placement options after five concurrent builds exhausted the 15 GB host and crashed it. In the final round, placement 3 had `ui_clk` worst slack `-0.375` ns on one AE350 RAM-port `hready` endpoint and `clk_pixel` total negative slack `-1.048` ns over 11 endpoints led by the transport receiver-select path at `-0.882` ns; its bitstream, SHA-256 `b93879275b1f8e378dbd67d0748bad9f0d1dba1e427fa2e3d319370e04a72d89`, was not deployed. At the user's direction Vorbis and Opus are on hold. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 26 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Take the fastest route to an audible MP3 from the AE350, as the user directed: add a CPU PCM output port that carries decoded samples from `ui_clk` into the player's PCM path through an async FIFO, adapt the Rockbox host so the existing embedded-input MP3 benchmark image writes its decoded output to that port, and test it on hardware with the user's agreement on which bitstream to use given the open timing margins. Afterwards, resume timing closure, starting with a separate, slower clock for the CPU island behind the async DDR3 link and registered receiver-select and debug-address paths in the transport and player.
+
+#### Files Modified:
+
+- build-ae350-ddr3.tcl
+- build-merged.tcl
+- scripts/build-ae350-ddr3.sh
+- scripts/build-merged.sh
+- src/ae350/ae350_exts_regs.sv
+- src/ae350/ae350_ram_bridge.sv
+- src/ae350/ae350_ram_link.sv
+- src/ae350/ae350_subsystem.sv
+- src/ae350/async_fifo.sv
+- src/audio/pcm_sample_fifo.sv
+- src/audio/wav_stream_player.sv
+- src/boards/console138k_merged.cst
+- src/iosys/iosys_bl616.v
+- src/tang_phosphor_top.sv
+- tests/ae350_loader_tb.sv
+- tests/ae350_ram_bridge_tb.sv
+- tests/run.sh
+- tools/ae350_run.py
+
+#### Status:
+
+- Build: FAIL
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

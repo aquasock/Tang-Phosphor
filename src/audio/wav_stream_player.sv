@@ -56,7 +56,7 @@ localparam logic [FIFO_ADDRESS_WIDTH:0] PREFILL_LEVEL =
     (FIFO_ADDRESS_WIDTH + 1)'(PREFILL_SAMPLES);
 
 logic session_active;
-logic decoder_reset;
+logic decoder_reset /* synthesis syn_maxfan = 32 */ = 1'b1;
 logic [7:0] ingress_data [0:1];
 logic ingress_read_pointer;
 logic ingress_write_pointer;
@@ -126,8 +126,20 @@ logic [15:0] session_stream_id;
 logic [35:0] session_total_samples;
 logic [31:0] session_duration_seconds;
 
-assign decoder_reset = !resetn || stream_start || stream_cancel;
-assign stream_ready = session_active && ingress_count != 2;
+// Registered, with replication: it resets the detector, the ingress buffers,
+// and both decoders.  No input is lost to the cycle of delay, since a START
+// frame carries no data and a cancel has already dropped stream_valid.  For
+// that extra cycle the decoders still present the previous stream's outputs,
+// so every decoder output the player acts on is masked while the registered
+// reset is high (decoders_live).  In the START or CANCEL cycle itself the
+// outputs stay visible, as they were with a combinational reset, so a
+// gapless predecessor keeps its rate and format.
+always_ff @(posedge clk)
+    decoder_reset <= !resetn || stream_start || stream_cancel;
+wire decoders_live = !decoder_reset;
+// No byte is taken while the registered decoder reset is asserted, so none can
+// be consumed by a detector that is about to be cleared.
+assign stream_ready = session_active && ingress_count != 2 && !decoder_reset;
 
 wire ingress_push = stream_valid && stream_ready;
 wire ingress_pop = ingress_count != 0 && detector_ready;
@@ -231,20 +243,20 @@ flac_decoder flac_decoder_instance (
     .format_error(flac_format_error), .error_code(flac_error_code)
 );
 
-assign format_valid = detected_format == 3'd1 ? wav_format_valid :
-    detected_format == 3'd2 ? flac_format_valid : 1'b0;
+assign format_valid = decoders_live && (detected_format == 3'd1 ? wav_format_valid :
+    detected_format == 3'd2 ? flac_format_valid : 1'b0);
 assign sample_rate = detected_format == 3'd1 ? wav_sample_rate :
     detected_format == 3'd2 ? flac_sample_rate : 32'b0;
-assign selected_pcm_valid = detected_format == 3'd1 ? wav_pcm_valid :
-    detected_format == 3'd2 ? flac_pcm_valid : 1'b0;
+assign selected_pcm_valid = decoders_live && (detected_format == 3'd1 ? wav_pcm_valid :
+    detected_format == 3'd2 ? flac_pcm_valid : 1'b0);
 assign selected_pcm_left = detected_format == 3'd1 ? wav_pcm_left : flac_pcm_left;
 assign selected_pcm_right = detected_format == 3'd1 ? wav_pcm_right : flac_pcm_right;
 assign selected_pcm_eof = detected_format == 3'd1 ? wav_pcm_eof : flac_pcm_eof;
-assign selected_format_error = detected_format == 3'd1 ? wav_format_error :
-    detected_format == 3'd2 ? flac_format_error : 1'b0;
+assign selected_format_error = decoders_live && (detected_format == 3'd1 ? wav_format_error :
+    detected_format == 3'd2 ? flac_format_error : 1'b0);
 assign selected_error_code = detected_format == 3'd1 ? wav_error_code : flac_error_code;
-assign selected_metadata_valid = detected_format == 3'd1 ? wav_metadata_valid :
-    detected_format == 3'd2 ? flac_metadata_valid : 1'b0;
+assign selected_metadata_valid = decoders_live && (detected_format == 3'd1 ? wav_metadata_valid :
+    detected_format == 3'd2 ? flac_metadata_valid : 1'b0);
 assign selected_total_samples = detected_format == 3'd1 ?
     {4'b0, wav_total_samples} : flac_total_samples;
 
@@ -423,12 +435,12 @@ always_ff @(posedge clk) begin
         if (stream_end)
             session_active <= 1'b0;
 
-        if (detector_format_error) begin
+        if (decoders_live && detector_format_error) begin
             error_code <= 8'h11; // Unknown or truncated content signature.
             state <= PLAYER_ERROR;
             playback_started <= 1'b0;
             playback_active <= 1'b0;
-        end else if (detector_format_valid &&
+        end else if (decoders_live && detector_format_valid &&
                 detected_format != 3'd1 && detected_format != 3'd2) begin
             error_code <= 8'h10; // Recognized format has no decoder yet.
             state <= PLAYER_ERROR;

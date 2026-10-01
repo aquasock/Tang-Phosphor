@@ -70,7 +70,7 @@ BRIDGE_STATE = 0xB8
 BRIDGE_TRACE = 0x300
 BRIDGE_STATE_NAMES = ["hready", "hresp", "c_valid", "c_eval", "c_merge", "rbuf_ok",
                       "rd_pend", "rd_wait", "wbuf_valid", "wbuf_open", "wr_wait",
-                      "error_first", "rd_done", "cmd_ready", "wr_data_rdy", "hwrite"]
+                      "error_first", "rd_done", "link_ready", "link_idle", "hwrite"]
 HTRANS_NAMES = ["IDLE", "BUSY", "NONSEQ", "SEQ"]
 HBURST_NAMES = ["SINGLE", "INCR", "WRAP4", "INCR4", "WRAP8", "INCR8", "WRAP16", "INCR16"]
 

@@ -177,3 +177,21 @@ INS_LOC "cpu_subsystem/u_ddr_pll/PLL_inst" PLL_L[0];
 INS_LOC "cpu_subsystem/u_ddr3/gw3_top/u_ddr_phy_top/u_dll" DDRDLLM_BL;
 INS_LOC "cpu_subsystem/u_ddr3/gw3_top/u_ddr_phy_top/fclkdiv" LEFTSIDE[4];
 INS_LOC "cpu_subsystem/cpu_pll/PLL_inst" PLL_R[0];
+
+// AE350 EXTS handshake: HREADY leaves the fabric, passes through the AE350
+// macro at R0C160 to HSEL/HTRANS, and returns through the accept term to the
+// pending and HREADY registers within one 100 MHz cycle.  Unconstrained
+// placement put these registers about 50 rows and 75 columns from the macro,
+// so keep the handshake, the captured address-phase attributes, the write
+// capture (HWDATA and its decoded target), and the program result words
+// beside the macro.  Only these
+// named objects: the register decode stays free to sit with its operands
+// (SUG1018 section 2.4.1 primitive group constraints).
+GROUP ae350_exts_handshake = {"cpu_subsystem/regs/hready*" "cpu_subsystem/regs/pending*" "cpu_subsystem/regs/accept*" "cpu_subsystem/regs/a_*" "cpu_subsystem/regs/w_*" "cpu_subsystem/regs/user*"};
+GRP_LOC ae350_exts_handshake R[2:15]C[146:164];
+
+// The RAM bridge is not grouped: ae350_ram_link puts two register stages
+// between it and the DDR3 controller, so placement no longer pulls it away
+// from the macro.  Gowin's constraint reader also exhausts memory when
+// primitive groups grow beyond the handshake group above (more instances,
+// a larger region, or wide data vectors), so keep further groups small.

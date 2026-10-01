@@ -413,6 +413,27 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x10 <extended response>   versioned debug/control response with CRC-16
 // 0x11 <stream ack>          stream status, next offset, and receive credit
 
+// Frame-position comparisons, registered for timing. data_cnt, len_reg,
+// block_payload_end and the stream CRC indices change only on rx_valid
+// cycles, and a UART delivers at most one byte per character time (at least
+// 148 clocks at 5 Mbaud), so each flag already holds its operands' current
+// comparison whenever the next byte arrives.
+reg data_cnt_last;          // data_cnt + 2 == len_reg
+reg data_cnt_before_block;  // data_cnt < block_payload_end
+reg data_cnt_at_block;      // data_cnt == block_payload_end
+reg data_cnt_before_crc;    // data_cnt < stream_crc_high_index
+reg data_cnt_at_crc_high;   // data_cnt == stream_crc_high_index
+reg data_cnt_at_crc_low;    // data_cnt == stream_crc_low_index
+
+always @(posedge clk) begin
+    data_cnt_last <= data_cnt + 16'd2 == len_reg;
+    data_cnt_before_block <= data_cnt < block_payload_end;
+    data_cnt_at_block <= data_cnt == block_payload_end;
+    data_cnt_before_crc <= {1'b0, data_cnt} < stream_crc_high_index;
+    data_cnt_at_crc_high <= {1'b0, data_cnt} == stream_crc_high_index;
+    data_cnt_at_crc_low <= {1'b0, data_cnt} == stream_crc_low_index;
+end
+
 // UART RX: command processing
 always @(posedge clk) begin
     if (!resetn) begin
@@ -550,7 +571,7 @@ always @(posedge clk) begin
                 data_cnt <= data_cnt + 1;
                 // e.g. set_overlay x[7:0], the 1st param byte is the last 
                 //      (data_cnt == 0, len_reg == 2)
-                if (data_cnt + 2 == len_reg)
+                if (data_cnt_last)
                     recv_state <= RECV_IDLE;
                 
                 case (cmd_reg)
@@ -684,7 +705,7 @@ always @(posedge clk) begin
                         endcase
                     end
                     BLOCK_COMMAND: begin
-                        if (data_cnt < block_payload_end)
+                        if (data_cnt_before_block)
                             ext_crc <= crc16_byte(ext_crc, rx_data);
                         case (data_cnt)
                             0: ext_version <= rx_data;
@@ -705,15 +726,15 @@ always @(posedge clk) begin
                         endcase
                         // Data bytes start at payload offset 9; every fourth
                         // byte completes one big-endian word.
-                        if (data_cnt >= 9 && data_cnt < block_payload_end &&
+                        if (data_cnt >= 9 && data_cnt_before_block &&
                             data_cnt < 9 + 4 * BLOCK_MAX_WORDS && data_cnt[1:0] == 2'd0) begin
                             block_buffer_write <= 1;
                             block_buffer_write_address <= 6'((data_cnt - 16'd9) >> 2);
                             block_buffer_write_data <= {data_reg[23:0], rx_data};
                         end
-                        if (data_cnt == block_payload_end)
+                        if (data_cnt_at_block)
                             ext_crc_received[15:8] <= rx_data;
-                        if (data_cnt + 2 == len_reg) begin
+                        if (data_cnt_last) begin
                             response_type <= EXT_COMMAND;
                             response_opcode <= ext_opcode;
                             response_sequence <= ext_sequence;
@@ -749,7 +770,7 @@ always @(posedge clk) begin
                         end
                     end
                     STREAM_COMMAND: begin
-                        if (data_cnt <= 9 || {1'b0, data_cnt} < stream_crc_high_index)
+                        if (data_cnt <= 9 || data_cnt_before_crc)
                             stream_crc_rx <= crc16_byte(stream_crc_rx, rx_data);
 
                         case (data_cnt)
@@ -773,14 +794,14 @@ always @(posedge clk) begin
                                     {stream_length_rx[15:8], rx_data} <= STREAM_CREDIT;
                             end
                             default: begin
-                                if ({1'b0, data_cnt} < stream_crc_high_index &&
+                                if (data_cnt_before_crc &&
                                     data_cnt < 10 + STREAM_CREDIT) begin
                                     stream_buffer_write <= 1;
                                     stream_buffer_write_address <= data_cnt[9:0] - 10'd10;
                                     stream_buffer_write_data <= rx_data;
-                                end else if ({1'b0, data_cnt} == stream_crc_high_index)
+                                end else if (data_cnt_at_crc_high)
                                     stream_crc_received[15:8] <= rx_data;
-                                else if ({1'b0, data_cnt} == stream_crc_low_index) begin
+                                else if (data_cnt_at_crc_low) begin
                                     stream_crc_received[7:0] <= rx_data;
                                     stream_response_flags <= stream_flags_rx;
                                     stream_response_id <= stream_id_rx;

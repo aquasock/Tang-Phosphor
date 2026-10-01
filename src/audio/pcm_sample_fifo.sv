@@ -27,9 +27,30 @@ logic [ADDRESS_WIDTH-1:0] read_pointer;
 wire push = input_valid && input_ready;
 wire pop = output_valid && output_ready;
 
-assign input_ready = level != DEPTH_COUNT;
-assign output_valid = level != 0;
+// The full and empty flags are registered from the next level rather than
+// decoded from the level counter, so the consumer's pop decision reaches the
+// block-RAM read address without the wide level comparison in front of it.
+// They always equal level != DEPTH_COUNT and level != 0.
 assign output_data = memory[read_pointer];
+
+always_ff @(posedge clk) begin
+    if (reset || clear) begin
+        input_ready <= 1'b1;
+        output_valid <= 1'b0;
+    end else begin
+        case ({push, pop})
+            2'b10: begin
+                input_ready <= level != DEPTH_COUNT - 1'b1;
+                output_valid <= 1'b1;
+            end
+            2'b01: begin
+                input_ready <= 1'b1;
+                output_valid <= level != 1;
+            end
+            default: ;
+        endcase
+    end
+end
 
 always_ff @(posedge clk) begin
     if (reset || clear) begin

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Randomized check of ae350_ram_bridge against a byte-level reference memory.
+// Randomized check of ae350_ram_bridge and ae350_ram_link against a
+// byte-level reference memory.  LINK_STAGES sets the link's transit depth, so
+// run.sh repeats the check with different command and response latencies.
 // A pipelined AHB-Lite master issues WRAP4/INCR4/INCR8/undefined-length
 // bursts with BUSY and IDLE cycles, narrow single transfers, and addresses
 // outside DDR3; a Gowin native-port model stalls cmd_ready and wr_data_rdy at
@@ -8,7 +10,9 @@
 // confined to a few lines so reads constantly follow writes to the same line.
 `timescale 1ns/1ps
 
-module ae350_ram_bridge_tb;
+module ae350_ram_bridge_tb #(
+    parameter int LINK_STAGES = 1
+);
 
     localparam int LINES = 8;
     localparam int SLOTS = 60000;
@@ -46,16 +50,35 @@ module ae350_ram_bridge_tb;
     logic [7:0]  trace_status;
     logic [31:0] first_error_addr, bridge_state;
 
+    logic         mem_cmd_valid, mem_cmd_write, mem_cmd_ready, mem_idle;
+    logic [24:0]  mem_cmd_line;
+    logic [255:0] mem_cmd_data;
+    logic [31:0]  mem_cmd_mask;
+    logic         mem_rsp_valid;
+    logic [255:0] mem_rsp_data;
+
+    ae350_ram_link #(.STAGES(LINK_STAGES)) link (
+        .clk(clk), .rst(rst),
+        .cmd_valid(mem_cmd_valid), .cmd_write(mem_cmd_write), .cmd_line(mem_cmd_line),
+        .cmd_data(mem_cmd_data), .cmd_mask(mem_cmd_mask), .cmd_ready(mem_cmd_ready),
+        .idle(mem_idle), .rsp_valid(mem_rsp_valid), .rsp_data(mem_rsp_data),
+        .ctrl_cmd_ready(cmd_ready), .ctrl_cmd(cmd), .ctrl_cmd_en(cmd_en),
+        .ctrl_addr(addr), .ctrl_wr_data_rdy(wr_data_rdy),
+        .ctrl_wr_data(wr_data), .ctrl_wr_data_en(wr_data_en),
+        .ctrl_wr_data_end(wr_data_end), .ctrl_wr_data_mask(wr_data_mask),
+        .ctrl_rd_data(rd_data), .ctrl_rd_data_valid(rd_data_valid)
+    );
+
     ae350_ram_bridge dut (
         .clk(clk), .rst(rst),
         .haddr(haddr), .htrans(htrans), .hwrite(hwrite), .hsize(hsize),
         .hburst(hburst), .hwdata(hwdata), .hrdata(hrdata), .hready(hready),
         .hresp(hresp),
-        .ctrl_cmd_ready(cmd_ready), .ctrl_cmd(cmd), .ctrl_cmd_en(cmd_en),
-        .ctrl_addr(addr), .ctrl_wr_data_rdy(wr_data_rdy),
-        .ctrl_wr_data(wr_data), .ctrl_wr_data_en(wr_data_en),
-        .ctrl_wr_data_end(wr_data_end), .ctrl_wr_data_mask(wr_data_mask),
-        .ctrl_rd_data(rd_data), .ctrl_rd_data_valid(rd_data_valid),
+        .mem_cmd_valid(mem_cmd_valid), .mem_cmd_write(mem_cmd_write),
+        .mem_cmd_line(mem_cmd_line), .mem_cmd_data(mem_cmd_data),
+        .mem_cmd_mask(mem_cmd_mask), .mem_cmd_ready(mem_cmd_ready),
+        .mem_idle(mem_idle), .mem_rsp_valid(mem_rsp_valid),
+        .mem_rsp_data(mem_rsp_data),
         .reads(reads), .writes(writes), .latency_sum(latency_sum),
         .latency_max(latency_max), .buffer_hits(buffer_hits), .errors(errors),
         .trace_addr(trace_addr), .trace_info(trace_info), .trace_status(trace_status),
@@ -271,8 +294,16 @@ module ae350_ram_bridge_tb;
         rst <= 1'b0;
         wait (done);
         repeat (8) @(posedge clk);
-        $display("ae350_ram_bridge_tb: %0d transfers, %0d errors, %0d native reads, %0d writes, %0d buffer hits, latency max %0d",
-                 completed, error_count, reads, writes, buffer_hits, latency_max);
+        // Posted writes may still be crossing the link; give their credits a
+        // bounded time to come home.
+        for (int i = 0; i < 200 && !mem_idle; i++)
+            @(posedge clk);
+        $display("ae350_ram_bridge_tb (link stages %0d): %0d transfers, %0d errors, %0d native reads, %0d writes, %0d buffer hits, latency max %0d",
+                 LINK_STAGES, completed, error_count, reads, writes, buffer_hits, latency_max);
+        if (!mem_idle) begin
+            $display("FAIL: link credits not all returned at the end");
+            failures++;
+        end
         if (error_count != 0 && (first_error_addr[31:30] == 2'b01 || !trace_status[7])) begin
             $display("FAIL: trace did not record the first error (%h, status %h)",
                      first_error_addr, trace_status);

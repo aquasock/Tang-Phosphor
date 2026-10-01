@@ -32,9 +32,18 @@
 //   0x300     trace addresses, 16 words (0x300-0x33c)
 //   0x340     trace transfer attributes, 16 words (0x340-0x37c)
 //
-// The AHB port inserts one wait state per write and two per read, so every
-// path from the AE350 macro ends at a register and the read multiplexer is
-// split over two cycles.
+// The AHB port inserts two wait states per write and three per read, so
+// every path from the AE350 macro ends at a register: a write captures HWDATA
+// and a registered decode of its target, then commits a cycle later, and the
+// read multiplexer is split over two cycles after a local copy of the
+// address.  The address-phase
+// attributes are captured on every cycle that HREADY is high, enabled only by
+// the local HREADY register, so the macro's outputs reach their capture
+// registers without decode logic; only pending and HREADY depend on HSEL and
+// HTRANS, through the accept term.  The merged image's constraints keep that
+// handshake, the captured attributes, and the program result words beside the
+// AE350 macro, so their names (hready, pending, accept, a_*, user) are part
+// of the floorplan.
 
 module ae350_exts_regs (
     input  logic        clk,
@@ -67,7 +76,7 @@ module ae350_exts_regs (
     input  logic [31:0] bridge_first_error,
     input  logic [31:0] bridge_state,
 
-    // Debug view: word address in, data two cycles later.
+    // Debug view: word address in, data three cycles later.
     input  logic [7:0]  dbg_addr,
     output logic [31:0] dbg_rdata
 );
@@ -88,87 +97,139 @@ module ae350_exts_regs (
 
     logic       pending;
     logic       reading;
+    logic       decoding;
+    logic [7:0] read_addr;
+
+    // Write commit stage: the data word and a one-hot target decoded from
+    // the captured address.
+    logic        committing;
+    logic [31:0] w_data;
+    logic        w_state, w_image_bytes, w_image_crc, w_result, w_log_head, w_pop;
+    logic [15:0] w_user;
     logic       a_write;
     logic [7:0] a_addr /* synthesis syn_maxfan = 16 */;
     logic [3:0] a_lanes;
 
     // Read decode for everything but the log ring, in two stages: the 16
-    // program result words and the other registers are selected
-    // separately, then combined.
-    function automatic logic [31:0] read_misc(input logic [7:0] address);
-        unique case (address)
-            8'h00:   return MAGIC;
-            8'h01:   return ABI;
-            8'h02:   return {31'b0, stream_overflow};
-            8'h03:   return now[31:0];
-            8'h04:   return time_high;
-            8'h08:   return state;
-            8'h09:   return image_bytes;
-            8'h0a:   return image_crc;
-            8'h0b:   return result;
-            8'h0c:   return log_head;
-            8'h20:   return {29'b0, entry_tag, entry_valid};
-            8'h21:   return entry_data;
-            8'h28:   return bridge_reads;
-            8'h29:   return bridge_writes;
-            8'h2a:   return bridge_latency_sum;
-            8'h2b:   return bridge_latency_max;
-            8'h2c:   return bridge_buffer_hits;
-            8'h2d:   return bridge_errors;
+    // program result words, the core registers (0x00-0x0c), and the stream
+    // and bridge registers (0x20-0x2d) are selected separately, then
+    // combined.
+    function automatic logic [31:0] read_core(input logic [7:0] address);
+        unique case (address[3:0])
+            4'h0:    return address[7:4] == 4'h0 ? MAGIC : 32'h0;
+            4'h1:    return address[7:4] == 4'h0 ? ABI : 32'h0;
+            4'h2:    return address[7:4] == 4'h0 ? {31'b0, stream_overflow} : 32'h0;
+            4'h3:    return address[7:4] == 4'h0 ? now[31:0] : 32'h0;
+            4'h4:    return address[7:4] == 4'h0 ? time_high : 32'h0;
+            4'h8:    return address[7:4] == 4'h0 ? state : 32'h0;
+            4'h9:    return address[7:4] == 4'h0 ? image_bytes : 32'h0;
+            4'ha:    return address[7:4] == 4'h0 ? image_crc : 32'h0;
+            4'hb:    return address[7:4] == 4'h0 ? result : 32'h0;
+            4'hc:    return address[7:4] == 4'h0 ? log_head : 32'h0;
             default: return 32'h0;
         endcase
     endfunction
 
+    function automatic logic [31:0] read_link(input logic [7:0] address);
+        unique case (address[3:0])
+            4'h0:    return address[7:4] == 4'h2 ? {29'b0, entry_tag, entry_valid} : 32'h0;
+            4'h1:    return address[7:4] == 4'h2 ? entry_data : 32'h0;
+            4'h8:    return address[7:4] == 4'h2 ? bridge_reads : 32'h0;
+            4'h9:    return address[7:4] == 4'h2 ? bridge_writes : 32'h0;
+            4'ha:    return address[7:4] == 4'h2 ? bridge_latency_sum : 32'h0;
+            4'hb:    return address[7:4] == 4'h2 ? bridge_latency_max : 32'h0;
+            4'hc:    return address[7:4] == 4'h2 ? bridge_buffer_hits : 32'h0;
+            4'hd:    return address[7:4] == 4'h2 ? bridge_errors : 32'h0;
+            default: return 32'h0;
+        endcase
+    endfunction
+
+    // Kept as a named net so the floorplan can place its LUT with the
+    // handshake registers.  Declared, then driven by an assign, as Gowin
+    // requires (see tang_phosphor_top.sv).
+    wire accept /* synthesis syn_keep = 1 */;
+    assign accept = hready && hsel && htrans[1];
+
     logic [31:0] read_user_word;
-    logic [31:0] read_misc_word;
-    logic        read_is_user;
+    logic [31:0] read_core_word;
+    logic [31:0] read_link_word;
+    logic [1:0]  read_select;
 
     always_ff @(posedge clk) begin
         now       <= now + 64'd1;
         entry_pop <= 1'b0;
 
-        if (hready && hsel && htrans[1]) begin
-            pending <= 1'b1;
-            hready  <= 1'b0;
+        // The attributes are only used while pending, and HREADY stays low
+        // from acceptance until completion, so capturing them on every
+        // HREADY cycle holds exactly the accepted transfer's values.
+        if (hready) begin
             a_write <= hwrite;
             a_addr  <= haddr[9:2];
             a_lanes <= hsize == 3'd0 ? 4'b0001 << haddr[1:0] :
                        hsize == 3'd1 ? (haddr[1] ? 4'b1100 : 4'b0011) : 4'b1111;
         end
 
+        if (accept) begin
+            pending <= 1'b1;
+            hready  <= 1'b0;
+        end
+
         if (pending) begin
             pending <= 1'b0;
             if (a_write) begin
-                hready <= 1'b1;
-                unique casez (a_addr)
-                    8'h08: state       <= hwdata;
-                    8'h09: image_bytes <= hwdata;
-                    8'h0a: image_crc   <= hwdata;
-                    8'h0b: result      <= hwdata;
-                    8'h0c: log_head    <= hwdata;
-                    8'b0001????: user[a_addr[3:0]] <= hwdata;
-                    8'h22: entry_pop   <= 1'b1;
-                    default: ;
-                endcase
+                committing    <= 1'b1;
+                w_data        <= hwdata;
+                w_state       <= a_addr == 8'h08;
+                w_image_bytes <= a_addr == 8'h09;
+                w_image_crc   <= a_addr == 8'h0a;
+                w_result      <= a_addr == 8'h0b;
+                w_log_head    <= a_addr == 8'h0c;
+                w_pop         <= a_addr == 8'h22;
+                for (int i = 0; i < 16; i++)
+                    w_user[i] <= a_addr == 8'h10 + 8'(i);
             end else begin
-                reading        <= 1'b1;
-                read_user_word <= user[a_addr[3:0]];
-                read_misc_word <= read_misc(a_addr);
-                read_is_user   <= a_addr[7:4] == 4'h1;
+                decoding  <= 1'b1;
+                read_addr <= a_addr;
                 if (a_addr == 8'h03)
                     time_high <= now[63:32];
             end
         end
 
+        if (committing) begin
+            committing <= 1'b0;
+            hready     <= 1'b1;
+            if (w_state)       state       <= w_data;
+            if (w_image_bytes) image_bytes <= w_data;
+            if (w_image_crc)   image_crc   <= w_data;
+            if (w_result)      result      <= w_data;
+            if (w_log_head)    log_head    <= w_data;
+            if (w_pop)         entry_pop   <= 1'b1;
+            for (int i = 0; i < 16; i++)
+                if (w_user[i]) user[i] <= w_data;
+        end
+
+        if (decoding) begin
+            decoding       <= 1'b0;
+            reading        <= 1'b1;
+            read_user_word <= user[read_addr[3:0]];
+            read_core_word <= read_core(read_addr);
+            read_link_word <= read_link(read_addr);
+            read_select    <= read_addr[7:4] == 4'h1 ? 2'd1 :
+                              read_addr[7:4] == 4'h2 ? 2'd2 : 2'd0;
+        end
+
         if (reading) begin
             reading <= 1'b0;
             hready  <= 1'b1;
-            hrdata  <= read_is_user ? read_user_word : read_misc_word;
+            hrdata  <= read_select == 2'd1 ? read_user_word :
+                       read_select == 2'd2 ? read_link_word : read_core_word;
         end
 
         if (rst) begin
             hready      <= 1'b1;
             pending     <= 1'b0;
+            committing  <= 1'b0;
+            decoding    <= 1'b0;
             reading     <= 1'b0;
             entry_pop   <= 1'b0;
             now         <= '0;
@@ -194,32 +255,40 @@ module ae350_exts_regs (
         if (log_write && a_lanes[3]) log_lane3[log_index] <= hwdata[31:24];
     end
 
-    // Debug view: two register stages, the first of which is the log
-    // ring's read port.
+    // Debug view: a local copy of the address, then two register stages, the
+    // first of which is the log ring's read port.
+    logic [7:0] dbg_word /* synthesis syn_maxfan = 16 */;
+    always_ff @(posedge clk)
+        dbg_word <= dbg_addr;
+
     logic [31:0] dbg_log;
     logic [31:0] dbg_user;
-    logic [31:0] dbg_misc;
+    logic [31:0] dbg_core;
+    logic [31:0] dbg_link;
     logic [31:0] dbg_diag;
     logic [1:0]  dbg_select;
     logic        dbg_is_diag;
 
     always_ff @(posedge clk) begin
-        dbg_log    <= {log_lane3[7'(dbg_addr - 8'h40)], log_lane2[7'(dbg_addr - 8'h40)],
-                       log_lane1[7'(dbg_addr - 8'h40)], log_lane0[7'(dbg_addr - 8'h40)]};
-        dbg_user   <= user[dbg_addr[3:0]];
-        dbg_misc   <= read_misc(dbg_addr);
-        dbg_is_diag <= dbg_addr[7:5] == 3'b110 || dbg_addr == 8'h2e ||
-                       dbg_addr == 8'h2f || dbg_addr == 8'h30;
-        dbg_diag   <= dbg_addr == 8'h2e ? bridge_state :
-                      dbg_addr == 8'h2f ? {24'b0, bridge_trace_status} :
-                      dbg_addr == 8'h30 ? bridge_first_error :
-                      dbg_addr[4] ? {16'b0, bridge_trace_info[dbg_addr[3:0]]} :
-                                    bridge_trace_addr[dbg_addr[3:0]];
-        dbg_select <= dbg_addr[7:6] == 2'b01 || dbg_addr[7:6] == 2'b10 ? 2'd2 :
-                      dbg_addr[7:4] == 4'h1 ? 2'd1 : 2'd0;
+        dbg_log    <= {log_lane3[7'(dbg_word - 8'h40)], log_lane2[7'(dbg_word - 8'h40)],
+                       log_lane1[7'(dbg_word - 8'h40)], log_lane0[7'(dbg_word - 8'h40)]};
+        dbg_user   <= user[dbg_word[3:0]];
+        dbg_core   <= read_core(dbg_word);
+        dbg_link   <= read_link(dbg_word);
+        dbg_is_diag <= dbg_word[7:5] == 3'b110 || dbg_word == 8'h2e ||
+                       dbg_word == 8'h2f || dbg_word == 8'h30;
+        dbg_diag   <= dbg_word == 8'h2e ? bridge_state :
+                      dbg_word == 8'h2f ? {24'b0, bridge_trace_status} :
+                      dbg_word == 8'h30 ? bridge_first_error :
+                      dbg_word[4] ? {16'b0, bridge_trace_info[dbg_word[3:0]]} :
+                                    bridge_trace_addr[dbg_word[3:0]];
+        dbg_select <= dbg_word[7:6] == 2'b01 || dbg_word[7:6] == 2'b10 ? 2'd3 :
+                      dbg_word[7:4] == 4'h1 ? 2'd1 :
+                      dbg_word[7:4] == 4'h2 ? 2'd2 : 2'd0;
         dbg_rdata  <= dbg_is_diag ? dbg_diag :
-                      dbg_select == 2'd2 ? dbg_log :
-                      dbg_select == 2'd1 ? dbg_user : dbg_misc;
+                      dbg_select == 2'd3 ? dbg_log :
+                      dbg_select == 2'd2 ? dbg_link :
+                      dbg_select == 2'd1 ? dbg_user : dbg_core;
     end
 
 endmodule

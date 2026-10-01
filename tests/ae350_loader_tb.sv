@@ -63,7 +63,7 @@ module ae350_loader_tb;
     logic [7:0]  daddr = '0;
     logic [31:0] drdata;
 
-    debug_read_cdc #(.ADDR_BITS(8), .TARGET_LATENCY(2)) dbg (
+    debug_read_cdc #(.ADDR_BITS(8), .TARGET_LATENCY(3)) dbg (
         .dclk(sclk), .daddr(daddr), .drdata(drdata),
         .tclk(cclk), .taddr(dbg_addr), .trdata(dbg_rdata)
     );
@@ -72,24 +72,29 @@ module ae350_loader_tb;
 
     // ------------------------------------------------------------------
     // AHB master (one transfer at a time, as the uncached CPU does).
+    //
+    // The master drives and samples on falling edges and the slave works on
+    // rising edges, so no value is ever read in the timestep that writes it.
+    // HREADY changes only on rising edges: its value at a falling edge is the
+    // one the slave presents at the next rising edge.
     // ------------------------------------------------------------------
     task automatic ahb(input logic write, input logic [31:0] address,
                        input logic [31:0] value, input logic [2:0] size,
                        output logic [31:0] result);
+        @(negedge cclk);
+        while (!hready) @(negedge cclk);
+        haddr  = address;
+        hsel   = 1'b1;
+        htrans = 2'b10;
+        hwrite = write;
+        hsize  = size;
+        @(negedge cclk);                    // accepted at the rising edge just passed
+        htrans = 2'b00;
+        hsel   = 1'b0;
+        hwdata = value;
+        while (!hready) @(negedge cclk);    // completes at the next rising edge
         @(posedge cclk);
-        while (!hready) @(posedge cclk);
-        haddr  <= address;
-        hsel   <= 1'b1;
-        htrans <= 2'b10;
-        hwrite <= write;
-        hsize  <= size;
-        @(posedge cclk);
-        while (!hready) @(posedge cclk);    // address phase accepted
-        htrans <= 2'b00;
-        hsel   <= 1'b0;
-        hwdata <= value;
-        @(posedge cclk);
-        while (!hready) @(posedge cclk);    // data phase complete
+        @(negedge cclk);
         result = hrdata;
     endtask
 
@@ -109,16 +114,17 @@ module ae350_loader_tb;
     typedef struct packed { logic [1:0] tag; logic [31:0] data; } entry_t;
     entry_t expected [$];
 
-    // One-cycle event strobe: 0 start, 1 end, 2 cancel.
+    // One-cycle event strobe: 0 start, 1 end, 2 cancel.  Stream-side
+    // signals are driven on falling edges, like the AHB master below.
     task automatic pulse(input int which);
-        @(posedge sclk);
-        start  <= which == 0;
-        stop   <= which == 1;
-        cancel <= which == 2;
-        @(posedge sclk);
-        start  <= 1'b0;
-        stop   <= 1'b0;
-        cancel <= 1'b0;
+        @(negedge sclk);
+        start  = which == 0;
+        stop   = which == 1;
+        cancel = which == 2;
+        @(negedge sclk);
+        start  = 1'b0;
+        stop   = 1'b0;
+        cancel = 1'b0;
     endtask
 
     task automatic session(input int length, input int cancel_at);
@@ -128,13 +134,14 @@ module ae350_loader_tb;
         expected.push_back({2'd1, 32'd0});
         while (taken < length && taken != cancel_at) begin
             logic [7:0] b = 8'($urandom);
-            @(posedge sclk);
-            data  <= b;
-            valid <= 1'b1;
-            @(posedge sclk);
-            while (!ready) @(posedge sclk);
-            valid <= 1'b0;
-            // The byte is taken at this edge.
+            @(negedge sclk);
+            data  = b;
+            valid = 1'b1;
+            // READY changes only on rising edges, so its value here is the
+            // one at the next rising edge, which takes the byte.
+            while (!ready) @(negedge sclk);
+            @(negedge sclk);
+            valid = 1'b0;
             word[8 * (taken % 4) +: 8] = b;
             taken++;
             if (taken % 4 == 0) begin
@@ -160,6 +167,7 @@ module ae350_loader_tb;
     // ------------------------------------------------------------------
     int received = 0;
     logic stop_cpu = 1'b0;
+    logic drain_done = 1'b0;
 
     task automatic drain();
         logic [31:0] status, value;
@@ -228,18 +236,22 @@ module ae350_loader_tb;
                 end
         end
 
-        // Stream sessions, drained concurrently.
+        // Stream sessions, drained concurrently.  join_none and an explicit
+        // completion flag: fork/join aborts in Verilator 5.032's
+        // VlForkSync::join for this pair of branches.
         fork
-            drain();
             begin
-                for (int s = 0; s < 60; s++) begin
-                    int length = 1 + $urandom % 70;
-                    session(length, ($urandom % 6) == 0 ? int'($urandom % length) : -1);
-                end
-                repeat (400) @(posedge sclk);
-                stop_cpu = 1'b1;
+                drain();
+                drain_done = 1'b1;
             end
-        join
+        join_none
+        for (int s = 0; s < 60; s++) begin
+            int length = 1 + $urandom % 70;
+            session(length, ($urandom % 6) == 0 ? int'($urandom % length) : -1);
+        end
+        repeat (400) @(posedge sclk);
+        stop_cpu = 1'b1;
+        wait (drain_done);
 
         if (expected.size() != 0) begin
             $display("FAIL: %0d entries never arrived", expected.size());

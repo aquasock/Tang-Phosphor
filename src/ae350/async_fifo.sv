@@ -46,14 +46,22 @@ module async_fifo #(
         return value ^ (value >> 1);
     endfunction
 
-    // Write side.
+    // Write side.  wready is registered from the pointer the write leaves
+    // behind, so the producer's handshake sees a flip-flop rather than the
+    // pointer comparison.  It compares against the synchronized read pointer
+    // of the current cycle, so space the reader frees appears one cycle
+    // later than with a combinational flag; it is never optimistic.
     wire [PTR-1:0] rptr_gray_w = rptr_gray_sync;
-    assign wready = wptr_gray != {~rptr_gray_w[PTR-1:PTR-2], rptr_gray_w[PTR-3:0]};
+    logic wready_q = 1'b1;
+    assign wready = wready_q;
     wire write = wvalid && wready;
+    wire [PTR-1:0] wptr_gray_next = write ? to_gray(wptr + 1'b1) : wptr_gray;
 
     always_ff @(posedge wclk) begin
         rptr_gray_meta <= rptr_gray;
         rptr_gray_sync <= rptr_gray_meta;
+        wready_q <= wptr_gray_next !=
+                    {~rptr_gray_w[PTR-1:PTR-2], rptr_gray_w[PTR-3:0]};
         if (write) begin
             memory[wptr[DEPTH_BITS-1:0]] <= wdata;
             wptr      <= wptr + 1'b1;

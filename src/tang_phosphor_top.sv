@@ -52,7 +52,9 @@ pll_74 clock_hdmi (
 );
 
 reg [15:0] reset_counter = 16'hffff;
-reg resetn = 1'b0;
+// Replicated by synthesis: one register otherwise drives the synchronous
+// reset of every player block across the die.
+reg resetn /* synthesis syn_maxfan = 32 */ = 1'b0;
 
 always @(posedge clk_pixel) begin
     if (reset_counter != 0)
@@ -436,7 +438,12 @@ assign cpu_stream_valid  = cpu_mode ? stream_valid  : 1'b0;
 
 assign stream_ready = cpu_mode ? cpu_stream_ready : player_stream_ready;
 
-assign debug_rdata = in_ae350_window ? ae350_debug_rdata : player_debug_rdata;
+// Registered for timing: iosys_bl616 samples debug_rdata six UART bytes after
+// it sets debug_address.
+reg [31:0] debug_rdata_q = 32'd0;
+always @(posedge clk_pixel)
+    debug_rdata_q <= in_ae350_window ? ae350_debug_rdata : player_debug_rdata;
+assign debug_rdata = debug_rdata_q;
 
 ae350_subsystem cpu_subsystem (
     .clk           (sys_clk),

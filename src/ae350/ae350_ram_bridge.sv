@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // AE350 RAM port (64-bit AHB-Lite, DDR_H*) to the Gowin DDR3 controller's
-// native port (256-bit, one BL8 burst of the x32 array per command).
+// native port (256-bit, one BL8 burst of the x32 array per command), through
+// ae350_ram_link.  This module is the half that sits beside the AE350 macro;
+// the link carries its line commands across the die to the controller.
 //
 // The bridge runs on the controller's user clock, which also clocks the
 // AE350 buses, so a cache miss crosses no clock domain.  One 256-bit native
@@ -34,10 +36,10 @@
 //
 // DDR3 is mapped at 0x40000000-0x7fffffff.  Any other address on the RAM
 // port gets an AHB ERROR response, and an erroneous write is discarded.
-// The native write data, mask, and address are registers; the command
-// enable is qualified by the controller's ready outputs, as the controller
-// only takes a command while cmd_ready (and wr_data_rdy for a write) is
-// high.
+// A command (one line read, or one masked line write from wbuf) is sent to
+// the link whenever it holds a credit; the link lands it in a FIFO beside
+// the controller, which issues it when the controller is ready, and returns
+// read lines in order.
 
 module ae350_ram_bridge (
     input  logic         clk,
@@ -54,18 +56,16 @@ module ae350_ram_bridge (
     output logic         hready,
     output logic         hresp,
 
-    // Gowin DDR3 controller native port.
-    input  logic         ctrl_cmd_ready,
-    output logic [2:0]   ctrl_cmd,
-    output logic         ctrl_cmd_en,
-    output logic [28:0]  ctrl_addr,
-    input  logic         ctrl_wr_data_rdy,
-    output logic [255:0] ctrl_wr_data,
-    output logic         ctrl_wr_data_en,
-    output logic         ctrl_wr_data_end,
-    output logic [31:0]  ctrl_wr_data_mask,
-    input  logic [255:0] ctrl_rd_data,
-    input  logic         ctrl_rd_data_valid,
+    // Line commands and read responses, through ae350_ram_link.
+    output logic         mem_cmd_valid,
+    output logic         mem_cmd_write,
+    output logic [24:0]  mem_cmd_line,
+    output logic [255:0] mem_cmd_data,
+    output logic [31:0]  mem_cmd_mask,   // 1 = byte written
+    input  logic         mem_cmd_ready,
+    input  logic         mem_idle,
+    input  logic         mem_rsp_valid,
+    input  logic [255:0] mem_rsp_data,
 
     // Diagnostics: native reads and writes, read latency from issue to data
     // in clk cycles (sum, maximum), read beats served from rbuf, and ERROR
@@ -81,7 +81,7 @@ module ae350_ram_bridge (
     // HWRITE, HSIZE, HBURST} in bits 9:0, 16 entries in a ring.  Recording
     // stops eight transfers after the first ERROR response.  trace_status
     // is {frozen, next entry}; state holds the bridge's flags and the
-    // controller's ready outputs, sampled every cycle.
+    // link's ready and idle outputs, sampled every cycle.
     output logic [31:0]  trace_addr [16],
     output logic [15:0]  trace_info [16],
     output logic [7:0]   trace_status,
@@ -168,16 +168,14 @@ module ae350_ram_bridge (
     // is still in its data phase.
     wire merge_pending = c_valid && c_merge;
     wire flush_ready   = wbuf_valid && (!wbuf_open || wr_wait || rd_pend) && !merge_pending;
-    wire issue_write   = flush_ready && ctrl_cmd_ready && ctrl_wr_data_rdy;
-    wire issue_read    = rd_pend && !wbuf_valid && !merge_pending && ctrl_cmd_ready;
+    wire issue_write   = flush_ready && mem_cmd_ready;
+    wire issue_read    = rd_pend && !wbuf_valid && !merge_pending && mem_cmd_ready;
 
-    assign ctrl_cmd          = wbuf_valid ? 3'b000 : 3'b001;
-    assign ctrl_cmd_en       = issue_write || issue_read;
-    assign ctrl_addr         = {1'b0, wbuf_valid ? wline : rd_line, 3'b000};
-    assign ctrl_wr_data      = wbuf;
-    assign ctrl_wr_data_en   = issue_write;
-    assign ctrl_wr_data_end  = issue_write;
-    assign ctrl_wr_data_mask = ~wmask;
+    assign mem_cmd_valid = issue_write || issue_read;
+    assign mem_cmd_write = wbuf_valid;
+    assign mem_cmd_line  = wbuf_valid ? wline : rd_line;
+    assign mem_cmd_data  = wbuf;
+    assign mem_cmd_mask  = wmask;
 
     always_ff @(posedge clk) begin
         if (rd_wait)
@@ -192,7 +190,7 @@ module ae350_ram_bridge (
             buffer_hits <= buffer_hits + 32'd1;
 
         // Debug trace, recorded the cycle after each accepted transfer.
-        state <= {12'b0, htrans, hwrite, ctrl_wr_data_rdy, ctrl_cmd_ready,
+        state <= {12'b0, htrans, hwrite, mem_idle, mem_cmd_ready,
                   rd_done, error_first, wr_wait, wbuf_open, wbuf_valid, rd_wait,
                   rd_pend, rbuf_ok, c_merge, c_eval, c_valid, hresp, hready};
         if (hready) begin
@@ -305,11 +303,11 @@ module ae350_ram_bridge (
             reads     <= reads + 32'd1;
         end
 
-        if (ctrl_rd_data_valid && rd_wait) begin
+        if (mem_rsp_valid && rd_wait) begin
             rd_wait     <= 1'b0;
-            rbuf        <= ctrl_rd_data;
+            rbuf        <= mem_rsp_data;
             rbuf_ok     <= 1'b1;
-            hrdata      <= ctrl_rd_data[64 * c_beat +: 64];
+            hrdata      <= mem_rsp_data[64 * c_beat +: 64];
             hready      <= 1'b1;
             rd_done     <= 1'b1;
         end

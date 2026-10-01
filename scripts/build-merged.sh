@@ -7,9 +7,8 @@
 # parallel, each in an isolated copy of the repository.  Bitstreams and
 # reports go to build/merged/place<N>/.
 #
-#   MERGED_PLACE_OPTIONS   placement options (default "4": the seed that
-#                           meets timing; 0-3 route marginally on ui_clk or
-#                           clk_pixel, 5-7 produce no bitstream)
+#   MERGED_PLACE_OPTIONS   placement options (default "4"; Gowin accepts
+#                           only 0-4 for GW5A devices, SUG100 8.3)
 #   RISCV_TOOLCHAIN_BIN    riscv64-unknown-elf toolchain directory
 
 set -euo pipefail
@@ -17,6 +16,14 @@ set -euo pipefail
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 out_dir="$project_dir/build/merged"
 place_options=${MERGED_PLACE_OPTIONS:-"4"}
+
+# Each Gowin build of this design peaks at several GB; five in parallel
+# exhausted the 15 GB build host.  Run larger option sets in batches.
+read -r -a place_option_list <<< "$place_options"
+if (( ${#place_option_list[@]} > 4 )); then
+    echo "At most 4 parallel builds; MERGED_PLACE_OPTIONS lists ${#place_option_list[@]}." >&2
+    exit 1
+fi
 toolchain_bin=${RISCV_TOOLCHAIN_BIN:-/home/vash/.cache/tangcore-dev/toolchain/bin}
 export PATH="$toolchain_bin:$PATH"
 

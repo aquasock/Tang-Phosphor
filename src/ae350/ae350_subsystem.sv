@@ -289,8 +289,45 @@ module ae350_subsystem (
     logic [7:0]  bridge_trace_status;
     logic [31:0] bridge_first_error, bridge_state;
 
-    // The bridge and the register block restart with the CPU, so their
-    // counters and the log cover one boot.
+    // The bridge sits beside the AE350 macro and the DDR3 controller beside
+    // its pins; ae350_ram_link carries line commands and read lines between
+    // them through registers only.
+    logic         mem_cmd_valid, mem_cmd_write, mem_cmd_ready, mem_idle;
+    logic [24:0]  mem_cmd_line;
+    logic [255:0] mem_cmd_data;
+    logic [31:0]  mem_cmd_mask;
+    logic         mem_rsp_valid;
+    logic [255:0] mem_rsp_data;
+
+    ae350_ram_link #(
+        .STAGES (1)
+    ) ram_link (
+        .clk                (ui_clk),
+        .rst                (!cpu_resetn),
+        .cmd_valid          (mem_cmd_valid),
+        .cmd_write          (mem_cmd_write),
+        .cmd_line           (mem_cmd_line),
+        .cmd_data           (mem_cmd_data),
+        .cmd_mask           (mem_cmd_mask),
+        .cmd_ready          (mem_cmd_ready),
+        .idle               (mem_idle),
+        .rsp_valid          (mem_rsp_valid),
+        .rsp_data           (mem_rsp_data),
+        .ctrl_cmd_ready     (cmd_ready),
+        .ctrl_cmd           (cmd),
+        .ctrl_cmd_en        (cmd_en),
+        .ctrl_addr          (cmd_addr),
+        .ctrl_wr_data_rdy   (wr_data_rdy),
+        .ctrl_wr_data       (wr_data),
+        .ctrl_wr_data_en    (wr_data_en),
+        .ctrl_wr_data_end   (wr_data_end),
+        .ctrl_wr_data_mask  (wr_data_mask),
+        .ctrl_rd_data       (rd_data),
+        .ctrl_rd_data_valid (rd_data_valid)
+    );
+
+    // The bridge, the link, and the register block restart with the CPU, so
+    // their counters and the log cover one boot.
     ae350_ram_bridge ram_bridge (
         .clk                (ui_clk),
         .rst                (!cpu_resetn),
@@ -303,17 +340,15 @@ module ae350_subsystem (
         .hrdata             (ram_hrdata),
         .hready             (ram_hready),
         .hresp              (ram_hresp),
-        .ctrl_cmd_ready     (cmd_ready),
-        .ctrl_cmd           (cmd),
-        .ctrl_cmd_en        (cmd_en),
-        .ctrl_addr          (cmd_addr),
-        .ctrl_wr_data_rdy   (wr_data_rdy),
-        .ctrl_wr_data       (wr_data),
-        .ctrl_wr_data_en    (wr_data_en),
-        .ctrl_wr_data_end   (wr_data_end),
-        .ctrl_wr_data_mask  (wr_data_mask),
-        .ctrl_rd_data       (rd_data),
-        .ctrl_rd_data_valid (rd_data_valid),
+        .mem_cmd_valid      (mem_cmd_valid),
+        .mem_cmd_write      (mem_cmd_write),
+        .mem_cmd_line       (mem_cmd_line),
+        .mem_cmd_data       (mem_cmd_data),
+        .mem_cmd_mask       (mem_cmd_mask),
+        .mem_cmd_ready      (mem_cmd_ready),
+        .mem_idle           (mem_idle),
+        .mem_rsp_valid      (mem_rsp_valid),
+        .mem_rsp_data       (mem_rsp_data),
         .reads              (bridge_reads),
         .writes             (bridge_writes),
         .latency_sum        (bridge_latency_sum),
@@ -412,12 +447,18 @@ module ae350_subsystem (
     // ------------------------------------------------------------------
     logic [31:0] regs_rdata;
 
+    // Read word address, registered so the transport's address register
+    // reaches this block's read multiplexer through no shared decode logic.
+    logic [7:0] read_word;
+    always_ff @(posedge tclk)
+        read_word <= debug_address[9:2];
+
     debug_read_cdc #(
         .ADDR_BITS      (8),
-        .TARGET_LATENCY (2)
+        .TARGET_LATENCY (3)
     ) regs_read (
         .dclk   (tclk),
-        .daddr  (debug_address[9:2]),
+        .daddr  (read_word),
         .drdata (regs_rdata),
         .tclk   (ui_clk),
         .taddr  (regs_dbg_addr),
@@ -431,11 +472,11 @@ module ae350_subsystem (
     logic [1:0]  por_sync        /* synthesis syn_srlstyle = "registers" */;
     logic [1:0]  calib_done_clk  /* synthesis syn_srlstyle = "registers" */;
     logic [31:0] calib_time;
-    logic [31:0] calib_time_meta;
-    logic [31:0] calib_time_sync;
+    logic [31:0] calib_time_meta /* synthesis syn_srlstyle = "registers" */;
+    logic [31:0] calib_time_sync /* synthesis syn_srlstyle = "registers" */;
     logic [31:0] uptime;
-    logic [31:0] uptime_meta;
-    logic [31:0] uptime_sync;
+    logic [31:0] uptime_meta     /* synthesis syn_srlstyle = "registers" */;
+    logic [31:0] uptime_sync     /* synthesis syn_srlstyle = "registers" */;
 
     always_ff @(posedge clk) begin
         calib_done_clk <= {calib_done_clk[0], calib_done};
@@ -480,18 +521,21 @@ module ae350_subsystem (
     wire [31:0] flags = {27'b0, running_sync[1], calib_sync[1], ddr_lock_sync[1],
                          ae350_lock_sync[1], por_sync[1]};
 
-    always_comb begin
-        unique case (debug_address[9:2])
-            8'hf0:   debug_rdata = stream_sessions;
-            8'hf1:   debug_rdata = stream_bytes;
-            8'hf2:   debug_rdata = stream_ends;
-            8'hf3:   debug_rdata = stream_cancels;
-            8'hf4:   debug_rdata = {31'b0, stream_overflow};
-            8'hf8:   debug_rdata = flags;
-            8'hf9:   debug_rdata = calib_time_sync;
-            8'hfa:   debug_rdata = uptime_sync;
-            8'hfc:   debug_rdata = restarts;
-            default: debug_rdata = regs_rdata;
+    // Registered, like read_word: iosys_bl616 samples debug_rdata six UART
+    // bytes after it sets debug_address, so the two cycles are invisible to
+    // Tang-Control.
+    always_ff @(posedge tclk) begin
+        unique case (read_word)
+            8'hf0:   debug_rdata <= stream_sessions;
+            8'hf1:   debug_rdata <= stream_bytes;
+            8'hf2:   debug_rdata <= stream_ends;
+            8'hf3:   debug_rdata <= stream_cancels;
+            8'hf4:   debug_rdata <= {31'b0, stream_overflow};
+            8'hf8:   debug_rdata <= flags;
+            8'hf9:   debug_rdata <= calib_time_sync;
+            8'hfa:   debug_rdata <= uptime_sync;
+            8'hfc:   debug_rdata <= restarts;
+            default: debug_rdata <= regs_rdata;
         endcase
     end
 
