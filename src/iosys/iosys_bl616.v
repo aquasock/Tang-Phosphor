@@ -170,8 +170,8 @@ wire [7:0] rx_data_slow;
 wire [7:0] rx_data_fast;
 wire rx_valid_slow;
 wire rx_valid_fast;
-wire [7:0] rx_data;
-wire rx_valid;
+reg [7:0] rx_data = 8'd0;
+reg rx_valid = 1'b0;
 
 // UART transmitter signals
 reg [7:0] tx_data;
@@ -184,8 +184,13 @@ wire uart_tx_slow;
 wire uart_tx_fast;
 reg baud_fast;
 
-assign rx_data = baud_fast ? rx_data_fast : rx_data_slow;
-assign rx_valid = baud_fast ? rx_valid_fast : rx_valid_slow;
+// The selected receiver's byte is registered, so the receiver select is not
+// in front of the command decoder.  The cycle of latency is invisible: a byte
+// arrives at most once per character time, at least 148 clocks at 5 Mbaud.
+always @(posedge clk) begin
+    rx_data <= baud_fast ? rx_data_fast : rx_data_slow;
+    rx_valid <= baud_fast ? rx_valid_fast : rx_valid_slow;
+end
 assign tx_busy = baud_fast ? tx_busy_fast : tx_busy_slow;
 assign uart_tx = baud_fast ? uart_tx_fast : uart_tx_slow;
 

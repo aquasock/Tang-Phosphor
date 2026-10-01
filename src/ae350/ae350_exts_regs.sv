@@ -118,7 +118,7 @@ module ae350_exts_regs (
     logic        committing;
     logic [31:0] w_data;
     logic        w_state, w_image_bytes, w_image_crc, w_result, w_log_head, w_pop;
-    logic        w_play_word, w_play_ctrl, w_play_byte;
+    logic        w_play_ctrl, w_play_byte, w_play;
     logic [15:0] w_user;
     logic       a_write;
     logic [7:0] a_addr /* synthesis syn_maxfan = 16 */;
@@ -201,9 +201,9 @@ module ae350_exts_regs (
                 w_result      <= a_addr == 8'h0b;
                 w_log_head    <= a_addr == 8'h0c;
                 w_pop         <= a_addr == 8'h22;
-                w_play_word   <= a_addr == 8'h24;
                 w_play_ctrl   <= a_addr == 8'h25;
                 w_play_byte   <= a_addr == 8'h26;
+                w_play        <= a_addr == 8'h24 || a_addr == 8'h25 || a_addr == 8'h26;
                 for (int i = 0; i < 16; i++)
                     w_user[i] <= a_addr == 8'h10 + 8'(i);
             end else begin
@@ -214,18 +214,12 @@ module ae350_exts_regs (
             end
         end
 
-        // A play-stream write holds the bus until the FIFO has room; one
-        // entry is pushed per write, at most every few cycles, so the
-        // registered ready already counts the previous push.
-        if (committing && !((w_play_word || w_play_ctrl || w_play_byte) && !play_ready)) begin
-            committing <= 1'b0;
-            hready     <= 1'b1;
-            if (w_play_word || w_play_ctrl || w_play_byte) begin
-                play_valid <= 1'b1;
-                play_data  <= w_data;
-                play_count <= w_play_byte ? 2'd0 : 2'd3;
-                play_kind  <= w_play_ctrl ? (w_data[2] ? 2'd3 : w_data[1] ? 2'd2 : 2'd1) : 2'd0;
-            end
+        // Ordinary register writes commit at once; their strobes are never
+        // set for a play-stream write, so they need no play term.  A
+        // play-stream write holds the bus until the FIFO has room; one entry
+        // is pushed per write, at most every few cycles, so the registered
+        // ready already counts the previous push.
+        if (committing) begin
             if (w_state)       state       <= w_data;
             if (w_image_bytes) image_bytes <= w_data;
             if (w_image_crc)   image_crc   <= w_data;
@@ -234,6 +228,16 @@ module ae350_exts_regs (
             if (w_pop)         entry_pop   <= 1'b1;
             for (int i = 0; i < 16; i++)
                 if (w_user[i]) user[i] <= w_data;
+            if (!w_play || play_ready) begin
+                committing <= 1'b0;
+                hready     <= 1'b1;
+                if (w_play) begin
+                    play_valid <= 1'b1;
+                    play_data  <= w_data;
+                    play_count <= w_play_byte ? 2'd0 : 2'd3;
+                    play_kind  <= w_play_ctrl ? (w_data[2] ? 2'd3 : w_data[1] ? 2'd2 : 2'd1) : 2'd0;
+                end
+            end
         end
 
         if (decoding) begin

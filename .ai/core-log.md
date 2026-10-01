@@ -1039,3 +1039,35 @@ Close timing on the merged image before relying on it further, starting with the
 - User Test: PASS
 
 ---
+
+## 28 COMMIT Unreleased 2026-09-30T22:14:08-07:00
+
+#### Coming From:
+
+Unreleased e6a7881
+
+#### Purpose:
+
+Close the merged image's remaining setup-timing failures with small RTL fixes before resorting to a separate AE350 bus clock.
+
+#### Outcome:
+
+Timing did not close, and at the user's direction the work is committed for an agent handoff without deployment. Three stage-1 fixes removed the paths they targeted: `ae350_exts_regs` now commits ordinary register writes on `committing` alone and gates only the bus release and FIFO push of a play-stream write on `play_ready` (the MP3 cycle's stall term had sat in every register's write enable), `iosys_bl616` registers `rx_data`/`rx_valid` after the 2/5 Mbaud receiver select, and `debug_regs` decodes reads from a registered `read_address`; a follow-up split that read decode into three registered stages (word index and range check, two 32-way halves, final select), which adds four cycles of read latency against roughly 890 cycles of transport slack and which a scratch old-versus-new Verilator comparison over 528 addresses matched except for the free-running uptime counter sampled a cycle apart. `debug_regs` still has no committed testbench; the regression suite passes, and a mutation removing the play-write stall is caught by `tests/ae350_loader_tb.sv`. Four Gowin EDA 1.9.11.03 builds at placement options 1 to 4, each run under a 13.5 GB cgroup memory cap with zero hold violations, still failed setup: option 2 came closest, with `ui_clk` at 96.9 MHz Fmax (worst `-0.320` ns on the AE350 RAM port's `DDR_HWRITE`-to-bridge-`hready` enable and `-0.048` ns on `w_play` to the register block's `hready`) and `clk_pixel` at 74.18 MHz (one endpoint at `-0.012` ns in the third-party TMDS encoder), producing undeployed bitstream SHA-256 `d3f16d957e414ac44685372587210fd6985bc4da13624819d149457407b350f7`; options 3 and 4 missed `clk_pixel` by up to `-1.094` ns inside the FLAC decoder's bit accumulator, reconstructed-sample, and state logic, and option 1 passed `ui_clk` at 112.8 MHz but missed `clk_pixel` by `-94` ns total, all in the FLAC decoder. Across about a dozen builds since entry 26 the AE350 RAM-port handshake has failed by 0.3 to 1.8 ns in nearly every placement, so further pipelining or placement constraints are unlikely to close it. For a handoff, merged builds use `systemd-run --user --scope -p MemoryMax=13.5G -p MemorySwapMax=4G env MERGED_PLACE_OPTIONS="1 2 3 4" scripts/build-merged.sh`, never more than four placement options at once, and only the single `ae350_exts_handshake` primitive group in `src/boards/console138k_merged.cst` is known to keep Gowin's constraint reader within memory. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 28 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Propose to the user the two structural fixes still needed for comfortable timing: clock the AE350 buses from their own slower clock (for example 75 MHz from the unused `PLL_R[0]` output in `src/ae350/ae350_pll.v`) with async FIFOs in place of the transit registers in `src/ae350/ae350_ram_link.sv`, which removes the single-cycle RAM-port handshake from the 100 MHz controller clock, and pipeline the FLAC decoder's bit reader and main state machine so `clk_pixel` closes independently of placement. After a build passes both clocks with zero hold violations, requalify the merged image on hardware with FPGA WAV/FLAC playback, the `mp3play.tpi` MP3 path from entry 27, and Tang-Control register reads that exercise the new `debug_regs` decode.
+
+#### Files Modified:
+
+- src/ae350/ae350_exts_regs.sv
+- src/debug/debug_regs.sv
+- src/iosys/iosys_bl616.v
+
+#### Status:
+
+- Build: FAIL
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

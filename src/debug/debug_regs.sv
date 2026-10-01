@@ -79,49 +79,77 @@ end
 
 // The transport latches the address six UART bytes before sampling read data,
 // so a registered read multiplexer keeps this wide case off its response path.
+// The read decode starts from its own copy of the address: iosys_bl616
+// samples request_rdata six UART bytes after it sets the address, so the
+// extra cycle is invisible, and the transport's address register no longer
+// feeds the decode across the die.  Writes keep request_address, which block
+// replay changes every cycle.
+reg [31:0] read_address /* synthesis syn_maxfan = 16 */ = 32'd0;
+always @(posedge clk)
+    read_address <= request_address;
+
+// Three stages from read_address: a word index and range check, two
+// registered 32-way halves, then the final select.  Every readable register
+// is word-aligned below 0x100; anything else reads 0xdeadbeef.
+reg [5:0]  read_index = 6'd0;
+reg        read_known = 1'b0;
+reg        read_select_hi = 1'b0;
+reg        read_known_q = 1'b0;
+reg [31:0] read_lo = 32'd0;
+reg [31:0] read_hi = 32'd0;
+
 always @(posedge clk) begin
-    case (request_address)
-        32'h0000_0000: request_rdata <= MAGIC;
-        32'h0000_0004: request_rdata <= 32'h0001_0007; // register ABI 1.7
-        32'h0000_0008: request_rdata <= BUILD_DATE;
-        32'h0000_000c: request_rdata <= 32'h0000_00ff;
-        32'h0000_0010: request_rdata <= uptime_cycles;
-        32'h0000_0014: request_rdata <= frame_count;
-        32'h0000_0018: request_rdata <= request_count;
-        32'h0000_001c: request_rdata <= write_count;
-        32'h0000_0020: request_rdata <= scratch;
-        32'h0000_0024: request_rdata <= transport_crc_errors;
-        32'h0000_0028: request_rdata <= transport_bad_requests;
-        32'h0000_0030: request_rdata <= stream_sessions;
-        32'h0000_0034: request_rdata <= stream_bytes;
-        32'h0000_0038: request_rdata <= stream_ends;
-        32'h0000_003c: request_rdata <= stream_cancels;
-        32'h0000_0040: request_rdata <= stream_last_offset;
-        32'h0000_0044: request_rdata <= stream_crc32;
-        32'h0000_0048: request_rdata <= {20'b0, controller1};
-        32'h0000_004c: request_rdata <= {20'b0, controller2};
-        32'h0000_0050: request_rdata <= {16'b0, hid1};
-        32'h0000_0054: request_rdata <= {16'b0, hid2};
-        32'h0000_0058: request_rdata <= {26'b0, controller_status};
-        32'h0000_005c: request_rdata <= {18'b0, audio_error,
-            playback_active, audio_format_valid, player_state};
-        32'h0000_0060: request_rdata <= audio_sample_rate;
-        32'h0000_0064: request_rdata <= {17'b0, pcm_fifo_level};
-        32'h0000_0068: request_rdata <= samples_played;
-        32'h0000_006c: request_rdata <= audio_underruns;
-        32'h0000_0070: request_rdata <= hdmi_audio_rate;
-        32'h0000_0074: request_rdata <= {29'b0, detected_format};
-        32'h0000_0078: request_rdata <= {31'b0, pause_requested};
-        32'h0000_007c: request_rdata <= {30'b0, ui_playlist, ui_visible};
-        32'h0000_0080: request_rdata <= {8'b0, ui_window_start,
-            ui_track_count, ui_current_track};
-        32'h0000_008c: request_rdata <= elapsed_seconds;
-        32'h0000_0090: request_rdata <= duration_seconds;
-        32'h0000_009c: request_rdata <= boundary_count;
-        32'h0000_00a0: request_rdata <= boundary_gap_samples;
-        32'h0000_00a4: request_rdata <= {16'b0, audible_stream_id};
-        default:       request_rdata <= 32'hdead_beef;
+    read_index <= read_address[7:2];
+    read_known <= read_address[31:8] == 24'd0 && read_address[1:0] == 2'd0;
+
+    read_select_hi <= read_index[5];
+    read_known_q <= read_known;
+    case (read_index[4:0])
+        5'd0: read_lo <= MAGIC;
+        5'd1: read_lo <= 32'h0001_0007; // register ABI 1.7
+        5'd2: read_lo <= BUILD_DATE;
+        5'd3: read_lo <= 32'h0000_00ff;
+        5'd4: read_lo <= uptime_cycles;
+        5'd5: read_lo <= frame_count;
+        5'd6: read_lo <= request_count;
+        5'd7: read_lo <= write_count;
+        5'd8: read_lo <= scratch;
+        5'd9: read_lo <= transport_crc_errors;
+        5'd10: read_lo <= transport_bad_requests;
+        5'd12: read_lo <= stream_sessions;
+        5'd13: read_lo <= stream_bytes;
+        5'd14: read_lo <= stream_ends;
+        5'd15: read_lo <= stream_cancels;
+        5'd16: read_lo <= stream_last_offset;
+        5'd17: read_lo <= stream_crc32;
+        5'd18: read_lo <= {20'b0, controller1};
+        5'd19: read_lo <= {20'b0, controller2};
+        5'd20: read_lo <= {16'b0, hid1};
+        5'd21: read_lo <= {16'b0, hid2};
+        5'd22: read_lo <= {26'b0, controller_status};
+        5'd23: read_lo <= {18'b0, audio_error, playback_active, audio_format_valid, player_state};
+        5'd24: read_lo <= audio_sample_rate;
+        5'd25: read_lo <= {17'b0, pcm_fifo_level};
+        5'd26: read_lo <= samples_played;
+        5'd27: read_lo <= audio_underruns;
+        5'd28: read_lo <= hdmi_audio_rate;
+        5'd29: read_lo <= {29'b0, detected_format};
+        5'd30: read_lo <= {31'b0, pause_requested};
+        5'd31: read_lo <= {30'b0, ui_playlist, ui_visible};
+        default: read_lo <= 32'hdead_beef;
     endcase
+    case (read_index[4:0])
+        5'd0: read_hi <= {8'b0, ui_window_start, ui_track_count, ui_current_track};
+        5'd3: read_hi <= elapsed_seconds;
+        5'd4: read_hi <= duration_seconds;
+        5'd7: read_hi <= boundary_count;
+        5'd8: read_hi <= boundary_gap_samples;
+        5'd9: read_hi <= {16'b0, audible_stream_id};
+        default: read_hi <= 32'hdead_beef;
+    endcase
+
+    request_rdata <= !read_known_q ? 32'hdead_beef :
+                     read_select_hi ? read_hi : read_lo;
 end
 
 endmodule
