@@ -112,6 +112,13 @@ for link_stages in 1 0 3; do
 done
 
 verilator --binary --timing -Wno-fatal \
+    --top-module ae350_play_stream_tb --Mdir "$output_dir/ae350_play_stream" \
+    "$test_dir/ae350_play_stream_tb.sv" \
+    "$project_dir/src/ae350/ae350_play_stream.sv" \
+    "$project_dir/src/ae350/async_fifo.sv"
+"$output_dir/ae350_play_stream/Vae350_play_stream_tb"
+
+verilator --binary --timing -Wno-fatal \
     --top-module ae350_loader_tb --Mdir "$ae350_loader_output_dir" \
     "$test_dir/ae350_loader_tb.sv" \
     "$project_dir/src/ae350/ae350_stream_loader.sv" \

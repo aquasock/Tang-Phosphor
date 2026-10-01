@@ -164,6 +164,23 @@ and estimates AE350 CPU load with an A25 cache model built by
 `tools/build-qemu-cache-model.sh`. The RISC-V toolchain is the Xuantie
 `riscv64-unknown-elf` GCC used by the BL616 and Tang-PSX builds.
 
+#### Playing an MP3 through the AE350
+
+The merged image (`scripts/build-merged.sh`, player plus AE350 and DDR3)
+lets the AE350 feed the FPGA player: in `cpu_mode` the player takes the
+CPU's play stream (`src/ae350/ae350_play_stream.sv`, registers
+`0x090`-`0x098` in `src/ae350/ae350_exts_regs.sv`) instead of the BL616
+transport. A benchmark image built with `BENCH_PLAY=1` decodes its embedded
+file into DDR3 and then plays the resulting WAV through that port:
+
+```sh
+make -C software/rbhost bench BENCH_INPUT=$PWD/song.mp3 BENCH_CODEC=mpa \
+    BENCH_NAME=mp3play BENCH_PLAY=1
+python3 tools/ae350_run.py upload build/rbhost/bench/mp3play.tpi   # at the TangCore menu
+# load tang-phosphor-merged.bin from the Cores menu, then:
+python3 tools/ae350_run.py --base 0x4000 --cpu run mp3play.tpi --timeout 400
+```
+
 ## Licensing and provenance
 
 Tang-Phosphor is distributed under GPL-3.0. The initial board-support, BL616

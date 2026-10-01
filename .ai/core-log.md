@@ -996,3 +996,46 @@ Take the fastest route to an audible MP3 from the AE350, as the user directed: a
 - User Test: NOT RUN
 
 ---
+
+## 27 COMMIT Unreleased 2026-09-30T21:46:37-07:00
+
+#### Coming From:
+
+Unreleased 760ee06
+
+#### Purpose:
+
+Prove audible MP3 playback by decoding an MP3 with Rockbox on the AE350 and playing the result through the hardware-proven FPGA player and HDMI audio path.
+
+#### Outcome:
+
+The user heard `09 - Underground BGM.mp3` (5,065,620 bytes, SHA-256 `9103e0e9d7aa44228f0e9125407674b836fe9483172e1ae0755723a8f60f814b`, 320 kbps 44.1 kHz stereo with an embedded PNG cover) play from the Tang and reported that it sounded perfect. The new `src/ae350/ae350_play_stream.sv` carries entries the CPU writes to `ae350_exts_regs` registers `0x090` (four bytes), `0x094` (start, end, or cancel; read bit 0 reports room), and `0x098` (one byte) through a 512-entry `async_fifo` from `ui_clk` into the transport clock and unpacks them into the player's start, end, cancel, and byte stream; writes to those registers hold the bus while the FIFO is full, so software needs no polling, and in `cpu_mode` the top level feeds the player from this stream instead of the BL616 transport. `software/rbhost` gained `BENCH_PLAY=1`, which plays the decoded WAV through the port after the benchmark decode and publishes its results first, and the README documents the procedure. The new `tests/ae350_play_stream_tb.sv` (40 randomized sessions across unrelated clocks with player backpressure) and play-register checks in `tests/ae350_loader_tb.sv` (entry encoding and a write held while the FIFO is full) pass with the rest of the regression suite, and a `qemu-riscv32` decode of the same file produced an 18,791,658-byte WAV with CRC-32 `ec1f366e`. At the user's direction a single Gowin EDA 1.9.11.03 build at placement option 3 was deployed with timing still open: zero hold violations with worst hold slack `+0.140` ns, but setup failed on 95 endpoints, with `ui_clk` at 93.1 MHz Fmax (worst `-0.746` ns on the new play-write stall term in the register block's commit enable) and `clk_pixel` at 68.8 MHz Fmax (worst `-1.075` ns on the player debug-register read multiplexer). The `5145802`-byte bitstream with SHA-256 `aa06786e32c911e05f19cdf83c496345449161825fb4f780badb94ddd9e58b3b` was uploaded as `cores/console138k/tang-phosphor-merged.bin` and the `5278644`-byte `mp3play.tpi` as `ae350/mp3play.tpi`, both with matching SD readback. After the user loaded the core, `tools/ae350_run.py --base 0x4000 --cpu run mp3play.tpi` streamed the image in 15.5 s at 333 KiB/s, and the AE350 decoded all 4,697,903 samples in 9.67 s, 7,243,148,969 cycles or about 9.1 percent of the 750 MHz core, producing output bit-identical to QEMU (18,791,658 bytes, CRC-32 `ec1f366e`), then played it in real time and returned `0x600d0000` 133.4 s after the stream began. The RAM bridge recorded 12 AHB ERROR responses during the run, the out-of-range access signature associated with the CPU wedge from entry 23, although the program completed. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 27 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Close timing on the merged image before relying on it further, starting with the play-write stall term in `ae350_exts_regs` and the player debug read multiplexer, then the CPU island's clock and the remaining AE350 RAM-port handshake. Then make playback practical, streaming files from the SD card to the AE350 and decoding while playing, extend it to the other working formats, and investigate the AHB ERROR responses behind the CPU wedge.
+
+#### Files Modified:
+
+- README.md
+- build-ae350-ddr3.tcl
+- build-merged.tcl
+- software/ae350/include/ae350.h
+- software/rbhost/Makefile
+- software/rbhost/host/platform_ae350.c
+- src/ae350/ae350_ddr3_top.sv
+- src/ae350/ae350_exts_regs.sv
+- src/ae350/ae350_play_stream.sv
+- src/ae350/ae350_subsystem.sv
+- src/tang_phosphor_top.sv
+- tests/ae350_loader_tb.sv
+- tests/ae350_play_stream_tb.sv
+- tests/run.sh
+
+#### Status:
+
+- Build: FAIL
+- Deployment: PASS
+- User Test: PASS
+
+---

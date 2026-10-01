@@ -177,6 +177,8 @@ $(BUILD)/host/%.o: host/%.S
 # .incbin; the input keeps its file name, since rbhost probes the format
 # from the extension.
 BENCH_NAME ?= bench
+# BENCH_PLAY=1 plays the decoded WAV through the FPGA player afterwards.
+BENCH_PLAY ?= 0
 BENCH_DIR  := $(BUILD)/bench
 BENCH_ELF  := $(BENCH_DIR)/$(BENCH_NAME).elf
 
@@ -202,7 +204,10 @@ $(BENCH_DIR)/$(BENCH_NAME).S: $(BUILD)/codecs/$(BENCH_CODEC).codec $(BENCH_INPUT
 		'	.word 0, 0, 0' \
 		'codec_name: .asciz "codecs/$(BENCH_CODEC).codec"' \
 		'	.globl bench_input_name' \
-		'bench_input_name: .asciz "$(notdir $(BENCH_INPUT))"' > $@
+		'bench_input_name: .asciz "$(notdir $(BENCH_INPUT))"' \
+		'	.balign 4' \
+		'	.globl bench_play' \
+		'bench_play: .word $(BENCH_PLAY)' > $@
 
 $(BENCH_ELF): $(AE350_OBJ) $(BENCH_DIR)/$(BENCH_NAME).S $(BUILD)/librbcodec.a \
 		host/host.ld host/memory.ld

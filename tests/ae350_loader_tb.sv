@@ -45,6 +45,10 @@ module ae350_loader_tb;
     logic [2:0]  hsize = 3'd2;
     logic [7:0]  dbg_addr;
     logic [31:0] dbg_rdata;
+    logic        play_valid;
+    logic [1:0]  play_kind, play_count;
+    logic [31:0] play_data;
+    logic        play_ready = 1'b1;
     logic [31:0] trace_addr [16] = '{default: 32'd0};
     logic [15:0] trace_info [16] = '{default: 16'd0};
 
@@ -53,6 +57,8 @@ module ae350_loader_tb;
         .hwrite(hwrite), .hsize(hsize), .hwdata(hwdata), .hrdata(hrdata),
         .hready(hready), .entry_valid(entry_valid), .entry_tag(entry_tag),
         .entry_data(entry_data), .entry_pop(entry_pop), .stream_overflow(overflow),
+        .play_valid(play_valid), .play_kind(play_kind), .play_count(play_count),
+        .play_data(play_data), .play_ready(play_ready),
         .bridge_reads(32'd11), .bridge_writes(32'd22), .bridge_latency_sum(32'd33),
         .bridge_latency_max(32'd44), .bridge_buffer_hits(32'd55), .bridge_errors(32'd66),
         .bridge_trace_addr(trace_addr), .bridge_trace_info(trace_info),
@@ -234,6 +240,44 @@ module ae350_loader_tb;
                     $display("FAIL: log byte %0d got %h", 4 * w + b, value[8 * b +: 8]);
                     failures++;
                 end
+        end
+
+        // Play stream registers: entry encoding, and a write that waits while
+        // the play FIFO is full.
+        begin
+            logic [35:0] got [$];
+            fork
+                begin
+                    ahb_write(32'he800_0094, 32'h1);
+                    ahb_write(32'he800_0090, 32'h4433_2211);
+                    ahb_write(32'he800_0098, 32'h0000_0055);
+                    ahb_read(32'he800_0094, value);
+                    if (value != 32'h1) begin $display("FAIL: play room %h", value); failures++; end
+                    play_ready = 1'b0;
+                    fork
+                        ahb_write(32'he800_0094, 32'h2);
+                        begin
+                            repeat (40) @(posedge cclk);
+                            if (got.size() != 3) begin $display("FAIL: play write did not wait (%0d)", got.size()); failures++; end
+                            play_ready = 1'b1;
+                        end
+                    join
+                    ahb_write(32'he800_0094, 32'h4);
+                    repeat (4) @(posedge cclk);
+                end
+                forever begin
+                    @(posedge cclk);
+                    if (play_valid) got.push_back({play_kind, play_count, play_data});
+                end
+            join_any
+            disable fork;
+            if (got.size() != 5 || got[0][35:34] != 2'd1 ||
+                    got[1] != {2'd0, 2'd3, 32'h4433_2211} ||
+                    got[2] != {2'd0, 2'd0, 32'h0000_0055} ||
+                    got[3][35:34] != 2'd2 || got[4][35:34] != 2'd3) begin
+                $display("FAIL: play entries (%0d): %p", got.size(), got);
+                failures++;
+            end
         end
 
         // Stream sessions, drained concurrently.  join_none and an explicit

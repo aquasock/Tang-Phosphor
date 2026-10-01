@@ -60,6 +60,16 @@ module ae350_subsystem (
     input  logic        stream_valid,
     output logic        stream_ready,
 
+    // Play stream from the AE350 to the player (tclk domain); see
+    // ae350_play_stream.sv and registers 0x090-0x098 in ae350_exts_regs.sv.
+    output logic        play_start,
+    output logic        play_end,
+    output logic        play_cancel,
+    output logic [7:0]  play_data,
+    output logic        play_valid,
+    input  logic        play_ready,
+    output logic [15:0] play_id,
+
     // Tang-Control debug (tclk domain).
     input  logic        debug_valid,
     input  logic        debug_write,
@@ -405,6 +415,10 @@ module ae350_subsystem (
     logic [7:0]  regs_dbg_addr;
     logic [31:0] regs_dbg_rdata;
 
+    logic        play_w_valid, play_w_ready;
+    logic [1:0]  play_w_kind, play_w_count;
+    logic [31:0] play_w_data;
+
     ae350_exts_regs regs (
         .clk                (ui_clk),
         .rst                (!cpu_resetn),
@@ -421,6 +435,11 @@ module ae350_subsystem (
         .entry_data         (entry_data),
         .entry_pop          (entry_pop),
         .stream_overflow    (stream_overflow_ui[1]),
+        .play_valid         (play_w_valid),
+        .play_kind          (play_w_kind),
+        .play_count         (play_w_count),
+        .play_data          (play_w_data),
+        .play_ready         (play_w_ready),
         .bridge_reads       (bridge_reads),
         .bridge_writes      (bridge_writes),
         .bridge_latency_sum (bridge_latency_sum),
@@ -517,6 +536,24 @@ module ae350_subsystem (
     // por_sync_tclk is the synchronized power-on reset for the loader's
     // stream side (same domain as its sclk).
     assign por_sync_tclk = por_sync[1];
+
+    ae350_play_stream play_stream (
+        .wclk      (ui_clk),
+        .wvalid    (play_w_valid),
+        .wkind     (play_w_kind),
+        .wcount    (play_w_count),
+        .wdata     (play_w_data),
+        .wready    (play_w_ready),
+        .clk       (tclk),
+        .rst       (!por_sync_tclk),
+        .start     (play_start),
+        .stop      (play_end),
+        .cancel    (play_cancel),
+        .data      (play_data),
+        .valid     (play_valid),
+        .ready     (play_ready),
+        .stream_id (play_id)
+    );
 
     wire [31:0] flags = {27'b0, running_sync[1], calib_sync[1], ddr_lock_sync[1],
                          ae350_lock_sync[1], por_sync[1]};

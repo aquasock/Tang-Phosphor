@@ -172,6 +172,14 @@ wire player_stream_end;
 wire player_stream_cancel;
 wire player_stream_valid;
 wire player_stream_ready;
+wire [7:0] player_stream_data;
+wire [15:0] player_stream_id;
+wire cpu_play_start;
+wire cpu_play_end;
+wire cpu_play_cancel;
+wire [7:0] cpu_play_data;
+wire cpu_play_valid;
+wire [15:0] cpu_play_id;
 wire cpu_stream_start;
 wire cpu_stream_end;
 wire cpu_stream_cancel;
@@ -319,8 +327,8 @@ iosys_bl616 #(
 wav_stream_player audio_player (
     .clk(clk_pixel), .resetn(resetn),
     .stream_start(player_stream_start), .stream_end(player_stream_end),
-    .stream_cancel(player_stream_cancel), .stream_id(stream_id),
-    .stream_data(stream_data),
+    .stream_cancel(player_stream_cancel), .stream_id(player_stream_id),
+    .stream_data(player_stream_data),
     .stream_valid(player_stream_valid), .stream_ready(player_stream_ready),
     .sample_tick(sample_tick), .paused(pause_requested),
     .audio_left(player_audio_left),
@@ -352,8 +360,8 @@ phosphor_ui_control ui_control (
 stream_debug_sink stream_monitor (
     .clk(clk_pixel), .resetn(resetn),
     .stream_start(player_stream_start), .stream_end(player_stream_end),
-    .stream_cancel(player_stream_cancel), .stream_id(stream_id),
-    .stream_offset(stream_offset), .stream_data(stream_data),
+    .stream_cancel(player_stream_cancel), .stream_id(player_stream_id),
+    .stream_offset(stream_offset), .stream_data(player_stream_data),
     .stream_valid(player_stream_valid), .stream_ready(player_stream_ready),
     .session_count(stream_sessions), .byte_count(stream_bytes),
     .end_count(stream_ends), .cancel_count(stream_cancels),
@@ -410,9 +418,10 @@ debug_regs debug_registers (
 //
 // The BL616 transport feeds the FPGA player by default (cpu_mode = 0).
 // Writing bit 0 of debug register 0x00c0 selects the CPU: the stream then
-// goes to the AE350 program loader and the AE350 debug view appears at
-// 0x4000-0x43ff (the subsystem's 1 KiB view aliases every 1 KiB; this
-// window gates it away from the player's 0x0000-0x3fff registers).
+// goes to the AE350 program loader, the player takes the AE350's play
+// stream instead, and the AE350 debug view appears at 0x4000-0x43ff (the
+// subsystem's 1 KiB view aliases every 1 KiB; this window gates it away from
+// the player's 0x0000-0x3fff registers).
 // ---------------------------------------------------------------------------
 reg cpu_mode = 1'b0;
 
@@ -426,10 +435,12 @@ always @(posedge clk_pixel) begin
         cpu_mode <= debug_wdata[0];
 end
 
-assign player_stream_start  = cpu_mode ? 1'b0 : stream_start;
-assign player_stream_end    = cpu_mode ? 1'b0 : stream_end;
-assign player_stream_cancel = cpu_mode ? 1'b0 : stream_cancel;
-assign player_stream_valid  = cpu_mode ? 1'b0 : stream_valid;
+assign player_stream_start  = cpu_mode ? cpu_play_start  : stream_start;
+assign player_stream_end    = cpu_mode ? cpu_play_end    : stream_end;
+assign player_stream_cancel = cpu_mode ? cpu_play_cancel : stream_cancel;
+assign player_stream_valid  = cpu_mode ? cpu_play_valid  : stream_valid;
+assign player_stream_data   = cpu_mode ? cpu_play_data   : stream_data;
+assign player_stream_id     = cpu_mode ? cpu_play_id     : stream_id;
 
 assign cpu_stream_start  = cpu_mode ? stream_start  : 1'b0;
 assign cpu_stream_end    = cpu_mode ? stream_end    : 1'b0;
@@ -469,6 +480,13 @@ ae350_subsystem cpu_subsystem (
     .stream_data   (stream_data),
     .stream_valid  (cpu_stream_valid),
     .stream_ready  (cpu_stream_ready),
+    .play_start    (cpu_play_start),
+    .play_end      (cpu_play_end),
+    .play_cancel   (cpu_play_cancel),
+    .play_data     (cpu_play_data),
+    .play_valid    (cpu_play_valid),
+    .play_ready    (player_stream_ready && cpu_mode),
+    .play_id       (cpu_play_id),
     .debug_valid   (cpu_debug_valid),
     .debug_write   (debug_write),
     .debug_address (debug_address),

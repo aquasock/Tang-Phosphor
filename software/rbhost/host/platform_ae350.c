@@ -223,6 +223,26 @@ static void publish64(uint32_t first, uint64_t value)
     AE350_REG(AE350_USER(first + 1)) = (uint32_t)(value >> 32);
 }
 
+/* Nonzero in an image built with BENCH_PLAY=1: after decoding, the output
+ * WAV is played through the FPGA player (registers 0x090-0x098).  Each play
+ * register write waits while the play FIFO is full, so the loop runs at the
+ * player's pace. */
+extern const uint32_t bench_play;
+
+static void play_output(void)
+{
+    const uint8_t *p = OUTPUT_BASE;
+    uint32_t n = output_size;
+
+    AE350_REG(AE350_PLAY_CTRL) = 1u;
+    for (; n >= 4; p += 4, n -= 4)
+        AE350_REG(AE350_PLAY_DATA) = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+                                     (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+    for (; n; ++p, --n)
+        AE350_REG(AE350_PLAY_BYTE) = *p;
+    AE350_REG(AE350_PLAY_CTRL) = 2u;
+}
+
 /* Called by crt0_ae350.S after .bss is cleared. */
 uint32_t ae350_main(void)
 {
@@ -259,5 +279,7 @@ uint32_t ae350_main(void)
     AE350_REG(AE350_USER(5)) = output_size;
     AE350_REG(AE350_USER(6)) = crc32(OUTPUT_BASE, output_size);
     publish64(8, time);
+    if (bench_play && exit_status == 0)
+        play_output();
     return 0x600d0000u | ((uint32_t)exit_status & 0xffffu);
 }

@@ -20,6 +20,11 @@
 //   0x080 R   stream entry status: bit 0 valid, bits 2:1 tag
 //   0x084 R   stream entry word
 //   0x088 W   discard the stream entry
+//   0x090 W   play stream: four bytes, least significant first
+//   0x094 W   play stream control: bit 0 start, bit 1 end, bit 2 cancel
+//         R   bit 0: the play stream has room for another entry
+//   0x098 W   play stream: one byte (bits 7:0)
+//             Writes to 0x090-0x098 wait while the play stream is full.
 //   0x0a0 R   RAM bridge: native reads, writes, read-latency sum and
 //             maximum (100 MHz cycles), line-buffer hits, ERROR responses
 //             (0x0a0-0x0b4)
@@ -64,6 +69,14 @@ module ae350_exts_regs (
     output logic        entry_pop,
     input  logic        stream_overflow,
 
+    // Play stream to the player (through an async FIFO): {kind, count, data},
+    // kind 0 data (count + 1 bytes), 1 start, 2 end, 3 cancel.
+    output logic        play_valid,
+    output logic [1:0]  play_kind,
+    output logic [1:0]  play_count,
+    output logic [31:0] play_data,
+    input  logic        play_ready,
+
     input  logic [31:0] bridge_reads,
     input  logic [31:0] bridge_writes,
     input  logic [31:0] bridge_latency_sum,
@@ -105,6 +118,7 @@ module ae350_exts_regs (
     logic        committing;
     logic [31:0] w_data;
     logic        w_state, w_image_bytes, w_image_crc, w_result, w_log_head, w_pop;
+    logic        w_play_word, w_play_ctrl, w_play_byte;
     logic [15:0] w_user;
     logic       a_write;
     logic [7:0] a_addr /* synthesis syn_maxfan = 16 */;
@@ -140,6 +154,7 @@ module ae350_exts_regs (
             4'hb:    return address[7:4] == 4'h2 ? bridge_latency_max : 32'h0;
             4'hc:    return address[7:4] == 4'h2 ? bridge_buffer_hits : 32'h0;
             4'hd:    return address[7:4] == 4'h2 ? bridge_errors : 32'h0;
+            4'h5:    return address[7:4] == 4'h2 ? {31'b0, play_ready} : 32'h0;
             default: return 32'h0;
         endcase
     endfunction
@@ -156,8 +171,9 @@ module ae350_exts_regs (
     logic [1:0]  read_select;
 
     always_ff @(posedge clk) begin
-        now       <= now + 64'd1;
-        entry_pop <= 1'b0;
+        now        <= now + 64'd1;
+        entry_pop  <= 1'b0;
+        play_valid <= 1'b0;
 
         // The attributes are only used while pending, and HREADY stays low
         // from acceptance until completion, so capturing them on every
@@ -185,6 +201,9 @@ module ae350_exts_regs (
                 w_result      <= a_addr == 8'h0b;
                 w_log_head    <= a_addr == 8'h0c;
                 w_pop         <= a_addr == 8'h22;
+                w_play_word   <= a_addr == 8'h24;
+                w_play_ctrl   <= a_addr == 8'h25;
+                w_play_byte   <= a_addr == 8'h26;
                 for (int i = 0; i < 16; i++)
                     w_user[i] <= a_addr == 8'h10 + 8'(i);
             end else begin
@@ -195,9 +214,18 @@ module ae350_exts_regs (
             end
         end
 
-        if (committing) begin
+        // A play-stream write holds the bus until the FIFO has room; one
+        // entry is pushed per write, at most every few cycles, so the
+        // registered ready already counts the previous push.
+        if (committing && !((w_play_word || w_play_ctrl || w_play_byte) && !play_ready)) begin
             committing <= 1'b0;
             hready     <= 1'b1;
+            if (w_play_word || w_play_ctrl || w_play_byte) begin
+                play_valid <= 1'b1;
+                play_data  <= w_data;
+                play_count <= w_play_byte ? 2'd0 : 2'd3;
+                play_kind  <= w_play_ctrl ? (w_data[2] ? 2'd3 : w_data[1] ? 2'd2 : 2'd1) : 2'd0;
+            end
             if (w_state)       state       <= w_data;
             if (w_image_bytes) image_bytes <= w_data;
             if (w_image_crc)   image_crc   <= w_data;
@@ -229,6 +257,7 @@ module ae350_exts_regs (
             hready      <= 1'b1;
             pending     <= 1'b0;
             committing  <= 1'b0;
+            play_valid  <= 1'b0;
             decoding    <= 1'b0;
             reading     <= 1'b0;
             entry_pop   <= 1'b0;
