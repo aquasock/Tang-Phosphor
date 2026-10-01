@@ -1071,3 +1071,70 @@ Propose to the user the two structural fixes still needed for comfortable timing
 - User Test: NOT RUN
 
 ---
+
+## 29 COMMIT Unreleased 2026-10-01T12:38:39-07:00
+
+#### Coming From:
+
+Unreleased 30409eb
+
+#### Purpose:
+
+Establish the single-cable FT2232 build-flash-control loop and fix the flash-format defect that made the merged image appear unbootable.
+
+#### Outcome:
+
+The merged image's single-cable silence was root-caused to a flash-format defect, not timing, power, or contention: openFPGALoader shifts a raw `.bin` into SRAM but cannot START the FPGA, leaving the board unconfigured and the UART silent, while the `.fs` flash stream starts it. The deployment core answered `peek 0` as `.fs` and was silent as `.bin`, isolating the format as the sole cause. `scripts/build-merged.sh` now keeps `tang_phosphor_merged.fs` beside `.bin`, `scripts/flash-otg.sh` rejects `.bin` with a pointer to the `.fs`, and a shared direct-UART transport `tools/fpga_uart.py` (byte-compatible with Tang-Control's `fpga_debug`/`fpga_stream`) plus `tools/ae350_run.py --direct`, `scripts/mp3_single_cable.py`, and `scripts/uart_probe.py` complete the one-wire toolset. Verified over one FT2232 cable: flash the merged `.fs`, `peek 0` returns `0x54504830`, stream `mp3play.tpi`, and the AE350 decodes the MP3 to `result 0x600d0000` (44100 Hz, 4697903 samples), with the user confirming playback. The sibling Tang-Control firmware gained an interrupt-driven FPGA RX and a TX mutex in commit `9d221a8` that removed the tangcore menu's gamepad stutter. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 29 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Close the merged image's open setup timing from entry 28 so single-cable control extends to reliable video and audio; the deployment core already closes timing and demonstrates the complete loop.
+
+#### Files Modified:
+
+- scripts/build-merged.sh
+- scripts/flash-otg.sh
+- scripts/mp3_single_cable.py
+- scripts/uart_probe.py
+- tools/ae350_run.py
+- tools/fpga_uart.py
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: PASS
+
+---
+
+## 30 COMMIT Unreleased 2026-10-01T12:38:40-07:00
+
+#### Coming From:
+
+Unreleased 532e19d
+
+#### Purpose:
+
+Add the user-facing guide, a command-line interface for the direct-UART transport, and a Pico 2 CMSIS-DAP flash script.
+
+#### Outcome:
+
+`README.md` was rewritten as a user-facing guide covering the two repositories, the one-wire versus two-wire modes, the command references, and the common gotchas including the `.bin`-versus-`.fs` defect. `tools/fpga_uart.py` gained a `peek`/`poke`/`dump` command-line interface, and `scripts/flash-pico.sh` flashes over a Raspberry Pi Pico 2 running CMSIS-DAP at 2 MHz with overridable VID/PID. The Pico probe was verified against the GW5AST-138C (IDCODE `0x1081b`) and requires a 2 MHz-or-lower JTAG clock; its 64-byte bulk endpoint makes it far slower than the FT2232. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 30 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Pursue the open-source toolchain adoption: mathieufro's `gw5ast-open-toolchain` forks hold the 138C harness and shapes but not the built chipdb or `.dat` corpus, so either request that he publish the built chipdb or re-run the fuzzing campaign against the Gowin Standard tool.
+
+#### Files Modified:
+
+- README.md
+- scripts/flash-pico.sh
+- tools/fpga_uart.py
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: PASS
+
+---
