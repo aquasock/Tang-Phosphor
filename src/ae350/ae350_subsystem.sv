@@ -336,6 +336,12 @@ module ae350_subsystem (
     logic [1:0]  entry_tag;
     logic [31:0] entry_data;
 
+    // por_sync_tclk is the synchronized power-on reset for the loader's
+    // stream side (same domain as its sclk).  Declared before the loader
+    // instantiation and driven by an assign so Gowin does not drop it as an
+    // implicit-declaration redeclaration.
+    wire por_sync_tclk;
+
     ae350_stream_loader loader (
         .sclk        (tclk),
         .srst        (!por_sync_tclk),
@@ -469,7 +475,7 @@ module ae350_subsystem (
 
     // por_sync_tclk is the synchronized power-on reset for the loader's
     // stream side (same domain as its sclk).
-    wire por_sync_tclk = por_sync[1];
+    assign por_sync_tclk = por_sync[1];
 
     wire [31:0] flags = {27'b0, running_sync[1], calib_sync[1], ddr_lock_sync[1],
                          ae350_lock_sync[1], por_sync[1]};

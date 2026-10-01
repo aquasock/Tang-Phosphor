@@ -165,6 +165,16 @@ wire [31:0] stream_offset;
 wire [7:0] stream_data;
 wire stream_valid;
 wire stream_ready;
+wire player_stream_start;
+wire player_stream_end;
+wire player_stream_cancel;
+wire player_stream_valid;
+wire player_stream_ready;
+wire cpu_stream_start;
+wire cpu_stream_end;
+wire cpu_stream_cancel;
+wire cpu_stream_valid;
+wire cpu_stream_ready;
 wire [31:0] stream_sessions;
 wire [31:0] stream_bytes;
 wire [31:0] stream_ends;
@@ -414,18 +424,16 @@ always @(posedge clk_pixel) begin
         cpu_mode <= debug_wdata[0];
 end
 
-wire player_stream_start  = cpu_mode ? 1'b0 : stream_start;
-wire player_stream_end    = cpu_mode ? 1'b0 : stream_end;
-wire player_stream_cancel = cpu_mode ? 1'b0 : stream_cancel;
-wire player_stream_valid  = cpu_mode ? 1'b0 : stream_valid;
+assign player_stream_start  = cpu_mode ? 1'b0 : stream_start;
+assign player_stream_end    = cpu_mode ? 1'b0 : stream_end;
+assign player_stream_cancel = cpu_mode ? 1'b0 : stream_cancel;
+assign player_stream_valid  = cpu_mode ? 1'b0 : stream_valid;
 
-wire cpu_stream_start  = cpu_mode ? stream_start  : 1'b0;
-wire cpu_stream_end    = cpu_mode ? stream_end    : 1'b0;
-wire cpu_stream_cancel = cpu_mode ? stream_cancel : 1'b0;
-wire cpu_stream_valid  = cpu_mode ? stream_valid  : 1'b0;
+assign cpu_stream_start  = cpu_mode ? stream_start  : 1'b0;
+assign cpu_stream_end    = cpu_mode ? stream_end    : 1'b0;
+assign cpu_stream_cancel = cpu_mode ? stream_cancel : 1'b0;
+assign cpu_stream_valid  = cpu_mode ? stream_valid  : 1'b0;
 
-wire player_stream_ready;
-wire cpu_stream_ready;
 assign stream_ready = cpu_mode ? cpu_stream_ready : player_stream_ready;
 
 assign debug_rdata = in_ae350_window ? ae350_debug_rdata : player_debug_rdata;

@@ -918,3 +918,34 @@ Deploy the merged bitstream to the Tang and verify on hardware that FPGA WAV/FLA
 - User Test: NOT RUN
 
 ---
+
+## 25 COMMIT Unreleased 2026-09-30T17:51:42-07:00
+
+#### Coming From:
+
+Unreleased b045b76
+
+#### Purpose:
+
+Fix the merged image's broken stream path so the FPGA player and the AE350 program loader both receive Tang-Control streams on hardware.
+
+#### Outcome:
+
+Two forward-referenced `wire x = ...` declarations were silently dropped by GowinSynthesis, leaving `player_stream_start/end/cancel/valid` and `por_sync_tclk` without drivers and therefore tied low: the player never saw a stream start or data, and the AE350 stream loader was held in permanent reset by `srst`. Both were fixed by declaring the nets before first use and driving them with `assign`, and the `EX1998` no-driver and `EX3638` redeclaration warnings are gone. On hardware the player now streams a 1,058,444-byte WAV to completion with matching CRC-32 `016f404b` and plays 264,600 samples at 44.1 kHz, and the AE350 receives a streamed image (sessions 1, bytes 1408) so `ddr3check` runs through `address ok`, `lanes ok`, and `interleave ok` before its known pattern-test wedge, while the FLAC codec bench returns cleanly with result `0x600d0000`, exit 0, and 441,000 decoded samples. The fix re-enabled logic that the buggy build had swept as dead, so every placement seed now misses timing marginally (worst about `-1 ns` on the AE350 `exts_regs` read path and the player `pcm_sample_fifo` level path); timing closure is deferred to the next cycle. The required core-syntax audit passed with `.ai/core.md` unchanged.
+
+#### Next Steps:
+
+Close timing on the merged image by floorplanning the AE350 fabric interface near the AE350 macro and the player's HDMI/audio path near the TMDS pads, or by pipelining the marginal `ae350_exts_regs` and `pcm_sample_fifo` paths, then re-verify on hardware.
+
+#### Files Modified:
+
+- src/ae350/ae350_subsystem.sv
+- src/tang_phosphor_top.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
