@@ -1212,3 +1212,33 @@ None.
 - User Test: NOT RUN
 
 ---
+
+## 33 COMMIT Unreleased 2026-10-01T15:17:31-07:00
+
+#### Coming From:
+
+Unreleased bb2d6a8
+
+#### Purpose:
+
+Requalify the timing-passing merged core (placement option 2) on hardware over the one-wire FT2232 path.
+
+#### Outcome:
+
+Flashed build/merged/place2/tang_phosphor_merged.fs with scripts/flash-otg.sh. peek 0 returned the player magic 0x54504830, ABI 0x010007 (1.7), build date 0x20260927, and capabilities 0x000000ff. scripts/mp3_single_cable.py streamed build/rbhost/bench/mp3play.tpi; the AE350 decoded the MP3 and the user confirmed HDMI audio playback, and reading the AE350 return register (0x402c with cpu_mode set) returned 0x600d0000 (44100 Hz) with loader state 0x01 (returned, one completed run). cpu_mode was cleared afterward, leaving the player in its default transport mode. All fourteen Verilator regressions remain passing.
+
+#### Next Steps:
+
+None for this cycle. The placement-sensitivity items from entry 32 (registering the ram_link forward-FIFO cmd_en read path, and GUI floorplanning of the clk_pixel blocks) remain optional follow-ups.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
