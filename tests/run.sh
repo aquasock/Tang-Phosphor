@@ -56,6 +56,13 @@ verilator --binary --timing -Wno-fatal \
 "$audio_policy_output_dir/Vaudio_output_policy_tb"
 
 verilator --binary --timing -Wno-fatal \
+    --top-module pcm_sink_tb --Mdir "$output_dir/pcm_sink" \
+    "$test_dir/pcm_sink_tb.sv" \
+    "$project_dir/src/audio/pcm_sink.sv" \
+    "$project_dir/src/audio/pcm_sample_fifo.sv"
+"$output_dir/pcm_sink/Vpcm_sink_tb"
+
+verilator --binary --timing -Wno-fatal \
     --top-module hdmi_audio_rate_tb --Mdir "$hdmi_audio_output_dir" \
     "$test_dir/hdmi_audio_rate_tb.sv" \
     "$project_dir/src/audio_test_source.sv" \

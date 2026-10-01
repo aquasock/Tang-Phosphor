@@ -32,7 +32,8 @@ module ae350_play_stream (
     output logic [7:0]  data,
     output logic        valid,
     input  logic        ready,
-    output logic [15:0] stream_id    // counts starts, for the player's session id
+    output logic [15:0] stream_id,   // counts starts, for the player's session id
+    output logic [31:0] rate         // sample rate from the START entry
 );
 
     logic [35:0] entry;
@@ -85,6 +86,7 @@ module ae350_play_stream (
                 2'd1: begin
                     start     <= 1'b1;
                     stream_id <= stream_id + 16'd1;
+                    rate      <= entry[31:0];
                 end
                 2'd2: stop   <= 1'b1;
                 2'd3: cancel <= 1'b1;
@@ -97,6 +99,7 @@ module ae350_play_stream (
             stop      <= 1'b0;
             cancel    <= 1'b0;
             stream_id <= 16'd0;
+            rate      <= 32'd0;
         end
     end
 

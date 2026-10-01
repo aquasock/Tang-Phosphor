@@ -72,6 +72,7 @@ module ae350_subsystem (
     output logic        play_valid,
     input  logic        play_ready,
     output logic [15:0] play_id,
+    output logic [31:0] play_rate,
 
     // Tang-Control debug (tclk domain).
     input  logic        debug_valid,
@@ -568,7 +569,8 @@ module ae350_subsystem (
         .data      (play_data),
         .valid     (play_valid),
         .ready     (play_ready),
-        .stream_id (play_id)
+        .stream_id (play_id),
+        .rate      (play_rate)
     );
 
     wire [31:0] flags = {27'b0, running_sync[1], calib_sync[1], ddr_lock_sync[1],

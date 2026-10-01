@@ -1274,3 +1274,42 @@ Build the raw-PCM audio sink (fed by ae350_play_stream) in place of the stub, th
 - User Test: NOT RUN
 
 ---
+
+## 35 COMMIT Unreleased 2026-10-01T16:49:34-07:00
+
+#### Coming From:
+
+Unreleased 9fccc89
+
+#### Purpose:
+
+Replace the decoder-removal stub with a real raw-PCM audio sink and stream raw PCM (not WAV) from the AE350, re-enabling playback with the FPGA-native decoders gone.
+
+#### Outcome:
+
+src/audio/pcm_sink.sv replaces wav_stream_player as the FPGA player's audio block: it assembles the AE350 play stream's four bytes into one interleaved 16-bit stereo sample, buffers them in pcm_sample_fifo, and clocks them out on sample_tick. The sample rate now crosses with the stream: the AE350 writes it to exts register 0x09c, ae350_exts_regs carries it in the play START entry, ae350_play_stream exposes it as a rate output, and the top level feeds it to the sink, which reports it to audio_output_policy so 44.1/48 kHz both work. software/rbhost/host/platform_ae350.c play_output() now writes the rate and skips the 0x2e-byte WAV header, streaming only PCM. A new tests/pcm_sink_tb.sv checks rate capture, byte assembly, and output; all twelve regressions pass. On hardware, mp3play.tpi played the full 4,697,903-sample MP3 and a 10-second FLAC excerpt played 441,000 samples, both at 44.1 kHz with zero underruns and confirmed audible.
+
+#### Next Steps:
+
+Stream files from the SD card to the AE350 so nothing is baked into a .tpi: BL616 reads an SD file and feeds the AE350 (Rockbox) decode-while-playing path, replacing the embedded-input benchmark harness. Also delete the now-orphaned FPGA decoder sources and their testbenches.
+
+#### Files Modified:
+
+- build-merged.tcl
+- software/ae350/include/ae350.h
+- software/rbhost/host/platform_ae350.c
+- src/ae350/ae350_exts_regs.sv
+- src/ae350/ae350_play_stream.sv
+- src/ae350/ae350_subsystem.sv
+- src/audio/pcm_sink.sv
+- src/tang_phosphor_top.sv
+- tests/pcm_sink_tb.sv
+- tests/run.sh
+
+#### Status:
+
+- Build: FAIL
+- Deployment: PASS
+- User Test: PASS
+
+---

@@ -180,6 +180,7 @@ wire cpu_play_cancel;
 wire [7:0] cpu_play_data;
 wire cpu_play_valid;
 wire [15:0] cpu_play_id;
+wire [31:0] cpu_play_rate;
 wire cpu_stream_start;
 wire cpu_stream_end;
 wire cpu_stream_cancel;
@@ -324,12 +325,13 @@ iosys_bl616 #(
     .uart_tx(UART_TXD)
 );
 
-wav_stream_player audio_player (
+pcm_sink audio_player (
     .clk(clk_pixel), .resetn(resetn),
     .stream_start(player_stream_start), .stream_end(player_stream_end),
     .stream_cancel(player_stream_cancel), .stream_id(player_stream_id),
     .stream_data(player_stream_data),
     .stream_valid(player_stream_valid), .stream_ready(player_stream_ready),
+    .play_rate(cpu_play_rate),
     .sample_tick(sample_tick), .paused(pause_requested),
     .audio_left(player_audio_left),
     .audio_right(player_audio_right), .playback_active(playback_active),
@@ -487,6 +489,7 @@ ae350_subsystem cpu_subsystem (
     .play_valid    (cpu_play_valid),
     .play_ready    (player_stream_ready && cpu_mode),
     .play_id       (cpu_play_id),
+    .play_rate     (cpu_play_rate),
     .debug_valid   (cpu_debug_valid),
     .debug_write   (debug_write),
     .debug_address (debug_address),

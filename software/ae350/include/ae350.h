@@ -37,6 +37,7 @@
 #define AE350_PLAY_DATA        0x90u   /* four bytes, least significant first */
 #define AE350_PLAY_CTRL        0x94u   /* W: 1 start, 2 end, 4 cancel; R: bit 0 room */
 #define AE350_PLAY_BYTE        0x98u   /* one byte; play writes wait while full */
+#define AE350_PLAY_RATE        0x9cu   /* sample rate carried by the next START */
 #define AE350_BRIDGE_READS     0xa0u
 #define AE350_BRIDGE_WRITES    0xa4u
 #define AE350_BRIDGE_LAT_SUM   0xa8u

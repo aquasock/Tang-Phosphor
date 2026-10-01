@@ -26,6 +26,7 @@
 //         R   bit 0: the play stream has room for another entry
 //   0x098 W   play stream: one byte (bits 7:0)
 //             Writes to 0x090-0x098 wait while the play stream is full.
+//   0x09c W   play sample rate, carried in the next play START entry
 //   0x0a0 R   RAM bridge: native reads, writes, read-latency sum and
 //             maximum (75 MHz bus-clock cycles), line-buffer hits, ERROR
 //             responses (0x0a0-0x0b4)
@@ -119,7 +120,8 @@ module ae350_exts_regs (
     logic        committing;
     logic [31:0] w_data;
     logic        w_state, w_image_bytes, w_image_crc, w_result, w_log_head, w_pop;
-    logic        w_play_ctrl, w_play_byte, w_play;
+    logic        w_play_ctrl, w_play_byte, w_play, w_play_rate;
+    logic [31:0] play_rate;   // sample rate carried in the play START entry
     logic [15:0] w_user;
     logic       a_write;
     logic [7:0] a_addr /* synthesis syn_maxfan = 16 */;
@@ -204,6 +206,7 @@ module ae350_exts_regs (
                 w_pop         <= a_addr == 8'h22;
                 w_play_ctrl   <= a_addr == 8'h25;
                 w_play_byte   <= a_addr == 8'h26;
+                w_play_rate   <= a_addr == 8'h27;
                 w_play        <= a_addr == 8'h24 || a_addr == 8'h25 || a_addr == 8'h26;
                 for (int i = 0; i < 16; i++)
                     w_user[i] <= a_addr == 8'h10 + 8'(i);
@@ -227,6 +230,7 @@ module ae350_exts_regs (
             if (w_result)      result      <= w_data;
             if (w_log_head)    log_head    <= w_data;
             if (w_pop)         entry_pop   <= 1'b1;
+            if (w_play_rate)   play_rate   <= w_data;
             for (int i = 0; i < 16; i++)
                 if (w_user[i]) user[i] <= w_data;
             if (!w_play || play_ready) begin
@@ -234,7 +238,7 @@ module ae350_exts_regs (
                 hready     <= 1'b1;
                 if (w_play) begin
                     play_valid <= 1'b1;
-                    play_data  <= w_data;
+                    play_data  <= (w_play_ctrl && w_data[0]) ? play_rate : w_data;
                     play_count <= w_play_byte ? 2'd0 : 2'd3;
                     play_kind  <= w_play_ctrl ? (w_data[2] ? 2'd3 : w_data[1] ? 2'd2 : 2'd1) : 2'd0;
                 end
@@ -273,6 +277,7 @@ module ae350_exts_regs (
             image_crc   <= '0;
             result      <= '0;
             log_head    <= '0;
+            play_rate   <= '0;
             for (int i = 0; i < 16; i++)
                 user[i] <= '0;
         end

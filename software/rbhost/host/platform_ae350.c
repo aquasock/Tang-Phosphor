@@ -233,8 +233,15 @@ static void play_output(void)
 {
     const uint8_t *p = OUTPUT_BASE;
     uint32_t n = output_size;
+    uint32_t rate = (uint32_t)p[0x18] | (uint32_t)p[0x19] << 8 |
+                    (uint32_t)p[0x1a] << 16 | (uint32_t)p[0x1b] << 24;
 
+    /* Announce the rate, then stream only the PCM body (skip the 0x2e-byte
+     * WAV header the FPGA sink no longer parses). */
+    AE350_REG(AE350_PLAY_RATE) = rate;
     AE350_REG(AE350_PLAY_CTRL) = 1u;
+    p += 0x2e;
+    n -= 0x2e;
     for (; n >= 4; p += 4, n -= 4)
         AE350_REG(AE350_PLAY_DATA) = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
                                      (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
