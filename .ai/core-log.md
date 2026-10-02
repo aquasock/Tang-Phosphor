@@ -1435,3 +1435,33 @@ None.
 - User Test: NOT RUN
 
 ---
+
+## 40 COMMIT Unreleased 2026-10-02T07:43:05-07:00
+
+#### Coming From:
+
+Unreleased afa054c
+
+#### Purpose:
+
+Verify on hardware over the two-wire Tang-Control path that the timing-clean merged core recorded in entry 39 accepts the extended debug protocol and plays WAV, FLAC, and MP3 audio through the AE350 PCM sink.
+
+#### Outcome:
+
+The `place3` merged core recorded in entry 39 was accepted on hardware over the two-wire Tang-Control CDC path. The SD image `cores/console138k/tang-phosphor-merged.bin` was downloaded and found byte-identical to `build/merged/place3/tang_phosphor_merged.bin` (SHA-256 `a4e0f726d281a2b4f5af601aeff430a318d38227760cc3d750f4f3d225b36f01`, CRC-32 `49b0072b`, `5005716` bytes), and the local placement report is timing-MET with `clk_pixel` Fmax `80.438` MHz, so the card is confirmed to hold a verified timing-clean image rather than a failing or stub variant. The core was loaded from the SD card through `tangctl.py core` in 5.8 s and answered the extended protocol: magic `0x54504830`, register ABI `0x00010007` (1.7), build date `0x20260927`, core capabilities `0x000000ff`, transport protocol 1 with transport capabilities `0x0000001f`, a scratch write of `0x12345678` read back and restored to zero, an unmapped read at `0x2c` returning `0xdeadbeef`, and zero transport CRC-error and malformed-request counts. Playback through the universal `ae350/resident.tpi` via `tangctl.py play` reached audio state 4 for every test with detected and active HDMI rate `0xac44`: `music/test.wav` presented exactly `441000` samples, `music/test.flac` presented `444240` samples, and `music/underground.mp3` presented exactly `4697903` samples. A single PCM underrun appeared during the first FLAC session and did not recur across four further sessions (a WAV replay, the MP3, another WAV replay, and a FLAC replay), so it reads as a one-off startup transient rather than a repeatable fault. The user confirmed that the WAV, FLAC, and MP3 playback all sounded good. The running BL616 firmware reports `app_sha256 deb2dfeb` at `265073` bytes, which is newer than the `daedf8df` image that entry 37 recorded, so the pinned Tang-Control client revision in project memory is now stale. No engineering file changed this cycle; `cpu_mode` was cleared to restore the default transport routing, and the loaded core remained responsive. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 40 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Characterize the single FLAC-start PCM underrun on the deployed `place3` image before dismissing it, and reconcile project memory's pinned Tang-Control client revision with the firmware actually running on the board (`app_sha256 deb2dfeb`, `265073` bytes, versus the `daedf8df` image that entry 37 recorded). Then resume the deferred persistent-player feature, which must be re-derived from the current tree because the `run_one_track()` loop named in entry 39 was never committed, and after that address the WMA truncation and the Opus trailing codec error recorded in entry 38.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: PASS
+
+---
