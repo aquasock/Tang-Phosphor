@@ -182,37 +182,53 @@ BENCH_PLAY ?= 0
 # BENCH_STREAM=1 receives the input through the stream loader instead of
 # embedding it; the codec is still embedded.
 BENCH_STREAM ?= 0
+# BENCH_UNIVERSAL=1 embeds every codec instead of BENCH_CODEC, so one image
+# decodes any streamed input.  Implied by bench-universal.
+BENCH_UNIVERSAL ?= 0
 BENCH_DIR  := $(BUILD)/bench
 BENCH_ELF  := $(BENCH_DIR)/$(BENCH_NAME).elf
 
 bench: $(BENCH_DIR)/$(BENCH_NAME).tpi
 
-$(BENCH_DIR)/$(BENCH_NAME).S: $(BUILD)/codecs/$(BENCH_CODEC).codec $(BENCH_INPUT) FORCE
-	@test -n "$(BENCH_INPUT)" -a -n "$(BENCH_CODEC)" || \
-		{ echo "set BENCH_INPUT and BENCH_CODEC" >&2; exit 1; }
+# Universal resident player: every codec, streamed input, play output.
+bench-universal: BENCH_UNIVERSAL := 1
+bench-universal: BENCH_STREAM := 1
+bench-universal: BENCH_PLAY := 1
+bench-universal: $(BENCH_DIR)/$(BENCH_NAME).tpi
+
+$(BENCH_DIR)/$(BENCH_NAME).S: $(CODECS) $(BENCH_INPUT) FORCE
+	@test -n "$(BENCH_INPUT)" || { echo "set BENCH_INPUT" >&2; exit 1; }
+	@if [ "$(BENCH_UNIVERSAL)" = "0" ]; then \
+		test -n "$(BENCH_CODEC)" || { echo "set BENCH_CODEC" >&2; exit 1; }; \
+	fi
 	@mkdir -p $(dir $@)
-	printf '%s\n' \
-		'	.section .rodata.bench_files, "a"' \
-		'	.balign 8' \
-		'codec_data: .incbin "$(BUILD)/codecs/$(BENCH_CODEC).codec"' \
-		'codec_end:' \
-		'	.balign 8' \
-		'input_data: .incbin "$(abspath $(BENCH_INPUT))"' \
-		'input_end:' \
-		'	.balign 4' \
-		'	.globl bench_files' \
-		'bench_files:' \
-		'	.word codec_name, codec_data, codec_end - codec_data' \
-		'	.word bench_input_name, input_data, input_end - input_data' \
-		'	.word 0, 0, 0' \
-		'codec_name: .asciz "codecs/$(BENCH_CODEC).codec"' \
-		'	.globl bench_input_name' \
-		'bench_input_name: .asciz "$(notdir $(BENCH_INPUT))"' \
-		'	.balign 4' \
-		'	.globl bench_play' \
-		'bench_play: .word $(BENCH_PLAY)' \
-		'	.globl bench_stream' \
-		'bench_stream: .word $(BENCH_STREAM)' > $@
+	@{ \
+		printf '%s\n' '	.section .rodata.bench_files, "a"' '	.balign 8'; \
+		if [ "$(BENCH_UNIVERSAL)" = "1" ]; then \
+			for n in $(CODEC_NAMES); do \
+				printf 'codec_data_%s: .incbin "$(BUILD)/codecs/%s.codec"\ncodec_end_%s:\n\t.balign 8\n' $$n $$n $$n; \
+			done; \
+		else \
+			printf 'codec_data: .incbin "$(BUILD)/codecs/$(BENCH_CODEC).codec"\ncodec_end:\n\t.balign 8\n'; \
+		fi; \
+		printf '%s\n' 'input_data: .incbin "$(abspath $(BENCH_INPUT))"' 'input_end:' '	.balign 4' '	.globl bench_files' 'bench_files:'; \
+		if [ "$(BENCH_UNIVERSAL)" = "1" ]; then \
+			for n in $(CODEC_NAMES); do \
+				printf '\t.word codec_name_%s, codec_data_%s, codec_end_%s - codec_data_%s\n' $$n $$n $$n $$n; \
+			done; \
+		else \
+			printf '\t.word codec_name, codec_data, codec_end - codec_data\n'; \
+		fi; \
+		printf '%s\n' '	.word bench_input_name, input_data, input_end - input_data' '	.word 0, 0, 0'; \
+		if [ "$(BENCH_UNIVERSAL)" = "1" ]; then \
+			for n in $(CODEC_NAMES); do \
+				printf 'codec_name_%s: .asciz "codecs/%s.codec"\n' $$n $$n; \
+			done; \
+		else \
+			printf 'codec_name: .asciz "codecs/$(BENCH_CODEC).codec"\n'; \
+		fi; \
+		printf '%s\n' '	.globl bench_input_name' 'bench_input_name: .asciz "$(notdir $(BENCH_INPUT))"' '	.balign 4' '	.globl bench_play' 'bench_play: .word $(BENCH_PLAY)' '	.globl bench_stream' 'bench_stream: .word $(BENCH_STREAM)'; \
+	} > $@
 
 $(BENCH_ELF): $(AE350_OBJ) $(BENCH_DIR)/$(BENCH_NAME).S $(BUILD)/librbcodec.a \
 		host/host.ld host/memory.ld

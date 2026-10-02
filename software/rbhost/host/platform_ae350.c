@@ -54,9 +54,35 @@ extern const uint32_t bench_stream;
 #define MAX_FILES    8
 
 /* Filled by receive_stream_file(): the streamed input, exposed to the file
- * API under the fixed name "input.mp3" so rbhost probes the format. */
+ * API under a name that reflects its content so rbhost selects the codec
+ * from the extension.  The transport carries only the file bytes, so the
+ * extension is probed from the magic bytes instead of the original name. */
 static struct bench_file stream_file;
 static uint32_t input_stream_size;
+static char stream_input_name[16];
+
+static const char *probe_input_extension(const uint8_t *p)
+{
+	if (!memcmp(p, "fLaC", 4))
+		return "flac";
+	if (!memcmp(p, "RIFF", 4))
+		return "wav";
+	if (!memcmp(p, "OggS", 4))
+		return !memcmp(p + 28, "OpusHead", 8) ? "opus" : "ogg";
+	if (!memcmp(p, "wvpk", 4))
+		return "wv";
+	if (!memcmp(p, "TTA1", 4))
+		return "tta";
+	if (p[0] == 0xff && (p[1] & 0xe0) == 0xe0)
+		return "mp3";  /* MPEG sync (mp1/mp2/mp3 share the mpa codec) */
+	if (!memcmp(p + 4, "ftyp", 4))
+		return !memcmp(p + 8, "alac", 4) ? "m4a" : "mp4";
+	if (p[0] == 0x30 && p[1] == 0x26 && p[2] == 0xb2 && p[3] == 0x75)
+		return "wma";  /* ASF header GUID */
+	if (p[0] == 0x0b && p[1] == 0x77)
+		return "ac3";
+	return "mp3";  /* ID3v2-tagged MP3 and anything unrecognized */
+}
 
 static struct {
     const struct bench_file *file;   /* NULL for the output */
@@ -264,7 +290,10 @@ static uint32_t receive_stream_file(void)
 		if (!seen_start)
 			continue;
 		if (tag == AE350_TAG_END) {
-			stream_file.name = "input.mp3";
+			const char *ext = probe_input_extension(INPUT_BASE);
+			strcpy(stream_input_name, "input.");
+			strcat(stream_input_name, ext);
+			stream_file.name = stream_input_name;
 			stream_file.data = INPUT_BASE;
 			stream_file.size = size;
 			input_stream_size = size;
@@ -318,9 +347,6 @@ static void play_output(void)
 /* Called by crt0_ae350.S after .bss is cleared. */
 uint32_t ae350_main(void)
 {
-    char *argv[] = {"rbhost", "codecs",
-                    bench_stream ? "input.mp3" : (char *)bench_input_name,
-                    "output.wav", NULL};
     uint32_t input_size = 0;
 
     if (bench_stream) {
@@ -330,6 +356,11 @@ uint32_t ae350_main(void)
             if (!strcmp(file->name, bench_input_name))
                 input_size = file->size;
     }
+
+    char *argv[] = {"rbhost", "codecs",
+                    bench_stream ? (char *)stream_file.name
+                                 : (char *)bench_input_name,
+                    "output.wav", NULL};
     for (int i = 0; i < 16; ++i)
         AE350_REG(AE350_USER(i)) = 0;
     AE350_REG(AE350_USER(7)) = input_size;
