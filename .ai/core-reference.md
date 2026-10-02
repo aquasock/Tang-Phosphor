@@ -158,7 +158,22 @@ supported profile. Project-specific limits remain implementation limits.
 - Sources: TangCore commit `f69c6ff`, `monitor/src/boards/console.cst` (PMOD1_IO0-7 as DualShock pins, PMOD0_IO0-7 as LEDs) and `nestang/src/boards/console60k_snescontroller.cst` (one SNES controller per socket on IO0/2/4 and IO1/3/5); litex-boards commit `e4307929c38a`, `litex_boards/platforms/sipeed_tang_console.py` (`_dock_connectors` pmod0, pmod1); Tang-PSX `.ai/core-reference.md` record BRD-004 (https://github.com/aquasock/Tang-PSX).
 - Authority: Board-vendor and upstream-core constraint files, plus hardware verification on this dock on 2026-10-02. Treat as a verified board fact, not a Digilent-documented limit.
 - Relevant rule: PMOD1, the socket beside the HDMI port, carries PMOD1_IO0-IO7 on FPGA pins W19 W20 F19 F20 E22 D22 E21 D21, and PMOD0 carries PMOD0_IO0-IO7 on V18 V19 G21 G22 F18 E18 C22 B22, all LVCMOS33. Sipeed's IO numbering interleaves the rows, so IO0, IO2, IO4 and IO6 are Digilent pins 1-4 and IO1, IO3, IO5 and IO7 are pins 7-10; a LiteX connector index is Sipeed's IO number, not the linear pin order.
-- Tang-Phosphor use: `src/boards/console138k_oled.cst` places the OLEDrgb on PMOD0 by mapping IO0, IO2, IO3, IO5, IO6 and IO7 and leaving IO4 unconstrained, because the interleaved numbering sends Pmod pins 1-4 to the even IO numbers and Pmod pins 7-10 to the odd ones.
+- Tang-Phosphor use: `src/boards/console138k_pmod.cst` binds both sockets, not any module, so every personality and every future PMOD experiment reuses one constraint file and a change of module never invalidates a placement; `src/boards/console138k_oled.cst` remains the panel-only bring-up file. An unselected socket must have every pin released.
+- Derived rule, verified on hardware 2026-10-02: because the two rows are interleaved, turning a module over swaps adjacent IO numbers, so flipped seating in Sipeed numbering is exactly IO index XOR 1. Orientation is therefore one rotate of the lane vector and needs no remap table and no second constraint file.
+
+### Tang Mega NEO Dock schematics describe a different accessory
+
+- Sources: `Documents/Tang_Mega_NEO_Dock-138K_31004_Schematics.pdf` and `..._31005_Schematics.pdf`, which name `PMOD0_IOx` and `PMOD1_IOx` on balls shared with SDRAM1 and the camera port.
+- Authority: Schematic text extraction, compared against the board actually being driven.
+- Relevant rule: those sheets do not describe this dock. Their PMOD0_IO0-IO7 net is carried on P19 R19 T21 U21 P16 R17 R18 T18 and their PMOD1_IO0-IO7 net on Y21 Y22 AB21 AB22 AA20 AA21 AA19 AB20, neither of which matches the balls the OLED panel actually ran on. The many NEO Dock `PMODx_IOx` labels coexist with SDRAM1 and CAM0 signals on one connector, which is a shared-header arrangement this dock does not have.
+- Tang-Phosphor use: Do not take pin assignments from those sheets. Use the hardware-verified socket balls above, and treat the discrepancy as unexplained rather than resolved: the sheets may belong to a different dock revision or to a related accessory.
+
+### PMOD configuration file (tang.ini)
+
+- Sources: Project decision recorded with the user on 2026-10-02, following the MiSTer.ini convention; Tang-PSX PmodVGA dual-socket evidence in record BRD-005.
+- Authority: Project convention, not an external standard.
+- Relevant rule: `/tang.ini` at the SD-card root is the contract between what is physically seated and what the gateware drives, because PMOD modules carry no identification pins and presence cannot be detected. Keys are flat under one `[tang]` section: `pmod0 = <module>`, `pmod0_flip = yes|no`, and the same for `pmod1`.
+- Tang-Phosphor use: A missing file, or a socket with no entry, leaves that socket released, so the absent file is the safe state and no PMOD output appears until the user configures one. Unknown module names, a `vga_j1` without its `vga_j2` partner, and `flip = yes` for a module that is not flip-safe are all refused rather than guessed. The core reports which personalities it supports so the registry lives beside the RTL that implements it, while the parser belongs to Tang-Control, which owns the SD card and the transport. `pmod_mirror_top`'s personality and orientation parameters are the register seam this file will drive.
 
 ### Digilent Pmod OLEDrgb pinout and orientation
 

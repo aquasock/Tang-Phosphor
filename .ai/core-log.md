@@ -1659,3 +1659,48 @@ Bring up the remaining four Pmod modules the user has acquired, each as its own 
 - User Test: PASS
 
 ---
+
+## 47 COMMIT Unreleased 2026-10-02T16:05:36-07:00
+
+#### Coming From:
+
+Unreleased 9d46de5
+
+#### Purpose:
+
+Give the project one output-agnostic renderer and one PMOD socket layer, so that the same frame reaches every screen and bringing up a module becomes a personality rather than a fork.
+
+#### Outcome:
+
+The core now has a single source of truth for pixels and a boundary between rendering and presentation. `src/ui/ui_frame_store.sv` holds one 96x64 RGB565 plane doubled into two banks, with the row address multiply written as shifts because 96 is 64 plus 32; nothing else in the design stores pixels, so mirroring is structural rather than a discipline. `src/ui/ui_scanout.sv` is the whole integer upscaler: output pixel (x, y) shows source pixel ((x - X0) / K, (y - Y0) / K), computed by a pair of mod-K counters rather than a divider, with everything outside the scaled rectangle left as a bar. `src/pmod/pmod_slot.sv` converts a personality's Digilent lane order to the dock's interleaved IO numbering and applies seating orientation, and `src/pmod/pmod_io_buf.sv` isolates the tri-state, so the permutation is plain combinational logic. `src/ui/ui_swap.sv` flips banks only after every registered output has crossed a frame boundary and holds the renderer off until then, which is what makes tear-free multi-output mirroring a mechanism instead of a hope. `src/ui/ui_pattern_demo.sv` is a stand-in renderer that already meets the contract a menu renderer must meet, and it adds an eighth pattern: a test card with a border, one corner block and two diagonals, so a flipped seating or a shifted active rectangle is diagnosable at a glance. The panel protocol was extracted from the bring-up core into `src/oled/oled_panel.sv` so it exists once and takes its pixels from a port; `src/oled/oled_pmod_top.sv` is now a thin top that supplies a built-in pattern, and the original bring-up test passes unchanged against the extracted engine, which is what proves the extraction faithful. Personality and orientation are module parameters on `src/pmod_mirror_top.sv`: the seam a transport register will drive once `/tang.ini` selects them at run time. Simulation caught two real defects before hardware, both of which would have looked like a broken panel: the mapper's registered counters describe the coordinate presented one pixel earlier, so a mapping computed for the next pixel is right only for a dense raster and shifted every pixel by one source column on the paced panel, and the engine launched each byte one clock after advancing its coordinate, which is one clock short of the mapper plus the store's registered read, so every pixel would have carried the previous pixel's colour; the engine now waits two clocks between pixels. A further three failures were the testbench's own, not the RTL's: stimulus driven with blocking assignments at the same instant as the clock edge silently lost the store's first write and the swap pulse, and the socket read path could not be exercised through an inout wire, which is why the tri-state now lives in its own module. The suite reports 17 passing tests and no failures, of which the mapper is checked against an independently written model over 1407744 coordinates at K equal to 1, 8 and 11, and the panel model decodes the SSD1331 pins out of PMOD0's raw socket pins so a wrong interleave or orientation fails in simulation rather than on a bench. `scripts/build-pmod.sh` built the core in sixteen seconds for `GW5AST-138C` with setup and hold total negative slack both 0.000 and `sys_clk` Fmax 120.486 MHz against its 50 MHz constraint, producing `build/pmod/tang_phosphor_pmod.bin` at 4460544 bytes with SHA-256 `756dc1a6c7485e2163b2cd9383f92a894edbed23aab991e4c96b7d90f475ad82`. The image was uploaded as `cores/console138k/pmodtang.bin` with a byte-identical SD readback and loaded over the two-wire interface, and the user reported that every pattern passes, including the new orientation card, which confirms the store, the mapper, the bank swap and the interleaved socket mapping on real silicon with the panel that was already trusted. The user also settled the configuration design for this work: a flat-key `/tang.ini` at the SD-card root naming the module and seating orientation per socket, with an absent file leaving both sockets released as the safe state, and the parser belonging to Tang-Control while the personality registry belongs beside the RTL. The Tang Mega NEO Dock schematics supplied as board documentation were found not to describe this dock at all, since their PMOD nets sit on balls shared with SDRAM1 and the camera port and match neither verified socket, so pin assignments continue to come from the hardware-verified record and that discrepancy is now recorded rather than left to be rediscovered. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 47 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The next backend is HDMI at K equal to 11, giving 1056x704 inside 1280x720, and it is the first build where mirroring claims anything because it is the first with two screens. It should land together with the check that makes this architecture worth having: a per-output CRC over the emitted pixel stream plus a `tools/ui_mirror_check.py` that computes the expected scaled raster independently and compares, so all outputs can be proven to agree with nothing plugged in, which is the only method available when the PmodVGA needs both sockets and therefore cannot be attached alongside the OLED. After that the VGA backend at K equal to 8, then the remaining modules as personalities, and only then the fold into the player, where the 720p-native `phosphor_album_ui.sv` gives way to a menu renderer writing this store. The open design decision carried forward is that a dense raster must delay its own coordinate by one pixel to match the mapper's registered mapping, which the HDMI backend must honour.
+
+#### Files Modified:
+
+- src/boards/console138k_pmod.cst
+- src/boards/console138k_pmod.sdc
+- src/oled/oled_panel.sv
+- src/oled/oled_pmod_top.sv
+- src/pmod/pmod_io_buf.sv
+- src/pmod/pmod_oledrgb.sv
+- src/pmod/pmod_slot.sv
+- src/pmod_mirror_top.sv
+- src/ui/ui_frame_store.sv
+- src/ui/ui_pattern_demo.sv
+- src/ui/ui_scanout.sv
+- src/ui/ui_swap.sv
+- build-pmod.tcl
+- scripts/build-pmod.sh
+- tests/ui_mirror_tb.sv
+- tests/run.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

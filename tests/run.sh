@@ -109,5 +109,21 @@ verilator --binary --timing -Wno-fatal \
     --top-module oled_pmod_tb --Mdir "$output_dir/oled_pmod" \
     "$test_dir/oled_pmod_tb.sv" \
     "$project_dir/src/oled/oled_pmod_top.sv" \
+    "$project_dir/src/oled/oled_panel.sv" \
     "$project_dir/src/oled/oled_spi.sv"
 "$output_dir/oled_pmod/Voled_pmod_tb"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module ui_mirror_tb --Mdir "$output_dir/ui_mirror" \
+    "$test_dir/ui_mirror_tb.sv" \
+    "$project_dir/src/pmod_mirror_top.sv" \
+    "$project_dir/src/pmod/pmod_slot.sv" \
+    "$project_dir/src/pmod/pmod_io_buf.sv" \
+    "$project_dir/src/pmod/pmod_oledrgb.sv" \
+    "$project_dir/src/oled/oled_panel.sv" \
+    "$project_dir/src/oled/oled_spi.sv" \
+    "$project_dir/src/ui/ui_frame_store.sv" \
+    "$project_dir/src/ui/ui_pattern_demo.sv" \
+    "$project_dir/src/ui/ui_scanout.sv" \
+    "$project_dir/src/ui/ui_swap.sv"
+"$output_dir/ui_mirror/Vui_mirror_tb"

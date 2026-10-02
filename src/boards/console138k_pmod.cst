@@ -1,0 +1,61 @@
+// Tang Console 138K socket-generic PMOD constraints.
+//
+// This file binds the SOCKETS, not the modules.  Every personality, every
+// seating orientation and every future PMOD experiment reuses it: which signal
+// a pin carries, and whether it is an output at all, is decided at run time by
+// the socket layer.  That is what lets tang.ini select a configuration without
+// a rebuild, and it is why there is no per-module constraint file.
+//
+// Numbering is Sipeed's, whose rows interleave: IO0/2/4/6 are module pins 1-4
+// and IO1/3/5/7 are pins 7-10.
+//
+// PMOD0's balls below are the ones the OLED panel actually ran on, so they are
+// confirmed on this hardware by a working display.  Both sockets' assignments
+// come from Tang-PSX record BRD-004, whose PMOD1 assignment was confirmed
+// there with a PmodVGA on 2026-09-29.  This project has not yet driven PMOD1.
+//
+// Note on provenance: the Tang Mega NEO Dock schematics in Documents are a
+// different accessory.  Their PMOD0_IOx and PMOD1_IOx nets sit on balls shared
+// with SDRAM1 and the camera port and do not match this dock, so they were not
+// used and are not authoritative for these sockets.
+
+IO_LOC "sys_clk" V22;
+IO_PORT "sys_clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=OFF;
+
+// PMOD0, the socket furthest from the HDMI port.
+IO_LOC "pmod0_io[0]" V18;
+IO_LOC "pmod0_io[1]" V19;
+IO_LOC "pmod0_io[2]" G21;
+IO_LOC "pmod0_io[3]" G22;
+IO_LOC "pmod0_io[4]" F18;
+IO_LOC "pmod0_io[5]" E18;
+IO_LOC "pmod0_io[6]" C22;
+IO_LOC "pmod0_io[7]" B22;
+
+// PMOD1, the socket beside the HDMI port.
+IO_LOC "pmod1_io[0]" W19;
+IO_LOC "pmod1_io[1]" W20;
+IO_LOC "pmod1_io[2]" F19;
+IO_LOC "pmod1_io[3]" F20;
+IO_LOC "pmod1_io[4]" E22;
+IO_LOC "pmod1_io[5]" D22;
+IO_LOC "pmod1_io[6]" E21;
+IO_LOC "pmod1_io[7]" D21;
+
+IO_PORT "pmod0_io[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[4]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[5]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[6]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[7]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+
+IO_PORT "pmod1_io[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[4]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[5]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[6]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[7]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;

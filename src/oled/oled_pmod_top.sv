@@ -3,10 +3,10 @@
 // Pmod OLEDrgb bring-up core.
 //
 // A deliberately standalone experiment: it instantiates neither the player nor
-// the AE350 nor the transport.  It powers the panel through the module's two
-// FET gates, runs the SSD1331 initialisation sequence exactly as Digilent's
-// Pmod OLEDrgb Reference Manual documents it, then cycles a few test patterns
-// so the panel, its colour order and the whole PMOD path can be judged by eye.
+// the AE350 nor the transport.  The panel protocol lives in oled_panel; this
+// top supplies the pixels from a built-in pattern generator so the panel, its
+// colour order and the whole PMOD path can still be judged by eye on their
+// own, without the frame store or the socket layer.
 //
 // The module sits on PMOD0, the socket furthest from the HDMI port.  Every
 // OLEDrgb signal is a host-driven input, so a mis-seated module cannot drive
@@ -16,9 +16,6 @@
 //   0 red   1 green   2 blue   3 white   4 black
 //   5 eight vertical colour bars
 //   6 red/green ramp across the panel
-//
-// The interface facts, the power-on sequence and every command byte below come
-// from the Pmod OLEDrgb Reference Manual (Rev B) and the SSD1331 datasheet.
 
 module oled_pmod_top (
     input  logic sys_clk,       // 50 MHz board clock
@@ -31,14 +28,8 @@ module oled_pmod_top (
     output logic oled_vccen,
     output logic oled_pmoden
 );
-    localparam integer INIT_LEN  = 44;      // documented init bytes
-    localparam integer FRAME_LEN = 6;       // window commands per frame
-
-    // Delay constants at 50 MHz.
-    localparam [23:0] D_20MS  = 24'd1_000_000;
-    localparam [23:0] D_25MS  = 24'd1_250_000;
-    localparam [23:0] D_100MS = 24'd5_000_000;
-    localparam [23:0] D_10US  = 24'd500;
+    // Frames each pattern is held: 64 panel frames is about a second.
+    localparam [7:0] HOLD_FRAMES = 8'd63;
 
     // ------------------------------------------------------------------
     // Power-on reset.
@@ -54,313 +45,71 @@ module oled_pmod_top (
     end
 
     // ------------------------------------------------------------------
-    // SPI master.
+    // Built-in pattern source, RGB565.
     // ------------------------------------------------------------------
-    logic       spi_start = 1'b0;
-    logic       spi_busy, spi_done, spi_mosi, spi_sck, spi_dco;
-    logic [7:0] spi_data = 8'h00;
-    logic       spi_dc   = 1'b0;
-
-    oled_spi #(.DIV(4)) spi (
-        .clk(sys_clk), .rst(rst), .start(spi_start), .data(spi_data), .dc(spi_dc),
-        .busy(spi_busy), .done(spi_done), .sck(spi_sck), .mosi(spi_mosi), .dc_o(spi_dco)
-    );
-
-    assign oled_mosi = spi_mosi;
-    assign oled_sck  = spi_sck;
-
-    // ------------------------------------------------------------------
-    // The documented initialisation sequence, one byte per index.
-    // ------------------------------------------------------------------
-    function automatic logic [7:0] init_byte(input logic [5:0] i);
-        case (i)
-            6'd0:  init_byte = 8'hFD;   // unlock command register
-            6'd1:  init_byte = 8'h12;   //   with key
-            6'd2:  init_byte = 8'hAE;   // display off
-            6'd3:  init_byte = 8'hA0;   // remap / colour depth
-            6'd4:  init_byte = 8'h72;   //   65k colour
-            6'd5:  init_byte = 8'hA1;   // display start line
-            6'd6:  init_byte = 8'h00;
-            6'd7:  init_byte = 8'hA2;   // display offset
-            6'd8:  init_byte = 8'h00;
-            6'd9:  init_byte = 8'hA4;   // normal display
-            6'd10: init_byte = 8'hA8;   // multiplex ratio: 1 + 0x3F = 64 rows
-            6'd11: init_byte = 8'h3F;
-            6'd12: init_byte = 8'hAD;   // master configuration
-            6'd13: init_byte = 8'h8E;
-            6'd14: init_byte = 8'hB0;   // power saving mode
-            6'd15: init_byte = 8'h0B;
-            6'd16: init_byte = 8'hB1;   // phase length
-            6'd17: init_byte = 8'h31;
-            6'd18: init_byte = 8'hB3;   // clock ratio / oscillator frequency
-            6'd19: init_byte = 8'hF0;
-            6'd20: init_byte = 8'h8A;   // precharge speed, colour A
-            6'd21: init_byte = 8'h64;
-            6'd22: init_byte = 8'h8B;   // precharge speed, colour B
-            6'd23: init_byte = 8'h78;
-            6'd24: init_byte = 8'h8C;   // precharge speed, colour C
-            6'd25: init_byte = 8'h64;
-            6'd26: init_byte = 8'hBB;   // precharge voltage
-            6'd27: init_byte = 8'h3A;
-            6'd28: init_byte = 8'hBE;   // VCOMH deselect level
-            6'd29: init_byte = 8'h3E;
-            6'd30: init_byte = 8'h87;   // master current attenuation
-            6'd31: init_byte = 8'h06;
-            6'd32: init_byte = 8'h81;   // contrast, colour A
-            6'd33: init_byte = 8'h91;
-            6'd34: init_byte = 8'h82;   // contrast, colour B
-            6'd35: init_byte = 8'h50;
-            6'd36: init_byte = 8'h83;   // contrast, colour C
-            6'd37: init_byte = 8'h7D;
-            6'd38: init_byte = 8'h2E;   // disable scrolling
-            6'd39: init_byte = 8'h25;   // clear window
-            6'd40: init_byte = 8'h00;   //   column 0..
-            6'd41: init_byte = 8'h00;   //   row 0..
-            6'd42: init_byte = 8'h5F;   //   ..95
-            6'd43: init_byte = 8'h3F;   //   ..63
-            default: init_byte = 8'h00;
-        endcase
-    endfunction
-
-    // Per-frame addressing: column window 0..95, then row window 0..63.
-    function automatic logic [7:0] frame_byte(input logic [2:0] i);
-        case (i)
-            3'd0: frame_byte = 8'h15;   // set column address
-            3'd1: frame_byte = 8'h00;
-            3'd2: frame_byte = 8'h5F;   // 95
-            3'd3: frame_byte = 8'h75;   // set row address
-            3'd4: frame_byte = 8'h00;
-            3'd5: frame_byte = 8'h3F;   // 63
-            default: frame_byte = 8'h00;
-        endcase
-    endfunction
-
-    // ------------------------------------------------------------------
-    // Test pattern, RGB565.
-    // ------------------------------------------------------------------
-    function automatic logic [15:0] pixel(
+    function automatic logic [15:0] pattern_pixel(
         input logic [6:0] px,
         input logic [5:0] py,
         input logic [2:0] p
     );
         case (p)
-            3'd0: pixel = 16'hF800;                         // red
-            3'd1: pixel = 16'h07E0;                         // green
-            3'd2: pixel = 16'h001F;                         // blue
-            3'd3: pixel = 16'hFFFF;                         // white
-            3'd4: pixel = 16'h0000;                         // black
+            3'd0: pattern_pixel = 16'hF800;                 // red
+            3'd1: pattern_pixel = 16'h07E0;                 // green
+            3'd2: pattern_pixel = 16'h001F;                 // blue
+            3'd3: pattern_pixel = 16'hFFFF;                 // white
+            3'd4: pattern_pixel = 16'h0000;                 // black
             3'd5: begin                                     // eight 12 px bars
                 case (px / 7'd12)
-                    3'd0: pixel = 16'hF800;                 // red
-                    3'd1: pixel = 16'h07E0;                 // green
-                    3'd2: pixel = 16'h001F;                 // blue
-                    3'd3: pixel = 16'h07FF;                 // cyan
-                    3'd4: pixel = 16'hF81F;                 // magenta
-                    3'd5: pixel = 16'hFFE0;                 // yellow
-                    3'd6: pixel = 16'hFFFF;                 // white
-                    default: pixel = 16'h0000;              // black
+                    7'd0: pattern_pixel = 16'hF800;         // red
+                    7'd1: pattern_pixel = 16'h07E0;         // green
+                    7'd2: pattern_pixel = 16'h001F;         // blue
+                    7'd3: pattern_pixel = 16'h07FF;         // cyan
+                    7'd4: pattern_pixel = 16'hF81F;         // magenta
+                    7'd5: pattern_pixel = 16'hFFE0;         // yellow
+                    7'd6: pattern_pixel = 16'hFFFF;         // white
+                    default: pattern_pixel = 16'h0000;      // black
                 endcase
             end
-            default: pixel = {px[6:2], py[5:0], py[5:1]};   // R with x, G with y
+            default: pattern_pixel = {px[6:2], py[5:0], py[5:1]};
         endcase
     endfunction
 
-    logic [15:0] colour;
-    always_comb colour = pixel(x, y, pat);
+    logic [6:0]  px_x;
+    logic [5:0]  px_y;
+    logic [15:0] px_data;
+    logic [2:0]  pat  = 3'd0;
+    logic [7:0]  fcnt = 8'd0;
+    logic        frame_start;
 
-    // ------------------------------------------------------------------
-    // Sequencer.
-    // ------------------------------------------------------------------
-    typedef enum logic [3:0] {
-        S_POWER, S_RESLOW, S_RESHIGH, S_INIT, S_VCCEN,
-        S_DISPON, S_FRAME, S_PIX, S_END
-    } state_t;
-
-    state_t      state = S_POWER;
-    logic [23:0] delay = 24'd1_000_000;
-    logic [5:0]  idx   = 6'd0;
-    logic [6:0]  x     = 7'd0;
-    logic [5:0]  y     = 6'd0;
-    logic        hi    = 1'b1;
-    logic [2:0]  pat   = 3'd0;
-    logic [7:0]  fcnt  = 8'd0;
-    logic        sent  = 1'b0;      // a byte has been handed to the SPI master
-
-    // Output registers.
-    logic cs_n_r   = 1'b1;
-    logic res_n_r  = 1'b1;
-    logic vccen_r  = 1'b0;
-    logic pmoden_r = 1'b0;
-
-    assign oled_cs_n   = cs_n_r;
-    assign oled_dc     = spi_dco;   // per-byte D/C from the SPI master
-    assign oled_res_n  = res_n_r;
-    assign oled_vccen  = vccen_r;
-    assign oled_pmoden = pmoden_r;
+    always_comb px_data = pattern_pixel(px_x, px_y, pat);
 
     always_ff @(posedge sys_clk) begin
         if (rst) begin
-            state     <= S_POWER;
-            delay     <= D_20MS;
-            idx       <= 6'd0;
-            x         <= 7'd0;
-            y         <= 6'd0;
-            hi        <= 1'b1;
-            pat       <= 3'd0;
-            fcnt      <= 8'd0;
-            sent      <= 1'b0;
-            cs_n_r    <= 1'b1;
-            spi_start <= 1'b0;
-            spi_dc    <= 1'b0;
-        end else begin
-            spi_start <= 1'b0;
-
-            if (delay != 24'd0)
-                delay <= delay - 24'd1;
-
-            case (state)
-                // Manual steps 1-4: D/C low, RES high, VCCEN low, PMODEN high,
-                // then 20 ms for the 3.3 V rail to settle.
-                S_POWER: begin
-                    res_n_r  <= 1'b1;
-                    vccen_r  <= 1'b0;
-                    pmoden_r <= 1'b1;
-                    if (delay == 24'd0) begin
-                        res_n_r <= 1'b0;
-                        delay   <= D_10US;
-                        state   <= S_RESLOW;
-                    end
-                end
-
-                // Manual step 5: RES low for at least 3 us.
-                S_RESLOW: begin
-                    if (delay == 24'd0) begin
-                        res_n_r <= 1'b1;
-                        delay   <= D_10US;
-                        state   <= S_RESHIGH;
-                    end
-                end
-
-                // Manual step 6: let the controller's reset complete.
-                S_RESHIGH: begin
-                    if (delay == 24'd0) begin
-                        cs_n_r <= 1'b0;     // hold CS low across the sequence
-                        idx    <= 6'd0;
-                        sent   <= 1'b0;
-                        state  <= S_INIT;
-                    end
-                end
-
-                // Manual steps 7-28: the documented command list, DC low.
-                S_INIT: begin
-                    if (!spi_busy && !sent) begin
-                        spi_data  <= init_byte(idx);
-                        spi_dc    <= 1'b0;
-                        spi_start <= 1'b1;
-                        sent      <= 1'b1;
-                    end else if (spi_done) begin
-                        sent <= 1'b0;
-                        if (idx == INIT_LEN - 1) begin
-                            delay <= D_25MS;
-                            state <= S_VCCEN;
-                        end else begin
-                            idx <= idx + 6'd1;
-                        end
-                    end
-                end
-
-                // Manual step 29: VCCEN high, wait 25 ms.
-                S_VCCEN: begin
-                    vccen_r  <= 1'b1;
-                    pmoden_r <= 1'b1;
-                    if (delay == 24'd0) begin
-                        idx   <= 6'd0;
-                        sent  <= 1'b0;
-                        state <= S_DISPON;
-                    end
-                end
-
-                // Manual step 30: display on, then leave 100 ms before drawing.
-                S_DISPON: begin
-                    if (!spi_busy && !sent) begin
-                        spi_data  <= 8'hAF;
-                        spi_dc    <= 1'b0;
-                        spi_start <= 1'b1;
-                        sent      <= 1'b1;
-                    end else if (spi_done) begin
-                        sent  <= 1'b0;
-                        delay <= D_100MS;
-                        idx   <= 6'd0;
-                        state <= S_FRAME;
-                    end
-                end
-
-                // Address window for this frame, then 96x64 pixels.
-                S_FRAME: begin
-                    if (delay == 24'd0) begin
-                        if (!spi_busy && !sent) begin
-                            spi_data  <= frame_byte(idx[2:0]);
-                            spi_dc    <= 1'b0;
-                            spi_start <= 1'b1;
-                            sent      <= 1'b1;
-                        end else if (spi_done) begin
-                            sent <= 1'b0;
-                            if (idx == FRAME_LEN - 1) begin
-                                idx   <= 6'd0;
-                                x     <= 7'd0;
-                                y     <= 6'd0;
-                                hi    <= 1'b1;
-                                state <= S_PIX;
-                            end else begin
-                                idx <= idx + 6'd1;
-                            end
-                        end
-                    end
-                end
-
-                // 6144 pixels, high byte then low byte, DC high.
-                S_PIX: begin
-                    if (!spi_busy && !sent) begin
-                        spi_data  <= hi ? colour[15:8] : colour[7:0];
-                        spi_dc    <= 1'b1;
-                        spi_start <= 1'b1;
-                        sent      <= 1'b1;
-                    end else if (spi_done) begin
-                        sent <= 1'b0;
-                        if (hi) begin
-                            hi <= 1'b0;
-                        end else begin
-                            hi <= 1'b1;
-                            if (x == 7'd95 && y == 6'd63) begin
-                                state <= S_END;
-                            end else if (x == 7'd95) begin
-                                x <= 7'd0;
-                                y <= y + 6'd1;
-                            end else begin
-                                x <= x + 7'd1;
-                            end
-                        end
-                    end
-                end
-
-                // Hold this pattern for a while, then take the next one.
-                S_END: begin
-                    if (fcnt == 8'd63) begin
-                        fcnt <= 8'd0;
-                        if (pat == 3'd6)
-                            pat <= 3'd0;
-                        else
-                            pat <= pat + 3'd1;
-                    end else begin
-                        fcnt <= fcnt + 8'd1;
-                    end
-                    idx   <= 6'd0;
-                    sent  <= 1'b0;
-                    state <= S_FRAME;
-                end
-
-                default: state <= S_POWER;
-            endcase
+            pat  <= 3'd0;
+            fcnt <= 8'd0;
+        end else if (frame_start) begin
+            if (fcnt == HOLD_FRAMES) begin
+                fcnt <= 8'd0;
+                pat  <= (pat == 3'd6) ? 3'd0 : pat + 3'd1;
+            end else begin
+                fcnt <= fcnt + 8'd1;
+            end
         end
     end
+
+    oled_panel #(.CLK_MHZ(50)) panel (
+        .clk         (sys_clk),
+        .rst         (rst),
+        .px_x        (px_x),
+        .px_y        (px_y),
+        .px_data     (px_data),
+        .cs_n        (oled_cs_n),
+        .mosi        (oled_mosi),
+        .sck         (oled_sck),
+        .dc          (oled_dc),
+        .res_n       (oled_res_n),
+        .vccen       (oled_vccen),
+        .pmoden      (oled_pmoden),
+        .frame_start (frame_start)
+    );
 endmodule
