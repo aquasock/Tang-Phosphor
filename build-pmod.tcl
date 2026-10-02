@@ -35,6 +35,11 @@ add_file -type verilog "src/hdmi/source_product_description_info_frame.sv"
 add_file -type verilog "src/hdmi/tmds_channel.sv"
 
 add_file -type verilog "src/audio_test_source.sv"
+add_file -type verilog "src/iosys/gowin_dpb_menu.v"
+add_file -type verilog "src/iosys/iosys_bl616.v"
+add_file -type verilog "src/iosys/textdisp.v"
+add_file -type verilog "src/iosys/uart_fixed.v"
+add_file -type verilog "src/debug/ui_debug_regs.sv"
 add_file -type verilog "src/pll/pll_27.v"
 add_file -type verilog "src/pll/pll_74.v"
 

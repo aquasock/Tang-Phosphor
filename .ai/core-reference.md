@@ -209,3 +209,16 @@ supported profile. Project-specific limits remain implementation limits.
 - Orientation rule: the module seats with its ICs facing up, away from the dock, which is the same seating the verified PmodVGA placement uses in Tang-PSX record BRD-005. Because both headers share the mechanical PMOD layout, turning a module over swaps pins 1-4 with pins 7-10 while power and ground stay on their own pins; that consequence is inferred from the mechanical layout for this module, not measured here.
 - Tang-Phosphor use: Bring the module up as its own single-purpose core that owns no player logic, hold chip select low across each whole sequence, map RGB565 colour as `0xF800` red, `0x07E0` green and `0x001F` blue, and judge the result from the panel itself, since that core deliberately exposes no debug transport.
 
+### Debug transport core ids
+
+- Sources: Tang-Control `usb/usb_cdc_console.cpp` (the `require_ext_core` gate and its message) and `core/tangpsx.cpp` (`CORE_ID = 0x51`); hardware confirmation on this bench 2026-10-02.
+- Authority: The host firmware, which is the only definition of the gate.
+- Relevant rule: The extended debug protocol behind `caps`, `peek`, `poke` and `baud` is refused unless the active core reports id `0x50`. Id `0x51` is Tang-PSX's. Any new core that wants the debug bus must either report `0x50` or the firmware must be changed and reflashed.
+- Tang-Phosphor use: The PMOD socket bring-up core reports `0x50` deliberately, so the existing host tools work unchanged. A dedicated id belongs with the `/tang.ini` parser, because that parser lives in the same firmware and the same rebuild can carry both changes.
+
+### Socket configuration over the debug bus
+
+- Sources: `src/debug/ui_debug_regs.sv` and the hardware test recorded in core-log entry 50.
+- Authority: Project interface definition.
+- Relevant rule: Register `0x10` is the socket control register. Bit 0 holds the renderer, bits 4-7 are the PMOD0 personality, bits 8-11 the PMOD1 personality, bit 12 is PMOD0 seated upside down and bit 13 is PMOD1. Personality numbering is 0 none, 1 oledrgb, 2 vga J1 and 3 vga J2. Register `0x14` is scratch. Reads: `0x00` magic `0x54504830`, `0x04` build date, `0x08` uptime, `0x0c` render frames, `0x18` source bank, `0x20`/`0x24` panel frames and checksum, `0x28`/`0x2c` HDMI, `0x30`/`0x34` VGA.
+- Tang-Phosphor use: This is the seam `/tang.ini` writes through. Power-on defaults select the panel on PMOD0 and nothing on PMOD1, which is the safe state, and the host is the only party that validates a declaration because it is the only party that knows what the user wrote.

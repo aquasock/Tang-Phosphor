@@ -42,6 +42,12 @@ IO_PORT "tmds_d_p[2]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
 IO_LOC "tmds_d_n[2]" J17;
 IO_PORT "tmds_d_n[2]" PULL_MODE=NONE IO_TYPE=LVCMOS33D;
 
+// UART to the external BL616 MCU, which carries the debug transport.
+IO_LOC "uart_rx" V14;
+IO_LOC "uart_tx" U15;
+IO_PORT "uart_rx" IO_TYPE=LVCMOS33;
+IO_PORT "uart_tx" IO_TYPE=LVCMOS33;
+
 // PMOD0, the socket furthest from the HDMI port.
 IO_LOC "pmod0_io[0]" V18;
 IO_LOC "pmod0_io[1]" V19;

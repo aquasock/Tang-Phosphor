@@ -1784,3 +1784,43 @@ The next cycle is the mirror checker, which remains what makes this architecture
 - User Test: PASS
 
 ---
+
+## 50 COMMIT Unreleased 2026-10-02T16:56:58-07:00
+
+#### Coming From:
+
+Unreleased f695e04
+
+#### Purpose:
+
+Give the socket bring-up core the BL616 debug transport so that its state can be read out, and turn the socket personalities and seating orientation from build-time parameters into declarations the host sends.
+
+#### Outcome:
+
+The transport is the same `iosys_bl616` the player uses, so the project's existing host tools reach this core unchanged; the OSD, controller, ROM-loading and stream interfaces are tied off because this core has no OSD and plays nothing, and only the debug bus matters. The core id is the player's `0x50`, not a new one, because the host firmware gates the extended debug protocol on that id and `0x51` is already Tang-PSX's; a dedicated id belongs with the `/tang.ini` parser, which is a firmware rebuild and reflash rather than a host change, and is recorded as such rather than half-done. `src/debug/ui_debug_regs.sv` is this core's register bank, deliberately separate from the player's because sharing one bank would couple two unrelated register sets; it exposes magic, build date, uptime, render frames, the current pattern, the source bank, the declared socket configuration and per-output frame counters, and it accepts a write that sets both personalities, both orientations and a renderer hold bit. Writing that register is what turns `/tang.ini` from a document into a mechanism, and it collapsed the two build variants into one artifact: `src/pmod_vga_top.sv` and its build script are deleted because configuration B is now a host write rather than a second bitstream. The hold bit freezes the pattern so a host can compare checksums against a frame it can predict, which is the precondition for any automated mirror check. Two implementation constraints were found rather than assumed. First, a bit-serial CRC32 is sixteen gates deep per input bit and cannot close at 74.25 MHz with one pixel per clock, so the checksum half of the checker needs either a parallel sixteen-bit update or per-domain pacing, and it was deliberately deferred rather than guessed at. Second, the transport instantiates a vendor block-RAM primitive that this project's simulator cannot elaborate, so the core gained a `TRANSPORT` parameter mirroring the existing `HDMI_BACKEND` escape hatch and the integration test builds without it. Build and timing improved rather than degraded: `clk_pixel` Fmax is 89.340 MHz against the 74.250 MHz constraint, up from 79.133, because the parameterized personality multiplexer is gone, and the 6.6 percent margin carried as a watch item since entry 48 is closed. The suite reports 18 passing tests and no failures. The image was uploaded as `cores/console138k/pmodtang.bin` and loaded over the two-wire interface; `status` reports `active_core` 80, `caps` reports protocol 1 with capabilities `0x0000001f`, and `peek 0` returns `0x54504830`, so the transport is confirmed live. The user-visible test was the mechanism itself: the core powers up as the panel configuration, the host read `0x12` from the control register, wrote `0x230` to select the VGA on both sockets, read back `0x234` with the live pattern field in the low bits, and the user reported that the picture was the same as the previous run, which had been produced by a separate build-time variant. Counters were confirmed alongside it, reading uptime `0x3660efe9`, thirteen rendered frames and 799 transmitter frames. One qualification is recorded: the user's visual pass was on the image built immediately before a generate wrapper was added around the transport to let the simulation test exclude it, and that wrapper changes hierarchy but not behaviour; the artifact committed here is the wrapped build at SHA-256 `3c59fac2ebb5aefd2aa915eb158d8f811c3ae1e7db57b95dcc6b9a4b4b5db8db`, and the card still carries the pre-wrapper image because writing the card requires the main menu. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 50 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The next cycle finishes the checker: the per-output checksum over the emitted pixel stream and a checksum over the source frame, using a parallel update or per-domain pacing as the throughput constraint dictates, then `tools/ui_mirror_check.py` to compute the expected rasters independently and compare against the registers this cycle made readable. A simulation test for the VGA backend, still outstanding since entry 49, folds into that cycle. The socket configuration also needs its `/tang.ini` parser in Tang-Control, which is when the core should get its own id, since that is a firmware rebuild and reflash. After the checker, the remaining PMOD modules as personalities, then the fold into the player.
+
+#### Files Modified:
+
+- build-pmod-vga.tcl
+- build-pmod.tcl
+- scripts/build-pmod.sh
+- src/boards/console138k_pmod.cst
+- src/debug/ui_debug_regs.sv
+- src/pmod_mirror_core.sv
+- src/pmod_mirror_top.sv
+- src/pmod_vga_top.sv
+- src/ui/ui_pattern_demo.sv
+- tests/run.sh
+- tests/ui_mirror_tb.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

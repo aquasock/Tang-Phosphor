@@ -22,23 +22,9 @@
 #              install locations are probed)
 set -euo pipefail
 
-variant="${1:-oled}"
-case "$variant" in
-    oled)
-        tcl_name="build-pmod.tcl"
-        base="tang_phosphor_pmod"
-        out_name="pmod"
-        ;;
-    vga)
-        tcl_name="build-pmod-vga.tcl"
-        base="tang_phosphor_vga"
-        out_name="vga"
-        ;;
-    *)
-        echo "unknown variant '$variant'; expected 'oled' or 'vga'" >&2
-        exit 1
-        ;;
-esac
+tcl_name="build-pmod.tcl"
+base="tang_phosphor_pmod"
+out_name="pmod"
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 out_dir="$project_dir/build/$out_name"
@@ -85,6 +71,6 @@ cp "$work_dir"/impl/pnr/"$base".{bin,fs,rpt.txt} "$out_dir/" 2>/dev/null || true
 cp "$work_dir"/impl/pnr/"$base"_tr_content.html "$out_dir/" 2>/dev/null || true
 ln -sf ../../"$base"_tr_content.html "$out_dir/impl/pnr/"
 
-echo "$variant variant:"
+echo "pmod core:"
 python3 "$project_dir/tools/gowin_timing_summary.py" "$out_dir" || true
 sha256sum "$out_dir/$base.bin" 2>/dev/null || true

@@ -293,8 +293,10 @@ module ui_mirror_tb;
         else                   core_resetn <= 1'b1;
     end
 
-    pmod_mirror_core #(.HDMI_BACKEND(1'b0)) core (
+    pmod_mirror_core #(.HDMI_BACKEND(1'b0), .TRANSPORT(1'b0)) core (
         .clk_pixel    (clk),
+        .uart_rx      (1'b1),
+        .uart_tx      (),
         .clk_pixel_x5 (clk),      // the TMDS serializers are not under test
         .resetn       (core_resetn),
         .pmod0_io     (io0),

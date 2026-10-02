@@ -32,6 +32,8 @@ module ui_pattern_demo #(
     input  logic        rst,
     input  logic        bank,           // the bank the outputs are reading
     input  logic        render_enable,
+    input  logic        hold,           // freeze on the current pattern
+    output logic [2:0]  pattern,        // the pattern currently being written
     output logic        we,
     output logic        wr_bank,
     output logic [6:0]  wr_x,
@@ -52,8 +54,9 @@ module ui_pattern_demo #(
     logic [5:0]  wr_y_r = 6'd0;
     logic        wr_bank_r = 1'b0;
     logic [2:0]  pat = 3'd0;
-    logic [31:0] hold = 32'd0;
+    logic [31:0] hold_cnt = 32'd0;
 
+    assign pattern = pat;
     assign we      = (state == S_WRITE);
     assign wr_x    = wr_x_r;
     assign wr_y    = wr_y_r;
@@ -111,7 +114,7 @@ module ui_pattern_demo #(
             wr_y_r     <= 6'd0;
             wr_bank_r  <= 1'b0;
             pat        <= 3'd0;
-            hold       <= 32'd0;
+            hold_cnt   <= 32'd0;
             render_done <= 1'b0;
         end else begin
             render_done <= 1'b0;
@@ -130,7 +133,7 @@ module ui_pattern_demo #(
                 S_WRITE: begin
                     if (wr_x_r == XLAST && wr_y_r == YLAST) begin
                         render_done <= 1'b1;
-                        hold        <= HOLD_TICKS;
+                        hold_cnt    <= HOLD_TICKS;
                         state       <= S_HOLD;
                     end else if (wr_x_r == XLAST) begin
                         wr_x_r <= 7'd0;
@@ -142,11 +145,16 @@ module ui_pattern_demo #(
 
                 // Let the completed frame stay up before drawing the next one.
                 S_HOLD: begin
-                    if (hold == 32'd0) begin
+                    // While held, stay on this pattern and keep counting
+                    // nothing: a host comparing CRCs needs a frame it can
+                    // predict, and the pattern must stop changing under it.
+                    if (hold) begin
+                        hold_cnt <= hold_cnt;
+                    end else if (hold_cnt == 32'd0) begin
                         pat   <= (pat == LAST_PAT) ? 3'd0 : pat + 3'd1;
                         state <= S_IDLE;
                     end else begin
-                        hold <= hold - 32'd1;
+                        hold_cnt <= hold_cnt - 32'd1;
                     end
                 end
 

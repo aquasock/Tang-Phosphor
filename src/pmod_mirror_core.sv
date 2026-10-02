@@ -29,24 +29,35 @@
 //   HDMI   always                    -> 1056x704 at 11x, centred in 1280x720
 
 module pmod_mirror_core #(
-    parameter [3:0] PMOD0_PERSONALITY = 4'd1,       // 0 = none, 1 = oledrgb
-    parameter       PMOD0_FLIPPED     = 1'b0,
-    parameter [3:0] PMOD1_PERSONALITY = 4'd0,
-    parameter       PMOD1_FLIPPED     = 1'b0,
     // Set to 0 to build the core without the HDMI backend.  The transmitter is
     // third-party code that this project's simulator cannot elaborate, so the
     // integration test turns it off and checks the OLED and socket paths; the
     // HDMI composition has its own test that needs no transmitter.
-    parameter bit   HDMI_BACKEND      = 1'b1
+    parameter bit   HDMI_BACKEND      = 1'b1,
+    // Set to 0 to build without the BL616 transport.  It instantiates a vendor
+    // block-RAM primitive that this project's simulator cannot elaborate, so
+    // the integration test turns it off and the socket layer keeps its
+    // power-on personalities.
+    parameter bit   TRANSPORT         = 1'b1
 ) (
     input  logic       clk_pixel,
     input  logic       clk_pixel_x5,
     input  logic       resetn,
+    input  logic       uart_rx,
+    output logic       uart_tx,
     inout  wire [7:0]  pmod0_io,
     inout  wire [7:0]  pmod1_io,
     output logic       tmds_clock,
     output logic [2:0] tmds
 );
+    // Declared configuration, written by the host over the transport.
+    logic [3:0] pmod0_personality;
+    logic [3:0] pmod1_personality;
+    logic       pmod0_flipped;
+    logic       pmod1_flipped;
+    logic       hold;
+    logic [2:0] demo_pattern;
+
     localparam [3:0] PERS_NONE    = 4'd0;
     localparam [3:0] PERS_OLEDRGB = 4'd1;
     localparam [3:0] PERS_VGA_J1  = 4'd2;
@@ -119,6 +130,8 @@ module pmod_mirror_core #(
         .rst           (rst),
         .bank          (bank),
         .render_enable (render_enable),
+        .hold          (hold),
+        .pattern       (demo_pattern),
         .we            (we),
         .wr_bank       (wr_bank),
         .wr_x          (wr_x),
@@ -223,6 +236,154 @@ module pmod_mirror_core #(
         .rd_px   (hdmi_px)
     );
 
+
+    // ------------------------------------------------------------------
+    // Debug transport.
+    //
+    // The same BL616 protocol the player uses, so the project's existing host
+    // tools can already reach this core.  The core id is the player's, because
+    // the firmware gates the extended debug protocol on id 0x50 and 0x51 is
+    // Tang-PSX's; a dedicated id belongs with the /tang.ini parser, which is a
+    // firmware rebuild and reflash rather than a host change.
+    //
+    // The OSD, controller, ROM-loading and stream interfaces are all tied off:
+    // this core has no OSD and plays nothing.  Only the debug bus matters here.
+    // ------------------------------------------------------------------
+    logic        debug_valid, debug_write;
+    logic [31:0] debug_address, debug_wdata, debug_rdata;
+    logic [31:0] debug_crc_errors, debug_bad_requests;
+    logic        overlay;
+    logic [7:0]  overlay_x, overlay_y;
+    logic [14:0] overlay_color;
+    logic [15:0] hid1, hid2;
+    logic [7:0]  rom_loading, rom_do, rom_do_valid;
+    logic [15:0] mgmt_address, mgmt_writedata;
+    logic        mgmt_read, mgmt_write;
+    logic [7:0]  kbd_data;
+    logic        kbd_data_valid;
+    logic [31:0] core_config;
+    logic        stream_start, stream_end, stream_cancel;
+    logic [15:0] stream_id;
+    logic [31:0] stream_offset;
+    logic [7:0]  stream_data;
+    logic        stream_valid;
+
+    generate
+    if (TRANSPORT) begin : g_transport
+    iosys_bl616 #(
+        .CORE_ID    (16'h0050),
+        .FREQ       (74_250_000),
+        .COLOR_LOGO (15'b11111_01000_11111)
+    ) transport (
+        .clk                (clk_pixel),
+        .hclk               (clk_pixel),
+        .resetn             (resetn),
+        .overlay            (overlay),
+        .overlay_x          (overlay_x),
+        .overlay_y          (overlay_y),
+        .overlay_color      (overlay_color),
+        .joy1               (12'd0),
+        .joy2               (12'd0),
+        .hid1               (hid1),
+        .hid2               (hid2),
+        .rom_loading        (rom_loading),
+        .rom_do             (rom_do),
+        .rom_do_valid       (rom_do_valid),
+        .mgmt_address       (mgmt_address),
+        .mgmt_read          (mgmt_read),
+        .mgmt_readdata      (16'd0),
+        .mgmt_write         (mgmt_write),
+        .mgmt_writedata     (mgmt_writedata),
+        .fdd_request        (2'd0),
+        .kbd_data           (kbd_data),
+        .kbd_data_valid     (kbd_data_valid),
+        .core_config        (core_config),
+        .debug_valid        (debug_valid),
+        .debug_write        (debug_write),
+        .debug_address      (debug_address),
+        .debug_wdata        (debug_wdata),
+        .debug_rdata        (debug_rdata),
+        .debug_crc_errors   (debug_crc_errors),
+        .debug_bad_requests (debug_bad_requests),
+        .stream_start       (stream_start),
+        .stream_end         (stream_end),
+        .stream_cancel      (stream_cancel),
+        .stream_id          (stream_id),
+        .stream_offset      (stream_offset),
+        .stream_data        (stream_data),
+        .stream_valid       (stream_valid),
+        .stream_ready       (1'b0),
+        .uart_rx            (uart_rx),
+        .uart_tx            (uart_tx)
+    );
+
+    // The OSD raster position is an input to the transport; this core shows no
+    // OSD, so the transmitter's raster is passed through and ignored.
+    assign overlay_x = raster_x[7:0];
+    assign overlay_y = raster_y[7:0];
+
+    end else begin : g_no_transport
+        assign debug_valid = 1'b0;
+        assign debug_write = 1'b0;
+        assign debug_address = 32'd0;
+        assign debug_wdata = 32'd0;
+        assign uart_tx = 1'b1;
+    end
+    endgenerate
+
+    // ------------------------------------------------------------------
+    // Counters the checker reads.
+    // ------------------------------------------------------------------
+    logic [31:0] uptime_cycles;
+    logic [31:0] render_frames;
+    logic [31:0] oled_frames;
+    logic [31:0] hdmi_frames;
+    logic [31:0] vga_frames;
+
+    always_ff @(posedge clk_pixel) begin
+        if (rst) begin
+            uptime_cycles <= 32'd0;
+            render_frames <= 32'd0;
+            oled_frames   <= 32'd0;
+            hdmi_frames   <= 32'd0;
+        end else begin
+            uptime_cycles <= uptime_cycles + 32'd1;
+            if (render_done)      render_frames <= render_frames + 32'd1;
+            if (oled_frame_start) oled_frames   <= oled_frames + 32'd1;
+            if (hdmi_frame_tick)  hdmi_frames   <= hdmi_frames + 32'd1;
+        end
+    end
+
+    // The VGA observes the transmitter's raster, so its frame count is the
+    // transmitter's.  It becomes its own number when it has its own timing.
+    assign vga_frames = hdmi_frames;
+
+    ui_debug_regs debug_registers (
+        .clk                (clk_pixel),
+        .resetn             (resetn),
+        .request_valid      (debug_valid),
+        .request_write      (debug_write),
+        .request_address    (debug_address),
+        .request_wdata      (debug_wdata),
+        .request_rdata      (debug_rdata),
+        .uptime_cycles      (uptime_cycles),
+        .render_frames      (render_frames),
+        .pattern            (demo_pattern),
+        .source_bank        (bank),
+        .source_crc         (32'd0),
+        .oled_frames        (oled_frames),
+        .oled_crc           (32'd0),
+        .hdmi_frames        (hdmi_frames),
+        .hdmi_crc           (32'd0),
+        .vga_frames         (vga_frames),
+        .vga_crc            (32'd0),
+        .pmod0_personality  (pmod0_personality),
+        .pmod1_personality  (pmod1_personality),
+        .pmod0_flipped      (pmod0_flipped),
+        .pmod1_flipped      (pmod1_flipped),
+        .hold               (hold)
+    );
+
     // ------------------------------------------------------------------
     // Personalities.
     // ------------------------------------------------------------------
@@ -286,14 +447,14 @@ module pmod_mirror_core #(
     );
 
     always_comb begin
-        case (PMOD0_PERSONALITY)
+        case (pmod0_personality)
             PERS_OLEDRGB: begin p0_lane_o = oled_lane_o; p0_lane_oe = oled_lane_oe; end
             PERS_VGA_J1:  begin p0_lane_o = vga_j1_o;   p0_lane_oe = vga_j1_oe;   end
             PERS_VGA_J2:  begin p0_lane_o = vga_j2_o;   p0_lane_oe = vga_j2_oe;   end
             default:      begin p0_lane_o = 8'h00;      p0_lane_oe = 8'h00;       end
         endcase
 
-        case (PMOD1_PERSONALITY)
+        case (pmod1_personality)
             PERS_OLEDRGB: begin p1_lane_o = oled_lane_o; p1_lane_oe = oled_lane_oe; end
             PERS_VGA_J1:  begin p1_lane_o = vga_j1_o;   p1_lane_oe = vga_j1_oe;   end
             PERS_VGA_J2:  begin p1_lane_o = vga_j2_o;   p1_lane_oe = vga_j2_oe;   end
@@ -302,7 +463,7 @@ module pmod_mirror_core #(
     end
 
     pmod_slot p0_slot (
-        .flipped (PMOD0_FLIPPED),
+        .flipped (pmod0_flipped),
         .lane_o  (p0_lane_o),
         .lane_oe (p0_lane_oe),
         .lane_i  (p0_lane_i),
@@ -321,7 +482,7 @@ module pmod_mirror_core #(
     // No PMOD1 personality exists yet, so the socket stays released.  The
     // parameter is kept so a future personality slots in here unchanged.
     pmod_slot p1_slot (
-        .flipped (PMOD1_FLIPPED),
+        .flipped (pmod1_flipped),
         .lane_o  (p1_lane_o),
         .lane_oe (p1_lane_oe),
         .lane_i  (p1_lane_i),

@@ -118,6 +118,7 @@ verilator --binary --timing -Wno-fatal \
     "$test_dir/ui_mirror_tb.sv" \
     "$project_dir/src/pmod_mirror_core.sv" \
     "$project_dir/src/audio_test_source.sv" \
+    "$project_dir/src/debug/ui_debug_regs.sv" \
     "$project_dir/src/pmod/pmod_slot.sv" \
     "$project_dir/src/pmod/pmod_io_buf.sv" \
     "$project_dir/src/pmod/pmod_oledrgb.sv" \

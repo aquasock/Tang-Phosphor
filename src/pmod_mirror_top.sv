@@ -8,13 +8,10 @@
 // pixel clock.  The logic itself is in pmod_mirror_core so that it can be
 // simulated without the vendor PLL primitives.
 
-module pmod_mirror_top #(
-    parameter [3:0] PMOD0_PERSONALITY = 4'd1,       // 0 = none, 1 = oledrgb
-    parameter       PMOD0_FLIPPED     = 1'b0,
-    parameter [3:0] PMOD1_PERSONALITY = 4'd0,
-    parameter       PMOD1_FLIPPED     = 1'b0
-) (
+module pmod_mirror_top (
     input  logic       sys_clk,     // 50 MHz board clock, PLL reference only
+    input  logic       uart_rx,
+    output logic       uart_tx,
     inout  wire [7:0]  pmod0_io,
     inout  wire [7:0]  pmod1_io,
     output logic       tmds_clk_p,
@@ -50,15 +47,12 @@ module pmod_mirror_top #(
     wire        hdmi_tmds_clock;
     wire [2:0]  hdmi_tmds;
 
-    pmod_mirror_core #(
-        .PMOD0_PERSONALITY (PMOD0_PERSONALITY),
-        .PMOD0_FLIPPED     (PMOD0_FLIPPED),
-        .PMOD1_PERSONALITY (PMOD1_PERSONALITY),
-        .PMOD1_FLIPPED     (PMOD1_FLIPPED)
-    ) core (
+    pmod_mirror_core core (
         .clk_pixel    (clk_pixel),
         .clk_pixel_x5 (clk_pixel_x5),
         .resetn       (resetn),
+        .uart_rx      (uart_rx),
+        .uart_tx      (uart_tx),
         .pmod0_io     (pmod0_io),
         .pmod1_io     (pmod1_io),
         .tmds_clock   (hdmi_tmds_clock),
