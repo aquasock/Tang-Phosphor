@@ -1560,3 +1560,33 @@ None.
 - User Test: PASS
 
 ---
+
+## 44 COMMIT Unreleased 2026-10-02T11:52:38-07:00
+
+#### Coming From:
+
+Unreleased ba153b7
+
+#### Purpose:
+
+Make the Phosphor core entry recognisable as an audio player and give its core image the same file-naming convention as the other TangCore cores.
+
+#### Outcome:
+
+Tang-Control's core-info entry for core id `0x50` now names its image `phosphortang.bin` instead of `tang-phosphor-merged.bin`, matching the `<system>tang.bin` convention already used by `nestang.bin`, `snestang.bin`, `gbatang.bin`, `mdtang.bin`, `smstang.bin` and `pctang.bin`; the display name deliberately stays `Phosphor`, because it is the project's lineage identity and upstream MiSTer-Phosphor is itself an FPGA audio player and visualizer, so taking Rockbox's name for the core was rejected as misattribution when Rockbox has no RISC-V target and this project consumes its codecs unmodified apart from the carried libwma patch. The recognisability work adds `--- Phosphor - Audio Player ---` as a single definition, `phosphor_menu_title()` declared in `core/cores.h` and defined in `core/phosphor.cpp`, used for both the PhosphorMenu header and the file chooser header. The chooser header was required because selecting Phosphor from the main menu calls `menu_loadrom` and opens the file chooser directly rather than the PhosphorMenu, so the header alone was not visible in the main flow; it is drawn on the first overlay text line, which the chooser left blank, while the TangCore logo seen below the list is drawn by the FPGA text display at a fixed pixel position rather than from the overlay character buffer. `docs/phosphor-loader.md` was also refreshed because it still described the old `cores/console138k/tang-phosphor.bin` path and a WAV-and-FLAC-only scope. The Tang-Control commits are `d531e4c` and `a500a2c`. The firmware was rebuilt to `265233` bytes and installed twice with `tangctl.py firmware`; each install leaves the BL616 in its vendor loader and requires a power-on before TangCore returns, which reconfirms entry 16, and the running image was verified as `app_sha256 baef1bab04b59625e981a5e354f467fa999904e3792f5581c44dbf8cf26c0767`. The card was migrated so that it was never unresolvable: `cores/console138k/phosphortang.bin` was uploaded before the first flash and the obsolete `tang-phosphor-merged.bin` filename was removed only after the new firmware was running, and the renamed core loads and reports magic `0x54504830`, register ABI `0x00010007` and capabilities `0x000000ff`, with a `music/test.wma` sanity play presenting `442368` samples at 44.1 kHz and zero underruns. The user confirmed that the main-menu entry still reads Phosphor, that the core image was renamed on the card, and that the audio-player header appears in both the main-menu path and the OSD pop-up. One correction is recorded: the `0403:6010` "Sipeed USB Debugger" the host sees after a reset is the BL616's vendor loader rather than a separate FTDI device, which agrees with the schematic's `USB-JTAG(BL616)` and supersedes the earlier reasoning that the supplied schematics did not match the board. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 44 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Push both repositories, since Tang-Control carries `d531e4c` and `a500a2c` and Tang-Phosphor carries this entry. Any SD card still holding `tang-phosphor-merged.bin` will no longer resolve with this firmware and needs that file renamed to `phosphortang.bin`. The standing items then remain the FLAC local-versus-hardware sample-count divergence, the missing automated WMA regression, the deferred persistent-player feature, a pinned deployable placement seed, and the debugging-capability work the user is considering for Tang-Control. The possible in-house codec corpus remains undecided and entry 43 still stands.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
