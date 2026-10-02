@@ -1345,3 +1345,33 @@ Implement the SD flow in the Tang-Control firmware: stream a resident player .tp
 - User Test: PASS
 
 ---
+
+## 37 COMMIT Unreleased 2026-10-01T18:26:47-07:00
+
+#### Coming From:
+
+Unreleased 8ccd1cd
+
+#### Purpose:
+
+Implement the SD flow in the Tang-Control firmware: stream a resident player .tpi and an SD audio file to the AE350 over USB CDC, replacing the one-wire play_stream.py path.
+
+#### Outcome:
+
+Added the Tang-Control play and core commands (Tang-Control commit 08ac97a): play sets cpu_mode and restarts the AE350 loader, waits for the loader WAIT state at 0x4020, streams ae350/mplayer.tpi and then the audio file through fpga_file_stream, and leaves cpu_mode set so the resident player's play_output() PCM reaches the pcm_sink; core programs the FPGA over JTAG from an SD image. Two defects surfaced and were fixed. First, the controller-stability UART rework (9d221a8) had left fpga_stream_send and transaction_locked on taskENTER_CRITICAL while the menu moved to fpga_tx_lock, so menu traffic could interleave with a stream and the audio transfer aborted at about 837 KB with transport timeouts; migrating both writers to fpga_tx_lock and serializing get_core_id behind fpga_link_acquire fixed it, and underground.mp3 (5,065,620 bytes) now streams with zero cancels. Second, run_play originally cleared cpu_mode immediately after streaming, cutting the AE350 play path and leaving the player blocked on a full play FIFO; leaving cpu_mode set lets playback start unaided. On hardware the full track decoded as MP3 44.1 kHz into 4,697,903 samples and played audibly with zero underruns (firmware app_sha256 daedf8df, 264,905-byte image). No FPGA build ran this cycle; the merged place2 clk_pixel timing margin remains failing.
+
+#### Next Steps:
+
+Validate the remaining codecs end-to-end over SD, investigate and fix the AE350 out-of-range AHB access wedge that blocks Vorbis, resolve the merged place2 clk_pixel timing margin, and delete the orphaned FPGA decoder sources and their testbenches.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
