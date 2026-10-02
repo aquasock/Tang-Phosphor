@@ -1375,3 +1375,33 @@ None.
 - User Test: PASS
 
 ---
+
+## 38 COMMIT Unreleased 2026-10-01T21:07:32-07:00
+
+#### Coming From:
+
+Unreleased a7894c6
+
+#### Purpose:
+
+Add menu-driven single-file playback through the AE350 and validate every Rockbox codec end to end from the menu.
+
+#### Outcome:
+
+Added a universal resident player and menu routing so files play straight from the Phosphor menu. software/rbhost gained a bench-universal target that embeds all eleven Rockbox codecs (mpa, flac, wav, vorbis, opus, aac, alac, wavpack, wma, a52, tta) into one resident image (resident.tpi, 863,620 bytes), and platform_ae350.c probes the streamed input's magic bytes to name it input.<ext> so rbhost picks the codec from the extension. Tang-Control added utils/ae350_play.cpp, routed the Phosphor menu's single-file selection through it, listed every audio extension in both choosers, and pointed the Phosphor core entry at tang-phosphor-merged.bin (Tang-Control commit 741f392, Tang-Phosphor commit ebf7ef9). A 10 s sine was decoded and played from the menu in every codec except WMA: wav (440,999 samples), flac (444,240), mp2 (440,223), opus (479,688 at 48 kHz resampled to 44.1 kHz), aac (440,999), alac (440,999), wavpack (440,999), ac3 (480,768 at 48 kHz), and tta (440,999), all with zero underruns, plus the earlier full-track mp3 and a full 132 s Vorbis track; WMA silently truncated to 110,592 samples (about 2.5 s of 10 s) and Opus reports a trailing codec error despite a complete decode, and both are recorded as the two known-bad entries to fix later. This also closes the Vorbis wedge question: that load-access fault was the transport failure's error path, not the Vorbis codec, so the earlier wedge note is stale. A synthesis-only pass and the philtomson/tang-console-138k-notes checks confirmed pll_stop on the memory-clock enable, exclusive clock groups, and the single-cycle cmd_en/wr_data_en handshake are already correct, and the RAM mapping is clean (no array written twice per clock became single-port distributed RAM); the 1.9.11.03 netlist is encrypted, which blocks the notes' gate-level replay method.
+
+#### Next Steps:
+
+Fix the WMA truncation and the Opus trailing codec error, resolve the merged place2 clk_pixel timing margin, delete the orphaned FPGA decoder sources and their testbenches, and correct the stale Vorbis-wedge note in project memory.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
