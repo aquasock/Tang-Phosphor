@@ -1,0 +1,36 @@
+diff --git a/lib/rbcodec/codecs/libwma/wmadeci.c b/lib/rbcodec/codecs/libwma/wmadeci.c
+index 56779ca..05f4f30 100644
+--- a/lib/rbcodec/codecs/libwma/wmadeci.c
++++ b/lib/rbcodec/codecs/libwma/wmadeci.c
+@@ -1345,7 +1345,14 @@ int wma_decode_superframe_init(WMADecodeContext* s,
+ 
+         s->bit_offset = get_bits(&s->gb, s->byte_offset_bits + 3);
+     } else {
+-        s->nb_frames = 1;
++        /* Tang-Phosphor: no bit reservoir - the packet carries whole frames packed together
++         * (plus trailing padding), so the frame count is derived from the
++         * payload size and the per-frame block alignment.  Hardcoding one
++         * frame per packet truncated WMA v2 files whose packets hold several
++         * frames. */
++        s->nb_frames = (s->block_align > 0) ? buf_size / s->block_align : 1;
++        if (s->nb_frames < 1)
++            s->nb_frames = 1;
+     }
+ 
+     return 1;
+@@ -1417,6 +1424,15 @@ int wma_decode_superframe_frame(WMADecodeContext* s,
+         s->reset_block_lengths = 1;
+     }
+ 
++    /* Tang-Phosphor: without the bit reservoir the frames are byte-aligned
++     * block_align slots, so re-position the bit reader at this frame's slot. */
++    if (!s->use_bit_reservoir && s->block_align > 0 && s->current_frame > 0)
++    {
++        int off = s->current_frame * s->block_align;
++        if (off < buf_size)
++            init_get_bits(&s->gb, (uint8_t *)buf + off, (buf_size - off) * 8);
++    }
++
+     /* If we haven't decoded a frame yet, do it now */
+     if (!done)
+         {

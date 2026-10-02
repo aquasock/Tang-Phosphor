@@ -1496,3 +1496,37 @@ Push the two pending commits for entries 40 and 41 to `origin/main`, then invest
 - User Test: PASS
 
 ---
+
+## 42 COMMIT Unreleased 2026-10-02T10:19:01-07:00
+
+#### Coming From:
+
+Unreleased a087883
+
+#### Purpose:
+
+Fix the two known-bad codecs, the WMA decode truncation and the Opus total silence, so every Rockbox codec plays correctly from the resident AE350 player.
+
+#### Outcome:
+
+Both defects were reproduced off-target before being fixed: `qemu-riscv32` running the project's own rbhost harness produced numbers identical to the Tang, which made iteration local. Opus was never played at all, and not because of a decode failure: the AE350 log showed `Codec: Opus`, `Frequency: 48000 Hz`, `error: codec error`, `Samples: 479688`, and the program's result register read `0x600d0001`, so `software/rbhost/host/platform_ae350.c` skipped `play_output()` because it gated playback on `bench_play && exit_status == 0` while the Opus codec returns a trailing error after a complete decode; the gate now keys on samples actually produced (`output_size > 0x2e`), so a nonzero codec status no longer suppresses a good decode. WMA decoded exactly `numpackets x 2048` samples (110592 of 441000 for the test file, and the same one-frame-per-packet pattern at 5, 10 and 20 seconds, 128 and 192 kbps, mono and stereo), and an instrumented run showed the decoder consuming the entire file with no error and no early end of input, so the loss was inside libwma: `wma_decode_superframe_init` hardcoded `nb_frames = 1` whenever the bit reservoir was unused, and each ASF packet in fact carries several block-aligned frames (3200-byte packets with `block_align` 743 or 1115). `third_party/rockbox/lib/rbcodec/codecs/libwma/wmadeci.c` now derives the frame count from the packet payload and `block_align` and repositions the bit reader at each frame's `block_align` slot; forcing the bit-reservoir path instead was tried and rejected because these files carry no superframe headers. After the fix the local decode is a clean 440 Hz tone (zero-crossing rate 880/s and a steady RMS matching ffmpeg, where before the extra frames were garbage) at the correct length, and ffprobe confirmed the input was an ordinary 10 s stereo 44.1 kHz 128 kbps `wmav2` file that VLC plays correctly, whose reported 13099 ms duration is only the ASF `play_duration` including its 3100 ms preroll. Because the libwma change lives in a submodule and a superproject commit cannot capture a dirty submodule, the fix is carried as `third_party/patches/0001-libwma-frames-per-packet.patch` with an idempotent `scripts/apply-rockbox-patches.sh`, which `software/rbhost`'s Makefile now runs before compiling any Rockbox source; reverting the submodule and rebuilding was verified to re-apply the patch and keep the decode correct. The rebuilt resident player (`ae350/resident.tpi`, 863764 bytes, CRC-32 `f4709ebe`) was uploaded with a byte-identical SD readback, and on hardware `music/test.wma` presented 442368 samples at 44.1 kHz, `music/test.opus` presented 479688 samples at 48 kHz, `music/test.flac` presented 444240, and `music/test.ac3` presented 480768, all with zero underruns. The user reported that all codecs pass now. All twelve FPGA regressions and the five rbhost codec vectors pass. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 42 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Push this cycle, then decide whether to add an automated regression for the WMA path, which currently has none because `make check` covers only FLAC vectors and a WMA vector would depend on the ffmpeg version. Beyond that, the standing items are the deferred persistent-player feature that must still be re-derived from the current tree, pinning a deployable placement seed, and the debugging-capability work the user is considering for Tang-Control, where the agreed priority is a firmware-independent register plane plus sticky and per-session counters rather than deeper JTAG.
+
+#### Files Modified:
+
+- THIRD_PARTY.md
+- scripts/apply-rockbox-patches.sh
+- software/rbhost/Makefile
+- software/rbhost/host/platform_ae350.c
+- third_party/patches/0001-libwma-frames-per-packet.patch
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

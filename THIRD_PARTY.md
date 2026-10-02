@@ -86,7 +86,8 @@ or firmware.
 
 `third_party/rockbox` is a Git submodule of the Rockbox open-source firmware.
 Its codecs, codec support libraries, metadata parsers, DSP, and supporting
-firmware and library sources are compiled unmodified by `software/rbhost`:
+firmware and library sources are compiled by `software/rbhost`. One local
+modification is carried, recorded here and applied from a patch file:
 
 - Project: https://www.rockbox.org/ (mirror https://github.com/Rockbox/rockbox)
 - Reference commit: `e45936397ee3677c910c9a0c6473184e9755040c`
@@ -99,6 +100,24 @@ derived from `lib/rbcodec/rbcodecconfig-example.h`,
 `lib/rbcodec/rbcodecplatform-unix.h`, and `lib/rbcodec/test/file.h`; those
 files remain GPL-2.0-or-later. The combined rbhost and codec binaries are
 distributed under GPL-3.0 as permitted by the "or later" terms.
+
+### Local modification: libwma frame count
+
+`lib/rbcodec/codecs/libwma/wmadeci.c` is patched. Rockbox's WMA v2 decoder
+hardcoded one frame per ASF packet whenever the bit reservoir is not used, so
+packets carrying several block-aligned frames (what ffmpeg's `wmav2` muxer
+produces) decoded only the first frame and truncated playback to roughly a
+quarter of the track. The patch derives the frame count from the packet
+payload size and `block_align` and repositions the bit reader at each frame's
+`block_align` slot. It affects only the no-bit-reservoir path and is intended
+for upstream submission.
+
+The patch is carried as
+`third_party/patches/0001-libwma-frames-per-packet.patch`, marked with a
+`Tang-Phosphor:` comment in the source, and applied by
+`scripts/apply-rockbox-patches.sh`. `software/rbhost`'s Makefile runs that
+script before compiling any Rockbox source, because `git submodule update`
+reverts the patch; the script is idempotent and re-applies it automatically.
 
 ## QEMU (development tooling only)
 

@@ -388,7 +388,10 @@ uint32_t ae350_main(void)
     AE350_REG(AE350_USER(5)) = output_size;
     AE350_REG(AE350_USER(6)) = crc32(OUTPUT_BASE, output_size);
     publish64(8, time);
-    if (bench_play && exit_status == 0)
+    /* The codec's status is nonzero for a trailing error even when the whole
+     * track decoded (Opus reports "codec error" after a complete decode), so
+     * gate playback on samples actually produced rather than on exit_status. */
+    if (bench_play && output_size > 0x2e)
         play_output();
     return 0x600d0000u | ((uint32_t)exit_status & 0xffffu);
 }

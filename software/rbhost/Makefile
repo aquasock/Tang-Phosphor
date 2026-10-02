@@ -161,7 +161,18 @@ $(BUILD)/rb/lib/rbcodec/codecs/%.o: $(RB)/lib/rbcodec/codecs/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -I$(dir $<) $(PRE) $(CODECFLAGS) $(EXTRA) -c $< -o $@
 
-$(BUILD)/rb/%.o: $(RB)/%.c
+# The Rockbox submodule carries local patches recorded in
+# third_party/patches/ (see THIRD_PARTY.md).  They must be applied before any
+# Rockbox source is compiled, because `git submodule update` reverts them.
+# The stamp below depends on the patch files and on the patched source itself,
+# so a re-checked-out submodule re-applies the patches on the next build.
+ROCKBOX_PATCHES := $(wildcard $(ROOT)/third_party/patches/*.patch)
+$(BUILD)/.rockbox-patched: $(ROCKBOX_PATCHES) $(RB)/lib/rbcodec/codecs/libwma/wmadeci.c
+	@mkdir -p $(BUILD)
+	@$(ROOT)/scripts/apply-rockbox-patches.sh
+	@touch $@
+
+$(BUILD)/rb/%.o: $(RB)/%.c | $(BUILD)/.rockbox-patched
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(EXTRA) -c $< -o $@
 
