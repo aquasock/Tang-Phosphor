@@ -1745,3 +1745,42 @@ The next cycle is the mirror checker, which is what makes this architecture prov
 - User Test: PASS
 
 ---
+
+## 49 COMMIT Unreleased 2026-10-02T16:46:16-07:00
+
+#### Coming From:
+
+Unreleased 7a236dd
+
+#### Purpose:
+
+Add the PmodVGA as a third presentation backend and find out whether the timing margin survives it, since the margin recorded at two backends looked like it might not.
+
+#### Outcome:
+
+The VGA backend does not generate a raster of its own; it observes the one the HDMI transmitter already produces and derives syncs and colour from it, which is how Tang-PSX drives its VGA output. That was a deliberate choice over a true 800x600 mode, because 800x600 at 60 Hz needs a 40 MHz pixel clock and 74.25 divided by 40 is not a rational-integer ratio, so it cannot be produced by a clock enable from clk_pixel and would force a real second clock domain with an asynchronous FIFO and a duplicated store through a design whose single clock is precisely why its bank swap and per-backend bank latch are trivial. `src/video/ui_vga_backend.sv` therefore takes the transmitter's raster and colour and derives the syncs from the CEA-861 VIC 4 windows -- 40-pixel horizontal sync after a 110-pixel front porch, 5-line vertical sync after a 5-line front porch, both positive polarity -- with the top four bits of each channel feeding the module's resistor ladder. `src/pmod/pmod_vga.sv` is the dual-socket personality: J1 carries red on pins 1-4 and blue on pins 7-10, J2 carries green on pins 1-4 with horizontal and vertical sync on pins 7 and 8 and two unconnected pins. Which socket carries J1 is the personality choice and upside-down seating is the same `flipped` bit every other module uses, so Tang-PSX's two placement mode bits become declarations rather than mode bits. The first VGA build exposed a trap worth recording: it produced a bitstream byte-identical to the OLED build, because with no socket selecting the VGA personality the entire backend was dead logic and the synthesiser removed it, so a build that merely contains VGA code is not a build that has VGA in it. The variant therefore selects the personalities for real, through `src/pmod_vga_top.sv` with J1 on PMOD1 and J2 on PMOD0, matching Tang-PSX's verified default. That top is a sibling of `pmod_mirror_top` rather than a wrapper around it, because wrapping puts the PLL outputs one level down and this tool version cannot name hierarchical nets from the SDC and does not support patterns in `get_nets`, which was established by two failed builds rather than assumed; each variant now owns an identical twenty-line clock block and both keep the same root-level net names. `scripts/build-pmod.sh` gained the variant argument and builds either configuration. The timing answer is the point of the exercise: the OLED variant measures `clk_pixel` Fmax 79.133 MHz and the VGA variant, with all three backends live, measures 78.946 MHz, a difference of 0.187 MHz or 0.24 percent, both meeting the 74.250 MHz constraint. The margin is therefore not held by the presentation backends at all, and a fourth backend would very likely also fit, which retires a watch item the previous entry carried. The suite reports 18 passing tests and no failures. The image was uploaded to `cores/console138k/vgatang.bin` with a byte-identical SD readback and loaded over the two-wire interface, and the user reported that HDMI and VGA are identical, the first time this bench has run a 720p60 raster over the PmodVGA port. One gap is recorded rather than glossed: the VGA backend still has no simulation test, so its sync windows and lane mapping were verified on hardware before they were verified in simulation, which is the reverse of this project's usual order and is the next thing to fix. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 49 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The next cycle is the mirror checker, which remains what makes this architecture provable rather than merely visible and which is now overdue: a per-output CRC32 over the emitted pixel stream with a frame counter and an epoch, the BL616 debug transport added to this core so those registers can be read, a distinct core id, the personality and orientation parameters driven by those registers so `/tang.ini` becomes live and the two configurations stop needing separate tops, and `tools/ui_mirror_check.py` to compute the expected raster independently and compare. A simulation test for the VGA backend folds into that cycle, so the sync windows and lane mapping are covered before anything else is built on them. After that the remaining PMOD modules as personalities, then the fold into the player. The watch item remaining is the 6.4 percent `clk_pixel` margin, now known not to be consumed by presentation backends.
+
+#### Files Modified:
+
+- build-pmod.tcl
+- build-pmod-vga.tcl
+- scripts/build-pmod.sh
+- src/boards/console138k_pmod.sdc
+- src/pmod/pmod_vga.sv
+- src/pmod_mirror_core.sv
+- src/pmod_vga_top.sv
+- src/video/ui_hdmi_backend.sv
+- src/video/ui_vga_backend.sv
+- tests/run.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

@@ -1,5 +1,6 @@
 set_device -name GW5AST-138C GW5AST-LV138PG484AC1/I0
 
+add_file -type verilog "src/pmod_vga_top.sv"
 add_file -type verilog "src/pmod_mirror_top.sv"
 add_file -type verilog "src/pmod_mirror_core.sv"
 
@@ -41,9 +42,9 @@ add_file -type verilog "src/pll/pll_74.v"
 add_file -type cst "src/boards/console138k_pmod.cst"
 add_file -type sdc "src/boards/console138k_pmod.sdc"
 
-set_option -output_base_name tang_phosphor_pmod
+set_option -output_base_name tang_phosphor_vga
 set_option -synthesis_tool gowinsynthesis
-set_option -top_module pmod_mirror_top
+set_option -top_module pmod_vga_top
 set_option -verilog_std sysv2017
 set_option -use_sspi_as_gpio 1
 set_option -use_mspi_as_gpio 1

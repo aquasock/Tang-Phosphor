@@ -29,6 +29,12 @@ module ui_hdmi_backend (
     output logic [5:0]  rd_y,
     input  logic [15:0] rd_px,
 
+    // The raster and colour this backend is producing, so the PmodVGA backend
+    // can observe them rather than build a second timing.
+    output logic [11:0] raster_x,
+    output logic [11:0] raster_y,
+    output logic [23:0] raster_rgb,
+
     // One-cycle pulse at the start of each frame, for the swap controller.
     output logic        frame_tick,
 
@@ -91,6 +97,10 @@ module ui_hdmi_backend (
         .screen_width       (),
         .screen_height      ()
     );
+
+    assign raster_x   = {1'b0, cx};
+    assign raster_y   = {2'b0, cy};
+    assign raster_rgb = rgb;
 
     always_ff @(posedge clk_pixel) begin
         if (!resetn)

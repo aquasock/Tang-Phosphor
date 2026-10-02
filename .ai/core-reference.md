@@ -186,6 +186,14 @@ supported profile. Project-specific limits remain implementation limits.
 - Relevant rule: A single native resolution cannot fill 96x64 (3:2), 800x600 (4:3) and 1280x720 (16:9) without interpolation, because filling a screen at an equal integer factor in both axes forces the native aspect to equal that screen's aspect, and the three differ. The only resolutions that divide all three exactly are 32x8 and smaller by a factor of two. Rendering at the panel's own 96x64 is therefore the compromise: the panel, the smallest and least forgiving display, is filled exactly, and each larger screen gets the largest integer factor that fits with symmetric bars. The best single alternative aspect, the geometric mean sqrt(4/3 x 16/9) = 1.5396, raises the worst-case coverage only from 84.4 percent to 86.6 percent, and the best integer realisation of it is a grid too coarse to render a menu.
 - Tang-Phosphor use: Render at 96x64 and scale by 1 for the panel, 8 for 800x600 (768x512 centred) and 11 for 1280x720 (1056x704 centred at (112, 8)).
 
+### Digilent PmodVGA pinout and sync polarity
+
+- Sources: Digilent PmodVGA Reference Manual, https://digilent.com/reference/pmod/pmodvga/reference-manual (pin table) and rev C.0 schematic 500-345; Tang-PSX `.ai/core-reference.md` record BRD-005 and `gateware/vga_output.py`; hardware verification on this bench 2026-10-02.
+- Authority: Vendor primary documentation plus a hardware test on this dock.
+- Relevant rule: The module is a dual PMOD. J1 carries red R0-R3 on pins 1-4 and blue B0-B3 on pins 7-10; J2 carries green G0-G3 on pins 1-4, horizontal sync on pin 7, vertical sync on pin 8, and pins 9-10 are not connected. Two SN74ALVC245 buffers drive per-colour resistor ladders in which bit 3 is the most significant step, so the top four bits of each 8-bit channel are the correct mapping, and every module pin is a buffered input, so a wrong placement or orientation only loses the picture.
+- Sync polarity: the polarity belongs to the raster, not to the module. CEA-861 VIC 4, which is 1280x720 at 60 Hz and the mode the transmitter produces, uses positive sync; the 640x480 convention Tang-PSX used is negative. A monitor that follows CEA locks on the positive form.
+- Tang-Phosphor use: `src/pmod/pmod_vga.sv` presents one half of the module per socket with a parameter selecting J1 or J2, so which socket carries which half is a declaration and upside-down seating is the socket layer's existing `flipped` bit. `src/video/ui_vga_backend.sv` takes the raster and colour from the HDMI transmitter rather than generating its own timing, which is Tang-PSX's arrangement and the reason the VGA needed no second clock. A true 800x600 mode was rejected because 40 MHz cannot be derived from the 74.25 MHz pixel clock by a clock enable.
+
 ### The pixel latency is not one number
 
 - Sources: `tests/ui_hdmi_scan_tb.sv`, which failed on the single-constant version of this rule, 2026-10-02.

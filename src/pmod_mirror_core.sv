@@ -49,10 +49,17 @@ module pmod_mirror_core #(
 );
     localparam [3:0] PERS_NONE    = 4'd0;
     localparam [3:0] PERS_OLEDRGB = 4'd1;
+    localparam [3:0] PERS_VGA_J1  = 4'd2;
+    localparam [3:0] PERS_VGA_J2  = 4'd3;
 
     localparam integer W = 96;
     localparam integer H = 64;
     localparam integer CLK_MHZ = 74;        // clk_pixel is 74.25 MHz
+
+    // The raster the HDMI transmitter produces, which the PmodVGA observes.
+    logic [11:0] raster_x;
+    logic [11:0] raster_y;
+    logic [23:0] raster_rgb;
 
     wire rst = ~resetn;
 
@@ -184,6 +191,9 @@ module pmod_mirror_core #(
             .rd_x           (hdmi_src_x),
             .rd_y           (hdmi_src_y),
             .rd_px          (hdmi_px),
+            .raster_x       (raster_x),
+            .raster_y       (raster_y),
+            .raster_rgb     (raster_rgb),
             .frame_tick     (hdmi_frame_tick),
             .tmds_clock     (tmds_clock),
             .tmds           (tmds)
@@ -192,6 +202,9 @@ module pmod_mirror_core #(
         assign hdmi_src_x      = 7'd0;
         assign hdmi_px         = 16'h0000;
         assign hdmi_frame_tick = 1'b0;
+        assign raster_x        = 12'd0;
+        assign raster_y        = 12'd0;
+        assign raster_rgb      = 24'h000000;
         assign tmds_clock      = 1'b0;
         assign tmds            = 3'b000;
     end
@@ -237,18 +250,55 @@ module pmod_mirror_core #(
     logic [7:0] p0_lane_o;
     logic [7:0] p0_lane_oe;
     logic [7:0] p0_lane_i;
+    logic [7:0] p1_lane_o;
+    logic [7:0] p1_lane_oe;
     logic [7:0] p1_lane_i;
     logic [7:0] p0_io_o, p0_io_oe, p0_io_i;
     logic [7:0] p1_io_o, p1_io_oe, p1_io_i;
 
+    logic [7:0] vga_j1_o, vga_j1_oe, vga_j2_o, vga_j2_oe;
+    logic [3:0] vga_r, vga_g, vga_b;
+    logic       vga_hs, vga_vs;
+
+    ui_vga_backend vga_timing (
+        .cx     (raster_x),
+        .cy     (raster_y),
+        .rgb    (raster_rgb),
+        .vga_r  (vga_r),
+        .vga_g  (vga_g),
+        .vga_b  (vga_b),
+        .vga_hs (vga_hs),
+        .vga_vs (vga_vs)
+    );
+
+    // The module is a dual PMOD: one socket carries J1, the other J2.  Which is
+    // which, and whether either is seated upside down, are runtime declarations.
+    pmod_vga #(.J1(1'b1)) vga_half_j1 (
+        .vga_r(vga_r), .vga_g(vga_g), .vga_b(vga_b),
+        .vga_hs(vga_hs), .vga_vs(vga_vs),
+        .lane_o(vga_j1_o), .lane_oe(vga_j1_oe)
+    );
+
+    pmod_vga #(.J1(1'b0)) vga_half_j2 (
+        .vga_r(vga_r), .vga_g(vga_g), .vga_b(vga_b),
+        .vga_hs(vga_hs), .vga_vs(vga_vs),
+        .lane_o(vga_j2_o), .lane_oe(vga_j2_oe)
+    );
+
     always_comb begin
-        if (PMOD0_PERSONALITY == PERS_OLEDRGB) begin
-            p0_lane_o  = oled_lane_o;
-            p0_lane_oe = oled_lane_oe;
-        end else begin
-            p0_lane_o  = 8'h00;
-            p0_lane_oe = 8'h00;
-        end
+        case (PMOD0_PERSONALITY)
+            PERS_OLEDRGB: begin p0_lane_o = oled_lane_o; p0_lane_oe = oled_lane_oe; end
+            PERS_VGA_J1:  begin p0_lane_o = vga_j1_o;   p0_lane_oe = vga_j1_oe;   end
+            PERS_VGA_J2:  begin p0_lane_o = vga_j2_o;   p0_lane_oe = vga_j2_oe;   end
+            default:      begin p0_lane_o = 8'h00;      p0_lane_oe = 8'h00;       end
+        endcase
+
+        case (PMOD1_PERSONALITY)
+            PERS_OLEDRGB: begin p1_lane_o = oled_lane_o; p1_lane_oe = oled_lane_oe; end
+            PERS_VGA_J1:  begin p1_lane_o = vga_j1_o;   p1_lane_oe = vga_j1_oe;   end
+            PERS_VGA_J2:  begin p1_lane_o = vga_j2_o;   p1_lane_oe = vga_j2_oe;   end
+            default:      begin p1_lane_o = 8'h00;      p1_lane_oe = 8'h00;       end
+        endcase
     end
 
     pmod_slot p0_slot (
@@ -272,8 +322,8 @@ module pmod_mirror_core #(
     // parameter is kept so a future personality slots in here unchanged.
     pmod_slot p1_slot (
         .flipped (PMOD1_FLIPPED),
-        .lane_o  (8'h00),
-        .lane_oe (8'h00),
+        .lane_o  (p1_lane_o),
+        .lane_oe (p1_lane_oe),
         .lane_i  (p1_lane_i),
         .io_o    (p1_io_o),
         .io_oe   (p1_io_oe),
