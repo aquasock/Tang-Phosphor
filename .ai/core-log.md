@@ -1530,3 +1530,33 @@ Push this cycle, then decide whether to add an automated regression for the WMA 
 - User Test: PASS
 
 ---
+
+## 43 COMMIT Unreleased 2026-10-02T11:06:59-07:00
+
+#### Coming From:
+
+Unreleased 0da404d
+
+#### Purpose:
+
+Verify end to end, over the two-wire link alone, that a freshly installed TangCore SD card carrying this firmware plays every supported audio format.
+
+#### Outcome:
+
+The card was a fresh TangCore install holding only `cores/`, and the Tang sat at its main menu with the BL616 CDC attached, so `music/` and `ae350/` were created and every artifact was transferred without a reboot or a cable change. The corpus could not be reused from the previous card because no copy exists on the host, so `test.wma` and `test.opus` were the two surviving originals while the other ten files were regenerated with ffmpeg from a 10 s 440 Hz stereo 44.1 kHz tone; the regenerated `test.flac` came out at exactly 131631 bytes, the same size as the original corpus file, which corroborates the regeneration, and all twelve were decoded locally under `qemu-riscv32` first so that the expected sample counts were known. Uploaded were the twelve files to `music/` and `build/rbhost/bench/resident.tpi` (`863764` bytes) as `ae350/resident.tpi`, each verified against its SD readback by size and CRC. The merged core was then built fresh with `MERGED_PLACE_OPTIONS="1 2 3 4"` under the memory cap: `place2` and `place3` met timing while `place1` and `place4` failed, and the bitstreams came out byte-identical to the entry 42 build, `place3` at SHA-256 `f708e977649dc58e1229dff77d87ddb3445a96f1140a6b0be3cd5c4326c33f34`, which is expected because only the AE350 software had changed. `place3` was uploaded as `cores/console138k/tang-phosphor-merged.bin` with a byte-identical readback and loaded with `tangctl.py core`, after which the core reported magic `0x54504830`, register ABI `0x00010007`, build date `0x20260927` and capabilities `0x000000ff`. The sweep then played all twelve formats in order, each reaching audio state 4 with zero underruns: `music/test.wav` presented `441000` samples, `music/test.flac` `444240`, `music/test.mp2` `440735`, `music/test.mp3` `441000`, `music/test.ogg` `441000`, `music/test.mp4` `441000`, `music/test.m4a` `441000`, `music/test.wv` `441000`, `music/test.ac3` `442368`, `music/test.tta` `441000`, `music/test.wma` `442368`, and `music/test.opus` `479688` at 48 kHz. The FLAC count is the one unexplained observation: the file nominally holds `441000` samples and `qemu-riscv32` reports `441000`, but the AE350 consistently presents `444240`, the same figure recorded in entries 38 and later, so it is not a regression from this work but an unresolved local-versus-hardware divergence. The regenerated AC-3 file plays at 44.1 kHz rather than the original corpus file's 48 kHz, which was stated incorrectly when the test was announced and is corrected here. The user reported that all twelve sounded identical and boring and that WMA and Opus, the two formats fixed in entry 42, were perfect. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 43 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Push this cycle, then investigate the FLAC local-versus-hardware sample-count divergence, where the same file decodes to `441000` samples under `qemu-riscv32` and `444240` on the AE350. Consider committing a deterministic generator for the codec test set, which the project already does for its other vectors through `tools/generate_wav_test.py`, `tools/generate_flac_test_vectors.py` and `tools/generate_gapless_test.py`, since the corpus uploaded here was regenerated ad hoc. The standing items remain the missing automated WMA regression, the deferred persistent-player feature, a pinned deployable placement seed, and the debugging-capability work the user is considering for Tang-Control.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
