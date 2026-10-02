@@ -120,8 +120,43 @@ module pcm_sink_tb;
             $display("FAIL: sample1 %04h/%04h expected ABCD/EF01", got_l[1], got_r[1]); failures++;
         end
 
+        // Startup window: a tick between START and the first assembled sample
+        // clears no data and must not be counted; a real starvation once
+        // playback is underway (no stream end) still must be.
+        stream_start = 1'b1;
+        @(posedge clk);
+        stream_start = 1'b0;
+        @(posedge clk);
+        sample_tick = 1'b1;      // RECEIVING, FIFO empty: prefill, not underrun
+        @(posedge clk);
+        sample_tick = 1'b0;
+        @(posedge clk);
+        if (underrun_count != 0 || samples_played != 0) begin
+            $display("FAIL: prefill tick counted (underruns %0d played %0d)",
+                     underrun_count, samples_played); failures++;
+        end
+
+        send_sample(16'h0011, 16'h0022);
+        sample_tick = 1'b1;
+        @(posedge clk);
+        sample_tick = 1'b0;
+        @(posedge clk);
+        if (underrun_count != 0 || samples_played != 1) begin
+            $display("FAIL: first sample (underruns %0d played %0d)",
+                     underrun_count, samples_played); failures++;
+        end
+
+        sample_tick = 1'b1;      // FIFO drained, still PLAYING, no end: real
+        @(posedge clk);
+        sample_tick = 1'b0;
+        @(posedge clk);
+        if (underrun_count != 1) begin
+            $display("FAIL: starvation not counted (underruns %0d)", underrun_count);
+            failures++;
+        end
+
         if (failures == 0)
-            $display("PASS pcm_sink: rate capture, byte assembly, and output");
+            $display("PASS pcm_sink: rate capture, byte assembly, output, and startup window");
         else
             $fatal(1, "pcm_sink_tb: %0d failures", failures);
         $finish;

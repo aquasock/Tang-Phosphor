@@ -142,7 +142,7 @@ module pcm_sink #(
                     if (fifo_out_valid) begin
                         samples_played_r <= samples_played_r + 32'd1;
                         playback_active  <= 1'b1;
-                    end else if (state == ST_PLAYING || state == ST_RECEIVING) begin
+                    end else if (state == ST_PLAYING && !end_seen) begin  // prefill and drain silence are not underruns
                         underruns_r <= underruns_r + 32'd1;
                     end
                 end

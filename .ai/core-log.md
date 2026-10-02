@@ -1465,3 +1465,34 @@ None.
 - User Test: PASS
 
 ---
+
+## 41 COMMIT Unreleased 2026-10-02T08:42:33-07:00
+
+#### Coming From:
+
+Unreleased 3579c4f
+
+#### Purpose:
+
+Eliminate the spurious PCM FIFO underrun that the raw-PCM sink counted during a session's prefill and end-of-stream drain windows without changing the audio path.
+
+#### Outcome:
+
+The raw-PCM sink no longer counts an underrun until playback is genuinely underway: the one changed condition in `src/audio/pcm_sink.sv` now reads `state == ST_PLAYING && !end_seen`, excluding both the prefill interval between `stream_start` (which clears the FIFO) and the first assembled sample and the one-cycle transition from `ST_PLAYING` to `ST_DONE` after the last sample drains. The count condition had been inherited from the decoder-based `wav_stream_player` without that player's `PREFILL_LEVEL` gate, so a sample tick landing in the roughly microsecond prefill gap was counted once and then retained, because `underruns_r` resets only on core reset while `samples_played` resets at `stream_start`; a scratch Verilator testbench reproduced `underruns=1` with `samples_played=0` on the unmodified RTL and showed that the gate removes it while still counting a genuine starvation tick, and a controlled ten-session run had already failed to reproduce the artifact (`0` overruns), establishing the low event rate. `tests/pcm_sink_tb.sv` gained a startup-window case asserting that a tick before the first sample is not counted and that a starvation after playback begins still is, and all twelve Verilator regressions pass. A four-placement merged build under the memory cap produced two timing-clean seeds, `place2` at `clk_pixel` Fmax `76.753` MHz and `place3` at `76.412` MHz, while `place1` and `place4` missed setup; `place3` was uploaded as `cores/console138k/tang-phosphor-merged.bin` with SHA-256 `f708e977649dc58e1229dff77d87ddb3445a96f1140a6b0be3cd5c4326c33f34` and CRC-32 `0fb6ab7e`, byte-identical on SD readback, and loaded through `tangctl.py core` to a core reporting magic `0x54504830`, register ABI `0x00010007`, build date `0x20260927`, core capabilities `0x000000ff`, and a clean scratch write/readback. On hardware `music/test.flac` presented exactly `444240` samples, `music/test.wav` `441000`, and `music/underground.mp3` `4697903`, all at `0xac44` with `0x6c` staying zero, and a sweep of the resident player's remaining media found `music/test.mp2` `440735`, `music/test.tta` `441000`, `music/test.m4a` (ALAC) `441000`, `music/test.mp4` (AAC) `441000`, `music/test.wv` `441000`, `music/test.ac3` `480768` at `0xbb80`, and `music/kakariko-village.ogg` `5821679` all correct, while `music/test.wma` again truncated to `110592` samples exactly as entry 38 recorded and `music/test.opus` produced no audio in three attempts because the sink received no samples at all, which differs from entry 38's record of a complete Opus decode with a trailing error and was not explained in this cycle. The user reported that all of the playback sounded perfect. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 41 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Push the two pending commits for entries 40 and 41 to `origin/main`, then investigate the Opus silence, which now produces no samples where entry 38 recorded a complete decode with a trailing error, and the WMA truncation at `110592` samples. After that, resume the deferred persistent-player feature, which must still be re-derived from the current tree because the `run_one_track()` loop named in entry 39 was never committed, and pin a standing deployable placement seed, since `place1` and `place4` traded places between the entry 39 and entry 41 builds and the default option 4 currently fails timing.
+
+#### Files Modified:
+
+- src/audio/pcm_sink.sv
+- tests/pcm_sink_tb.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
