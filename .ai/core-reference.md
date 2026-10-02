@@ -175,6 +175,24 @@ supported profile. Project-specific limits remain implementation limits.
 - Relevant rule: `/tang.ini` at the SD-card root is the contract between what is physically seated and what the gateware drives, because PMOD modules carry no identification pins and presence cannot be detected. Keys are flat under one `[tang]` section: `pmod0 = <module>`, `pmod0_flip = yes|no`, and the same for `pmod1`.
 - Tang-Phosphor use: A missing file, or a socket with no entry, leaves that socket released, so the absent file is the safe state and no PMOD output appears until the user configures one. Unknown module names, a `vga_j1` without its `vga_j2` partner, and `flip = yes` for a module that is not flip-safe are all refused rather than guessed. The core reports which personalities it supports so the registry lives beside the RTL that implements it, while the parser belongs to Tang-Control, which owns the SD card and the transport. `pmod_mirror_top`'s personality and orientation parameters are the register seam this file will drive.
 
+---
+
+## Integer Scaling
+
+### One frame store, one mapper per backend
+
+- Sources: Project decision and hardware verification, 2026-10-02; the aspect arithmetic in this record.
+- Authority: Project convention, derived from the three target aspect ratios and confirmed on hardware.
+- Relevant rule: A single native resolution cannot fill 96x64 (3:2), 800x600 (4:3) and 1280x720 (16:9) without interpolation, because filling a screen at an equal integer factor in both axes forces the native aspect to equal that screen's aspect, and the three differ. The only resolutions that divide all three exactly are 32x8 and smaller by a factor of two. Rendering at the panel's own 96x64 is therefore the compromise: the panel, the smallest and least forgiving display, is filled exactly, and each larger screen gets the largest integer factor that fits with symmetric bars. The best single alternative aspect, the geometric mean sqrt(4/3 x 16/9) = 1.5396, raises the worst-case coverage only from 84.4 percent to 86.6 percent, and the best integer realisation of it is a grid too coarse to render a menu.
+- Tang-Phosphor use: Render at 96x64 and scale by 1 for the panel, 8 for 800x600 (768x512 centred) and 11 for 1280x720 (1056x704 centred at (112, 8)).
+
+### The pixel latency is not one number
+
+- Sources: `tests/ui_hdmi_scan_tb.sv`, which failed on the single-constant version of this rule, 2026-10-02.
+- Authority: Hardware measurement through simulation of the real composition; a project implementation rule, not an external standard.
+- Relevant rule: The registered stages between an output coordinate and its pixel differ per axis. Horizontally the coordinate changes every clock, so the scan mapper's registered mapping is one output pixel behind and the frame store's registered read adds another, requiring two pixels of correction. Vertically the coordinate changes once per line, so the mapper's register is already aligned with the line it belongs to and the store returns that same line's pixel, requiring no correction. A shared constant shifts the whole image by one source row.
+- Tang-Phosphor use: `src/video/ui_hdmi_scan.sv` carries `X_LATENCY` and `Y_LATENCY` separately, and the bar decision is taken combinationally from the coordinate the transmitter presents rather than from a delayed mapper output, because the colour presented must belong to that coordinate. A paced backend such as the OLED engine, which holds a coordinate for a whole 16-bit transfer, needs no correction on either axis.
+
 ### Digilent Pmod OLEDrgb pinout and orientation
 
 - Sources: Digilent Pmod OLEDrgb Reference Manual, https://digilent.com/reference/pmod/pmodoledrgb/reference-manual (J1 pin table and the 32-step initialisation list); SSD1331 controller datasheet; a local copy of the reference manual printed by the user at `Documents/Pmod OLEDrgb Reference Manual - Digilent Reference.pdf`.

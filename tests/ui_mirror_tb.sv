@@ -283,10 +283,24 @@ module ui_mirror_tb;
     // ==================================================================
     wire [7:0] io0, io1;
 
-    pmod_mirror_top top (
-        .sys_clk (clk),
-        .pmod0_io(io0),
-        .pmod1_io(io1)
+    // The core takes its clocks as inputs so this test can drive them; the top
+    // level only adds the vendor PLLs, which no simulator here can elaborate.
+    logic [15:0] core_por = 16'hffff;
+    logic        core_resetn = 1'b0;
+
+    always_ff @(posedge clk) begin
+        if (core_por != 16'd0) core_por <= core_por - 16'd1;
+        else                   core_resetn <= 1'b1;
+    end
+
+    pmod_mirror_core #(.HDMI_BACKEND(1'b0)) core (
+        .clk_pixel    (clk),
+        .clk_pixel_x5 (clk),      // the TMDS serializers are not under test
+        .resetn       (core_resetn),
+        .pmod0_io     (io0),
+        .pmod1_io     (io1),
+        .tmds_clock   (),
+        .tmds         ()
     );
 
     // Decode the SSD1331 pins out of the raw socket pins using the normal
@@ -328,7 +342,7 @@ module ui_mirror_tb;
                 if (dc == 0 && sh == 8'h15) begin
                     frame_count  = frame_count + 1;
                     since_window = 0;
-                end else if (frame_count >= 2) begin
+                end else if (frame_count >= 3) begin
                     since_window = since_window + 1;
                     // The window is six bytes counting the 0x15 itself, so the
                     // first pixel's high byte is the sixth byte after it.
@@ -358,8 +372,11 @@ module ui_mirror_tb;
         if (vccen !== 1'b1)  note_fail("panel VCCEN high by pixel time");
         if (pmoden !== 1'b1) note_fail("panel PMODEN high by pixel time");
 
-        // Frame 2, after the first bank swap, must be pattern 0's pure red.
-        expect_eq("panel sees frame 2", frame_count >= 2 ? 1 : 0, 1);
+        // Frame 3 is the first that can carry the pattern: the renderer fills
+        // the back bank, the swap lands at the end of frame 1, and each
+        // backend latches its read bank at its own next frame boundary, so the
+        // panel picks the new bank up at frame 3.
+        expect_eq("panel reached frame 3", frame_count >= 3 ? 1 : 0, 1);
         expect_eq("panel pixel high byte", px_hi, 8'hF8);
         expect_eq("panel pixel low byte",  px_lo, 8'h00);
         if (!px_captured) note_fail("panel pixel never captured");

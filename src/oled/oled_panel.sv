@@ -20,6 +20,10 @@
 
 module oled_panel #(
     parameter integer CLK_MHZ = 50,
+    // SCK is two clocks per bit times this divider.  DIV=4 gives 160 ns from
+    // 50 MHz and DIV=6 gives 162 ns from 74.25 MHz, both above the SSD1331's
+    // 150 ns minimum clock cycle.
+    parameter integer SPI_DIV = 4,
     parameter integer W       = 96,
     parameter integer H       = 64
 ) (
@@ -61,7 +65,7 @@ module oled_panel #(
     logic [7:0] spi_data = 8'h00;
     logic       spi_dc   = 1'b0;
 
-    oled_spi #(.DIV(4)) spi (
+    oled_spi #(.DIV(SPI_DIV)) spi (
         .clk(clk), .rst(rst), .start(spi_start), .data(spi_data), .dc(spi_dc),
         .busy(spi_busy), .done(spi_done), .sck(spi_sck), .mosi(spi_mosi), .dc_o(spi_dco)
     );

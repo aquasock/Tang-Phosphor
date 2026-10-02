@@ -1,15 +1,41 @@
 set_device -name GW5AST-138C GW5AST-LV138PG484AC1/I0
 
 add_file -type verilog "src/pmod_mirror_top.sv"
+add_file -type verilog "src/pmod_mirror_core.sv"
+
+# Socket layer and personalities.
 add_file -type verilog "src/pmod/pmod_slot.sv"
 add_file -type verilog "src/pmod/pmod_io_buf.sv"
 add_file -type verilog "src/pmod/pmod_oledrgb.sv"
+
+# Panel protocol.
 add_file -type verilog "src/oled/oled_panel.sv"
 add_file -type verilog "src/oled/oled_spi.sv"
+
+# Renderer and presentation backends.
 add_file -type verilog "src/ui/ui_frame_store.sv"
 add_file -type verilog "src/ui/ui_pattern_demo.sv"
 add_file -type verilog "src/ui/ui_scanout.sv"
 add_file -type verilog "src/ui/ui_swap.sv"
+add_file -type verilog "src/video/ui_hdmi_scan.sv"
+add_file -type verilog "src/video/ui_hdmi_backend.sv"
+
+# HDMI transmitter and its packet machinery.
+add_file -type verilog "src/hdmi/audio_clock_regeneration_packet.sv"
+add_file -type verilog "src/hdmi/audio_info_frame.sv"
+add_file -type verilog "src/hdmi/audio_sample_packet.sv"
+add_file -type verilog "src/hdmi/auxiliary_video_information_info_frame.sv"
+add_file -type verilog "src/hdmi/hdmi.sv"
+add_file -type verilog "src/hdmi/packet_assembler.sv"
+add_file -type verilog "src/hdmi/packet_picker.sv"
+add_file -type verilog "src/hdmi/serializer.sv"
+add_file -type verilog "src/hdmi/source_product_description_info_frame.sv"
+add_file -type verilog "src/hdmi/tmds_channel.sv"
+
+add_file -type verilog "src/audio_test_source.sv"
+add_file -type verilog "src/pll/pll_27.v"
+add_file -type verilog "src/pll/pll_74.v"
+
 add_file -type cst "src/boards/console138k_pmod.cst"
 add_file -type sdc "src/boards/console138k_pmod.sdc"
 

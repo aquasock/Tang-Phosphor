@@ -1704,3 +1704,44 @@ The next backend is HDMI at K equal to 11, giving 1056x704 inside 1280x720, and 
 - User Test: PASS
 
 ---
+
+## 48 COMMIT Unreleased 2026-10-02T16:26:26-07:00
+
+#### Coming From:
+
+Unreleased 92d4746
+
+#### Purpose:
+
+Put the same frame on the HDMI output as on the panel, and make the composition of the scaled image on the second screen a checked property rather than something judged by eye.
+
+#### Outcome:
+
+The renderer now drives two presentation backends, and the second one was added as a backend and a constraint file rather than a second copy of the image. `src/video/ui_hdmi_scan.sv` scales 96x64 by 11 into 1056x704 and centres it at (112, 8) inside 1280x720 with the rest black; `src/video/ui_hdmi_backend.sv` wraps the project's existing Sameer Puri derived transmitter and owns nothing but its scan mapper and the bank latch. `pmod_mirror_top.sv` was split into a top that holds only the PLL chain, the reset and the differential output buffers and a `src/pmod_mirror_core.sv` that takes its clocks as inputs, which is what makes the logic simulatable at all: the vendor PLL and ELVDS_OBUF primitives cannot be elaborated by the project's simulator, and the same split had already been applied to the panel protocol. Every backend, both frame-store read ports, the renderer and the HDMI transmitter now run on clk_pixel, so the design contains no clock-domain crossing anywhere and the bank swap needs no handshake. The cycle's real finding is that the latency between a coordinate and its pixel is not one number: horizontally the coordinate changes every clock, so the mapper's registered mapping is one pixel behind and the store's registered read adds another, while vertically the coordinate changes once per line, so the mapper's register is already aligned with the line it belongs to and the store returns that line's pixel, requiring no correction at all; a single shared constant shifted the whole image up by one source row, and the two constants are now separate and documented. The bar decision was likewise corrected to be taken combinationally from the coordinate the transmitter presents, since the colour presented must belong to that coordinate and only the pixel needs compensating. Each backend also latches its read bank at its own frame boundary, because the swap controller flips the shared bank when the last registered output has crossed a frame, which need not be that backend; the cost is one frame of latency on an update and the benefit is that no output can have its bank change part way through a frame. The HDMI audio path reuses the project's deterministic `audio_test_source` so its packet machinery stays exercised. `tests/ui_hdmi_scan_tb.sv` checks the composition against an independently written model over all 921600 pixels of a frame, 178176 of which must be bars, and reports the image landing at (112, 8) at 11x; the suite now reports 18 passing tests and no failures. The third-party transmitter cannot be elaborated by the simulator because it assigns to some signals both blocking and non-blocking, so the integration test builds the core with `HDMI_BACKEND` clear and covers the OLED and socket paths, while the composition has its own test that needs no transmitter; that split is deliberate and is stated in both files. `scripts/build-pmod.sh` built the core in twenty-six seconds for `GW5AST-138C` with setup and hold total negative slack both 0.000 and `clk_pixel` Fmax 79.133 MHz against its 74.250 MHz constraint, a margin of only 6.6 percent where the same core measured 86.732 MHz before HDMI, which is recorded as a watch item rather than a defect since the constraint is met, and producing `build/pmod/tang_phosphor_pmod.bin` at 4571648 bytes with SHA-256 `e3f47c12d546200c01d0676eb85aba5a21e690f4399b674cece6ab5989cd5c7f`. The image was uploaded as `cores/console138k/pmodtang.bin` with a byte-identical SD readback and loaded over the two-wire interface, and the user reported that both screens look perfect, which confirms the shared store, the second scan mapper, the two-axis latency rule and the per-backend bank latch with two outputs live at once for the first time. The checker that the previous entry's next steps called for was deliberately deferred to its own cycle rather than landed here, because its expected values depend on this backend's geometry and debugging the two together would conflate whether the backend is right with whether the checker is right. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 48 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The next cycle is the mirror checker, which is what makes this architecture provable rather than merely visible: a per-output CRC32 over the emitted pixel stream with a frame counter and an epoch, the BL616 debug transport added to this core so those registers can be read, a new core id so Tang-Control can tell this image from the player, the personality and orientation parameters driven by those registers so `/tang.ini` becomes live, and `tools/ui_mirror_check.py` to compute the expected raster independently and compare. It matters because the PmodVGA needs both sockets and therefore can never share the bench with the OLED, so three outputs can never be confirmed by looking. After that the VGA backend at K equal to 8, then the remaining modules as personalities, then the fold into the player. The watch items carried forward are the 6.6 percent `clk_pixel` margin, which a third backend may consume, and the two-axis latency rule, which any dense-raster backend must honour.
+
+#### Files Modified:
+
+- src/boards/console138k_pmod.cst
+- src/boards/console138k_pmod.sdc
+- src/oled/oled_panel.sv
+- src/pmod/pmod_oledrgb.sv
+- src/pmod_mirror_core.sv
+- src/pmod_mirror_top.sv
+- src/video/ui_hdmi_backend.sv
+- src/video/ui_hdmi_scan.sv
+- build-pmod.tcl
+- tests/ui_hdmi_scan_tb.sv
+- tests/ui_mirror_tb.sv
+- tests/run.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

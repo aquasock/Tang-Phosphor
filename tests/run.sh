@@ -116,7 +116,8 @@ verilator --binary --timing -Wno-fatal \
 verilator --binary --timing -Wno-fatal \
     --top-module ui_mirror_tb --Mdir "$output_dir/ui_mirror" \
     "$test_dir/ui_mirror_tb.sv" \
-    "$project_dir/src/pmod_mirror_top.sv" \
+    "$project_dir/src/pmod_mirror_core.sv" \
+    "$project_dir/src/audio_test_source.sv" \
     "$project_dir/src/pmod/pmod_slot.sv" \
     "$project_dir/src/pmod/pmod_io_buf.sv" \
     "$project_dir/src/pmod/pmod_oledrgb.sv" \
@@ -127,3 +128,10 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/ui/ui_scanout.sv" \
     "$project_dir/src/ui/ui_swap.sv"
 "$output_dir/ui_mirror/Vui_mirror_tb"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module ui_hdmi_scan_tb --Mdir "$output_dir/ui_hdmi_scan" \
+    "$test_dir/ui_hdmi_scan_tb.sv" \
+    "$project_dir/src/video/ui_hdmi_scan.sv" \
+    "$project_dir/src/ui/ui_scanout.sv"
+"$output_dir/ui_hdmi_scan/Vui_hdmi_scan_tb"

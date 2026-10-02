@@ -20,7 +20,8 @@
 // mis-seated module cannot drive against these outputs.
 
 module pmod_oledrgb #(
-    parameter integer CLK_MHZ = 50
+    parameter integer CLK_MHZ = 50,
+    parameter integer SPI_DIV = 4
 ) (
     input  logic        clk,
     input  logic        rst,
@@ -54,7 +55,7 @@ module pmod_oledrgb #(
         lane_oe    = 8'b1111_1011;
     end
 
-    oled_panel #(.CLK_MHZ(CLK_MHZ)) panel (
+    oled_panel #(.CLK_MHZ(CLK_MHZ), .SPI_DIV(SPI_DIV)) panel (
         .clk         (clk),
         .rst         (rst),
         .px_x        (px_x),
