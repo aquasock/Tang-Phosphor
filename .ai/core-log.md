@@ -1405,3 +1405,33 @@ None.
 - User Test: PASS
 
 ---
+
+## 39 COMMIT Unreleased 2026-10-01T23:10:33-07:00
+
+#### Coming From:
+
+Unreleased d3cb94b
+
+#### Purpose:
+
+Deploy a timing-clean merged image that carries the PCM sink, after the deployed core was found to be a timing-failing build and the nominally clean placement predated the sink.
+
+#### Outcome:
+
+The cycle began by debugging the persistent-player hang the previous entry left in `software/rbhost/host/platform_ae350.c`, but that work was set aside at the user's direction once the hang was narrowed to the `run_one_track()` extraction itself: the loop form hangs deterministically at `decode_file()` entry (the first log byte never appears, there is no CPU trap, and the RAM bridge is idle with the register-block read never completing), while the single-shot body works, and it hangs identically on every bitstream tried, so it is a code or CPU-side effect rather than FPGA timing. The deployed core was then re-examined: `cores/console138k/tang-phosphor-merged.bin` on the SD, byte-identical to `tang-phosphor-play.bin` at CRC `d3bf308e` (the `place2` build), is not timing clean (`clk_pixel` setup TNS -0.973 ns), and the only timing-clean existing placement, `place1`, is a stale build that still instantiates `src/audio/wav_stream_player.sv` (the silence stub) with no `pcm_sink`, so it cannot play. A fresh merged build was run with `MERGED_PLACE_OPTIONS="1 2 3 4" scripts/build-merged.sh` from the current tree; `place3` (`clk_pixel` Fmax 80.4 MHz) and `place4` (74.8 MHz) met timing with all clocks TNS 0.000 and `pcm_sink` present, while `place1` (-1.920 ns `clk_pixel`, -0.862 ns `ui_clk`) and `place2` (-0.973 ns `clk_pixel`) failed. The timing-clean, complete `build/merged/place3/tang_phosphor_merged.bin` was uploaded as `cores/console138k/tang-phosphor-merged.bin` and `cores/console138k/tang-phosphor-play.bin` with matching SD-readback CRC, and `build/rbhost/bench/resident.tpi` (the working single-shot player, CRC `b8929e4d`) as `ae350/resident.tpi`. On hardware `place3` streamed, decoded `music/test.wav` to 441,000 samples at 44.1 kHz, and played them with the playback rate register reading `0xac44` and zero underruns; the persistent-player loop change remains deferred, and the user's audible acceptance of the deployed image was not reported before the handoff.
+
+#### Next Steps:
+
+Diagnose and fix the persistent-player hang in `software/rbhost/host/platform_ae350.c`, where the `run_one_track()` function extraction plus `for(;;)` loop wedges the first `decode_file()` log write while the single-shot body does not, and requalify it on the deployed `place3` image; also pin the standing deployable placement option so the SD is not left holding a timing-failing or stub variant again.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
