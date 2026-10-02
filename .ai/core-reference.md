@@ -148,3 +148,23 @@ supported profile. Project-specific limits remain implementation limits.
 - Authority: Simulation model parameterized by board measurements; not a cycle-accurate model of the A25 pipeline.
 - Relevant behavior: The plugin models set-associative L1 instruction and data caches and a unified L2 with LRU replacement and counts misses per instruction; it does not model dirty write-backs, pipeline stalls, or miss overlap. The A25 caches are 32 KiB, 4-way, 32-byte lines; measured miss costs are about 570 core cycles to DDR3 through Tang-PSX's RAM path and about 240 for a hit in its 128 KiB fabric L2.
 - Tang-Phosphor use: `tools/rbhost_profile.py` reports a CPU-load range bracketed by 1.0 cycle per instruction without write-backs and 1.5 cycles per instruction with a write-back for every data miss; any SDRAM figure is an estimate until measured on hardware.
+
+---
+
+## Dock PMOD Sockets
+
+### Tang Console dock PMOD socket pins and numbering
+
+- Sources: TangCore commit `f69c6ff`, `monitor/src/boards/console.cst` (PMOD1_IO0-7 as DualShock pins, PMOD0_IO0-7 as LEDs) and `nestang/src/boards/console60k_snescontroller.cst` (one SNES controller per socket on IO0/2/4 and IO1/3/5); litex-boards commit `e4307929c38a`, `litex_boards/platforms/sipeed_tang_console.py` (`_dock_connectors` pmod0, pmod1); Tang-PSX `.ai/core-reference.md` record BRD-004 (https://github.com/aquasock/Tang-PSX).
+- Authority: Board-vendor and upstream-core constraint files, plus hardware verification on this dock on 2026-10-02. Treat as a verified board fact, not a Digilent-documented limit.
+- Relevant rule: PMOD1, the socket beside the HDMI port, carries PMOD1_IO0-IO7 on FPGA pins W19 W20 F19 F20 E22 D22 E21 D21, and PMOD0 carries PMOD0_IO0-IO7 on V18 V19 G21 G22 F18 E18 C22 B22, all LVCMOS33. Sipeed's IO numbering interleaves the rows, so IO0, IO2, IO4 and IO6 are Digilent pins 1-4 and IO1, IO3, IO5 and IO7 are pins 7-10; a LiteX connector index is Sipeed's IO number, not the linear pin order.
+- Tang-Phosphor use: `src/boards/console138k_oled.cst` places the OLEDrgb on PMOD0 by mapping IO0, IO2, IO3, IO5, IO6 and IO7 and leaving IO4 unconstrained, because the interleaved numbering sends Pmod pins 1-4 to the even IO numbers and Pmod pins 7-10 to the odd ones.
+
+### Digilent Pmod OLEDrgb pinout and orientation
+
+- Sources: Digilent Pmod OLEDrgb Reference Manual, https://digilent.com/reference/pmod/pmodoledrgb/reference-manual (J1 pin table and the 32-step initialisation list); SSD1331 controller datasheet; a local copy of the reference manual printed by the user at `Documents/Pmod OLEDrgb Reference Manual - Digilent Reference.pdf`.
+- Authority: Vendor primary documentation for the module and its controller.
+- Relevant rule: J1 carries pin 1 CS#, pin 2 MOSI, pin 3 not connected, pin 4 SCK, pins 5 and 11 GND, pins 6 and 12 VCC3V3, pin 7 D/C#, pin 8 RES#, pin 9 VCCEN and pin 10 PMODEN; the SSD1331 speaks write-only SPI in mode 3 and every module signal is an input driven by the host, so VCCEN low removes the panel rails and PMODEN high connects the logic ground.
+- Orientation rule: the module seats with its ICs facing up, away from the dock, which is the same seating the verified PmodVGA placement uses in Tang-PSX record BRD-005. Because both headers share the mechanical PMOD layout, turning a module over swaps pins 1-4 with pins 7-10 while power and ground stay on their own pins; that consequence is inferred from the mechanical layout for this module, not measured here.
+- Tang-Phosphor use: Bring the module up as its own single-purpose core that owns no player logic, hold chip select low across each whole sequence, map RGB565 colour as `0xF800` red, `0x07E0` green and `0x001F` blue, and judge the result from the panel itself, since that core deliberately exposes no debug transport.
+

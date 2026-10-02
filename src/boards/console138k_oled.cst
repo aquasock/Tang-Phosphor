@@ -1,0 +1,29 @@
+// Tang Console 138K Pmod OLEDrgb bring-up pinout.
+//
+// The module sits on PMOD0, the socket furthest from the HDMI port.
+//
+// Socket pins follow BRD-004, verified on this dock: PMOD0_IO0-IO7 are
+// V18 V19 G21 G22 F18 E18 C22 B22 as LVCMOS33, and Sipeed's IO numbering
+// interleaves the rows, so IO0/2/4/6 are Pmod pins 1-4 and IO1/3/5/7 are
+// pins 7-10.  Mapping those onto the OLEDrgb's J1 pinout from its reference
+// manual gives the assignments below.  IO4 (F18) is the module's
+// not-connected pin and is deliberately left unconstrained.
+
+IO_LOC "sys_clk" V22;
+IO_PORT "sys_clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=OFF;
+
+IO_LOC "oled_cs_n"   V18;   // PMOD0_IO0, J1 pin 1  CS#
+IO_LOC "oled_dc"     V19;   // PMOD0_IO1, J1 pin 7  D/C#
+IO_LOC "oled_mosi"   G21;   // PMOD0_IO2, J1 pin 2  MOSI
+IO_LOC "oled_res_n"  G22;   // PMOD0_IO3, J1 pin 8  RES#
+IO_LOC "oled_vccen"  E18;   // PMOD0_IO5, J1 pin 9  VCCEN  (low = rails off)
+IO_LOC "oled_sck"    C22;   // PMOD0_IO6, J1 pin 4  SCK
+IO_LOC "oled_pmoden" B22;   // PMOD0_IO7, J1 pin 10 PMODEN (high = logic ground)
+
+IO_PORT "oled_cs_n"   IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "oled_dc"     IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "oled_mosi"   IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "oled_res_n"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "oled_vccen"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "oled_sck"    IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "oled_pmoden" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;

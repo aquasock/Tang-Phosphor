@@ -1622,3 +1622,40 @@ Continue release preparation: give the core version a single source of truth ins
 - User Test: N/A
 
 ---
+
+## 46 COMMIT Unreleased 2026-10-02T15:14:19-07:00
+
+#### Coming From:
+
+Unreleased 1b313fe
+
+#### Purpose:
+
+Bring the Digilent Pmod OLEDrgb up on the Tang Console dock as a self-contained PMOD verification core so that a later module can be judged on hardware without disturbing the player.
+
+#### Outcome:
+
+The Pmod OLEDrgb was implemented as a standalone core that shares no logic with the player, so a PMOD fault cannot be mistaken for a playback fault. `src/oled/oled_spi.sv` is the mode-3 SPI master, deliberately not driving chip select so the caller holds it low across an entire sequence, and `src/oled/oled_pmod_top.sv` performs the power sequencing, replays the 44-byte SSD1331 initialisation list from the module's reference manual, and then cycles seven test patterns of roughly one second each; `src/boards/console138k_oled.cst` places the module on PMOD0, the socket furthest from the HDMI port, with the interleaved Sipeed IO numbering, and leaves IO4 unconstrained because the module does not connect that pin. The module seats with its ICs facing up, the same orientation as the verified PmodVGA placement, and the user confirmed that orientation on hardware. A Verilator bench added to `tests/run.sh` checks the power-up order, in which PMODEN precedes the reset release and VCCEN rises only after the command list, the 44 initialisation bytes in order, display-on following VCCEN, the per-frame address window, the first pixel bytes with D/C high, and mode-3 sampling stability with chip select low throughout; the suite now reports 13 passing tests, no failures, and exit status 0. Simulation caught three real defects before any hardware was touched: D/C was driven from a dead register, so every byte would have been sent as a command and no pixel would ever have been accepted, the nine-state sequencer was declared three bits wide, and the bench's own bit counter latched a byte after seven bits rather than eight. `scripts/build-oled.sh` built the core in about fifteen seconds for `GW5AST-138C` with setup and hold total negative slack both `0.000` and `sys_clk` Fmax `137.291` MHz against its `50` MHz constraint, the only warning being generic routing on `sys_clk`, which is benign for a single-clock design with that margin; the artifact is `build/oled/tang_phosphor_oled.bin` at `4330802` bytes with SHA-256 `1fe63b8237459ec5bf4ae2ea48ccbb67e547fcc2ae4fa5a3b77e1e60cede9c24`. The image was uploaded as `cores/console138k/oledtang.bin` with a byte-identical SD readback and loaded over the two-wire interface from the TangCore menu, and the user reported that all seven patterns appeared and that every colour matched its expected position, which verifies the RGB565 byte order, the window addressing and the full 96x64 area on real silicon. The debug protocol correctly reports no active Phosphor core while this image runs, because the bring-up core intentionally instantiates no transport registers and the panel itself is the indicator. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 46 of 100 with exactly six sections, and confirmed that no settled history was rewritten; the audit also corrected a stale closing note in `.ai/core-syntax.md` that still described the active log as empty, which would have invited a future agent to restart the entry numbering at 1. The socket numbering, the module pinout and the orientation rule were recorded in `.ai/core-reference.md` so that the remaining modules can reuse them.
+
+#### Next Steps:
+
+Bring up the remaining four Pmod modules the user has acquired, each as its own bring-up core on the same socket, reusing the socket numbering and orientation rule now recorded in `.ai/core-reference.md`; the user still needs to supply the module names or reference manuals, because the DigiKey part numbers listed so far could not be confirmed against Digilent's catalogue and one of them was only tentatively matched. The standing items then remain the FLAC local-versus-hardware sample-count divergence, the missing automated WMA regression, the deferred persistent-player feature, a pinned deployable placement seed, the debugging-capability work the user is considering for Tang-Control, and the deferred `0.1.0` release preparation, which stays paused while the PMOD work is in progress.
+
+#### Files Modified:
+
+- src/oled/oled_spi.sv
+- src/oled/oled_pmod_top.sv
+- src/boards/console138k_oled.cst
+- src/boards/console138k_oled.sdc
+- build-oled.tcl
+- scripts/build-oled.sh
+- tests/oled_pmod_tb.sv
+- tests/run.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

@@ -104,3 +104,10 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/ae350/ae350_exts_regs.sv" \
     "$project_dir/src/ae350/debug_read_cdc.sv"
 "$ae350_loader_output_dir/Vae350_loader_tb"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module oled_pmod_tb --Mdir "$output_dir/oled_pmod" \
+    "$test_dir/oled_pmod_tb.sv" \
+    "$project_dir/src/oled/oled_pmod_top.sv" \
+    "$project_dir/src/oled/oled_spi.sv"
+"$output_dir/oled_pmod/Voled_pmod_tb"

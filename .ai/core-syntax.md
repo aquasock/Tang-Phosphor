@@ -314,5 +314,6 @@ recommended.
 ## Current Log Conformance
 
 Existing settled entries are historical evidence and are not reformatted merely
-because this syntax changes. The active Tang-Phosphor log is currently empty, so
-its first workflow entry begins at `1` and must conform to this document.
+because this syntax changes. The active Tang-Phosphor log began at entry `1`, and
+every newly added entry must conform to this document; its number is the highest
+number currently present plus one.
