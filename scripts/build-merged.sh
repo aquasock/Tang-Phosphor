@@ -7,15 +7,19 @@
 # parallel, each in an isolated copy of the repository.  Bitstreams and
 # reports go to build/merged/place<N>/.
 #
-#   MERGED_PLACE_OPTIONS   placement options (default "4"; Gowin accepts
-#                           only 0-4 for GW5A devices, SUG100 8.3)
+#   MERGED_PLACE_OPTIONS   placement options (default "3"; Gowin accepts
+#                           only 0-4 for GW5A devices, SUG100 8.3).  Option 3
+#                           is the default because it is the seed that closes
+#                           timing on the current netlist; options 1 and 4 fail
+#                           setup, so the seed is pinned rather than left to
+#                           Gowin.  See the README "Building from source".
 #   RISCV_TOOLCHAIN_BIN    riscv64-unknown-elf toolchain directory
 
 set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 out_dir="$project_dir/build/merged"
-place_options=${MERGED_PLACE_OPTIONS:-"4"}
+place_options=${MERGED_PLACE_OPTIONS:-"3"}
 
 # Each Gowin build of this design peaks at several GB; five in parallel
 # exhausted the 15 GB build host.  Run larger option sets in batches.
@@ -96,6 +100,6 @@ done
 
 if (( ${#builds[@]} )); then
     python3 "$project_dir/tools/gowin_timing_summary.py" "${builds[@]}" || true
-    (cd "$out_dir" && sha256sum place*/tang_phosphor_merged.bin)
+    (cd "$out_dir" && sha256sum $(for option in $place_options; do echo "place$option/tang_phosphor_merged.bin"; done))
 fi
 exit $status

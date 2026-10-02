@@ -44,7 +44,7 @@ Plug in **only the FT2232/OTG cable**, then:
 scripts/flash-otg.sh
 
 # merged core (player + AE350 + DDR3, the MP3 build)
-scripts/flash-otg.sh build/merged/place4/tang_phosphor_merged.fs
+scripts/flash-otg.sh build/merged/place3/tang_phosphor_merged.fs
 ```
 
 > **Always flash a `.fs` file, never a `.bin`.** openFPGALoader shifts a `.bin`
@@ -136,6 +136,56 @@ debug connector, not bulk flashing.
 | `ae350_run.py --direct` | 1-wire | not needed | merged core |
 | `ping`/`status`/`rxstats`/`ls`/`get`/`put`/`rm`/`mkdir`/`firmware`/`stream`/`bench` | 2-wire | our firmware | no |
 | `caps`/`peek`/`poke`/`baud` | 2-wire | our firmware | yes |
+
+---
+
+## Building from source
+
+The build is deterministic: the same sources, Gowin version, and placement
+option produce a byte-identical bitstream with identical timing. The figures
+below were reproduced twice from a clean tree.
+
+**Requirements**
+
+- **Gowin EDA 1.9.11.03** — set `GOWIN_SH` to its `gw_sh`, or have `gw_sh` on
+  `PATH`. The scripts also probe `/home/vash/tools/gowin-1.9.11.03/IDE/bin/gw_sh`
+  and `/opt/Gowin/Gowin_V1.9.11.03/IDE/bin/gw_sh`.
+- **Xuantie RISC-V toolchain** — `RISCV_TOOLCHAIN_BIN` (default
+  `/home/vash/.cache/tangcore-dev/toolchain/bin`) providing
+  `riscv64-unknown-elf-gcc`.
+- **Submodules** — `git submodule update --init --recursive`. Rockbox carries
+  one local patch under `third_party/patches/`; the build re-applies it
+  automatically, and `THIRD_PARTY.md` records why.
+- **Gowin's DDR3 IP** is generated locally from `src/ddr3` by the build; it is
+  never committed.
+- **Memory** — a Gowin placement peaks at several GB. Build at most four
+  options at once; a single option is roughly 3 GB.
+
+Build the merged core:
+
+```bash
+scripts/build-merged.sh                                        # option 3, the pinned seed
+env MERGED_PLACE_OPTIONS="1 2 3 4" scripts/build-merged.sh      # every seed
+```
+
+Option 3 is the default because it is the seed that closes timing on the
+current netlist; options 1 and 4 fail setup, which is why the seed is pinned
+instead of left to Gowin.
+
+**Expected result** (`place3`, GW5AST-138 revision C)
+
+- `build/merged/place3/tang_phosphor_merged.bin` — `4989844` bytes, sha256
+  `f708e977649dc58e1229dff77d87ddb3445a96f1140a6b0be3cd5c4326c33f34`
+- Every clock TNS `0.000`; `clk_pixel` Fmax **76.412 MHz** (constraint 74.25),
+  `ui_clk` 123.399, `bus_clk` 99.469, `clk50` 232.591, `clk400` 2016.129,
+  `clk12` 94.890
+
+Check yours with `sha256sum build/merged/place3/tang_phosphor_merged.bin` and
+`python3 tools/gowin_timing_summary.py build/merged/place3`.
+
+The AE350 player is a separate build —
+`make -C software/rbhost bench-universal BENCH_NAME=resident` — and the BL616
+firmware comes from the sibling **Tang-Control** repository.
 
 ---
 

@@ -1590,3 +1590,35 @@ None.
 - User Test: PASS
 
 ---
+
+## 45 COMMIT Unreleased 2026-10-02T12:41:22-07:00
+
+#### Coming From:
+
+Unreleased f42efde
+
+#### Purpose:
+
+Make a community rebuild from a fresh clone reproduce this project's timing closure and artifact for the merged core.
+
+#### Outcome:
+
+Determinism was established first, by rebuilding placement option 3 from the current tree and comparing against the deployed artifact: the result was byte-identical at SHA-256 `f708e977649dc58e1229dff77d87ddb3445a96f1140a6b0be3cd5c4326c33f34` and `4989844` bytes with identical timing, every clock at TNS `0.000` and `clk_pixel` Fmax `76.412` MHz against the `74.25` MHz constraint, `ui_clk` `123.399`, `bus_clk` `99.469`, `clk50` `232.591`, `clk400` `2016.129` and `clk12` `94.890`. Because `scripts/build-merged.sh` rsyncs the sources into a fresh temporary tree for each run, both builds were effectively clean builds, so the recipe itself is reproducible rather than an artifact of a warm working tree. The default seed was then corrected, because `MERGED_PLACE_OPTIONS` defaulted to `4` while options 1 and 4 fail setup on this netlist and only 2 and 3 meet it, so a plain default build produced a timing-failing image; the default is now `3` with a comment explaining the pin, and the script's closing hash list prints only the options actually built instead of every stale `place*` directory left by earlier runs. The README gained a `Building from source` section that lists the requirements, the Gowin EDA and RISC-V toolchain environment variables and fallback paths, the submodule and automatically applied Rockbox patch, the locally generated DDR3 IP and the memory ceiling, the build command, the expected artifact size and SHA-256 and per-clock Fmax figures, and how to verify the result with `sha256sum` and `tools/gowin_timing_summary.py`; the quick-start example that flashed `build/merged/place4/tang_phosphor_merged.fs`, a timing-failing artifact, now names `place3`. `software/rbhost`'s Makefile no longer demands `BENCH_INPUT` for the universal player, which receives its input over the stream loader and never uses an embedded one, so the documented community build works without a dummy file; the non-streaming `bench` target still refuses without it, and this was verified by building the player with no input (`863748` bytes), by confirming the guard still fires for the non-streaming target, and by the five codec vectors continuing to pass. All twelve FPGA regressions pass. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 45 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Continue release preparation: give the core version a single source of truth instead of the hand-synced `BUILD_DATE` in `src/debug/debug_regs.sv` and the `V` field of `CONF_STR` in `src/iosys/iosys_bl616.v`, draft `docs/RELEASE_NOTES.md`, and propose the content for the `Releasing` section of `.ai/core.md`, which is still empty and must be approved by the user because `core.md` is RESTRICTED. The open release decisions remain the artifact set, the FLAC local-versus-hardware sample-count divergence, the missing automated WMA regression, and the supported-scope statement for 0.1.0.
+
+#### Files Modified:
+
+- README.md
+- scripts/build-merged.sh
+- software/rbhost/Makefile
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---

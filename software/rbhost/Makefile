@@ -208,7 +208,9 @@ bench-universal: BENCH_PLAY := 1
 bench-universal: $(BENCH_DIR)/$(BENCH_NAME).tpi
 
 $(BENCH_DIR)/$(BENCH_NAME).S: $(CODECS) $(BENCH_INPUT) FORCE
-	@test -n "$(BENCH_INPUT)" || { echo "set BENCH_INPUT" >&2; exit 1; }
+	@if [ -z "$(BENCH_INPUT)" ] && [ "$(BENCH_STREAM)" != "1" ]; then \
+		echo "set BENCH_INPUT" >&2; exit 1; \
+	fi
 	@if [ "$(BENCH_UNIVERSAL)" = "0" ]; then \
 		test -n "$(BENCH_CODEC)" || { echo "set BENCH_CODEC" >&2; exit 1; }; \
 	fi
@@ -222,7 +224,12 @@ $(BENCH_DIR)/$(BENCH_NAME).S: $(CODECS) $(BENCH_INPUT) FORCE
 		else \
 			printf 'codec_data: .incbin "$(BUILD)/codecs/$(BENCH_CODEC).codec"\ncodec_end:\n\t.balign 8\n'; \
 		fi; \
-		printf '%s\n' 'input_data: .incbin "$(abspath $(BENCH_INPUT))"' 'input_end:' '	.balign 4' '	.globl bench_files' 'bench_files:'; \
+		if [ -n "$(BENCH_INPUT)" ]; then \
+			printf '%s\n' 'input_data: .incbin "$(abspath $(BENCH_INPUT))"' 'input_end:'; \
+		else \
+			printf '%s\n' 'input_data:' 'input_end:'; \
+		fi; \
+		printf '%s\n' '	.balign 4' '	.globl bench_files' 'bench_files:'; \
 		if [ "$(BENCH_UNIVERSAL)" = "1" ]; then \
 			for n in $(CODEC_NAMES); do \
 				printf '\t.word codec_name_%s, codec_data_%s, codec_end_%s - codec_data_%s\n' $$n $$n $$n $$n; \
