@@ -179,6 +179,9 @@ $(BUILD)/host/%.o: host/%.S
 BENCH_NAME ?= bench
 # BENCH_PLAY=1 plays the decoded WAV through the FPGA player afterwards.
 BENCH_PLAY ?= 0
+# BENCH_STREAM=1 receives the input through the stream loader instead of
+# embedding it; the codec is still embedded.
+BENCH_STREAM ?= 0
 BENCH_DIR  := $(BUILD)/bench
 BENCH_ELF  := $(BENCH_DIR)/$(BENCH_NAME).elf
 
@@ -207,7 +210,9 @@ $(BENCH_DIR)/$(BENCH_NAME).S: $(BUILD)/codecs/$(BENCH_CODEC).codec $(BENCH_INPUT
 		'bench_input_name: .asciz "$(notdir $(BENCH_INPUT))"' \
 		'	.balign 4' \
 		'	.globl bench_play' \
-		'bench_play: .word $(BENCH_PLAY)' > $@
+		'bench_play: .word $(BENCH_PLAY)' \
+		'	.globl bench_stream' \
+		'bench_stream: .word $(BENCH_STREAM)' > $@
 
 $(BENCH_ELF): $(AE350_OBJ) $(BENCH_DIR)/$(BENCH_NAME).S $(BUILD)/librbcodec.a \
 		host/host.ld host/memory.ld

@@ -45,10 +45,18 @@ struct bench_file {
 
 extern const struct bench_file bench_files[];
 extern const char bench_input_name[];
+extern const uint32_t bench_stream;
 
 #define OUTPUT_BASE  ((uint8_t *)0x48000000u)
 #define OUTPUT_LIMIT (256u << 20)
+#define INPUT_BASE   ((uint8_t *)0x60000000u)
+#define INPUT_LIMIT  (256u << 20)
 #define MAX_FILES    8
+
+/* Filled by receive_stream_file(): the streamed input, exposed to the file
+ * API under the fixed name "input.mp3" so rbhost probes the format. */
+static struct bench_file stream_file;
+static uint32_t input_stream_size;
 
 static struct {
     const struct bench_file *file;   /* NULL for the output */
@@ -72,6 +80,12 @@ int _open(const char *path, int flags, int mode)
             files[fd].open = 1;
             if (flags & O_TRUNC)
                 output_size = 0;
+            return fd;
+        }
+        if (stream_file.data && !strcmp(stream_file.name, path)) {
+            files[fd].file = &stream_file;
+            files[fd].position = 0;
+            files[fd].open = 1;
             return fd;
         }
         for (const struct bench_file *file = bench_files; file->name; ++file) {
@@ -223,6 +237,57 @@ static void publish64(uint32_t first, uint64_t value)
     AE350_REG(AE350_USER(first + 1)) = (uint32_t)(value >> 32);
 }
 
+/* Receive one file through the stream loader entries (START/DATA/END) into
+ * INPUT_BASE and register it as the streamed input.  Returns the byte count,
+ * or 0 on cancel/error.  DATA words are four little-endian bytes. */
+static uint32_t receive_stream_file(void)
+{
+	uint32_t size = 0;
+	int seen_start = 0;
+
+	for (;;) {
+		uint32_t status;
+		do
+			status = AE350_REG(AE350_STREAM_STATUS);
+		while (!(status & 1u));
+		uint32_t tag = (status >> 1) & 3u;
+		uint32_t data = AE350_REG(AE350_STREAM_DATA);
+		AE350_REG(AE350_STREAM_POP) = 0;
+
+		if (tag == AE350_TAG_CANCEL)
+			return 0;
+		if (tag == AE350_TAG_START) {
+			seen_start = 1;
+			size = 0;
+			continue;
+		}
+		if (!seen_start)
+			continue;
+		if (tag == AE350_TAG_END) {
+			stream_file.name = "input.mp3";
+			stream_file.data = INPUT_BASE;
+			stream_file.size = size;
+			input_stream_size = size;
+			ae350_puts("stream rx ");
+			ae350_put_decimal(size);
+			ae350_puts(" first ");
+			for (int i = 0; i < 4; ++i) {
+				static const char h[] = "0123456789abcdef";
+				ae350_putc(h[INPUT_BASE[i] >> 4]);
+				ae350_putc(h[INPUT_BASE[i] & 15]);
+			}
+			ae350_puts("\n");
+			return size;
+		}
+		for (int i = 0; i < 4; ++i) {
+			if (size >= INPUT_LIMIT)
+				return 0;
+			INPUT_BASE[size++] = (uint8_t)data;
+			data >>= 8;
+		}
+	}
+}
+
 /* Nonzero in an image built with BENCH_PLAY=1: after decoding, the output
  * WAV is played through the FPGA player (registers 0x090-0x098).  Each play
  * register write waits while the play FIFO is full, so the loop runs at the
@@ -253,12 +318,18 @@ static void play_output(void)
 /* Called by crt0_ae350.S after .bss is cleared. */
 uint32_t ae350_main(void)
 {
-    char *argv[] = {"rbhost", "codecs", (char *)bench_input_name, "output.wav", NULL};
+    char *argv[] = {"rbhost", "codecs",
+                    bench_stream ? "input.mp3" : (char *)bench_input_name,
+                    "output.wav", NULL};
     uint32_t input_size = 0;
 
-    for (const struct bench_file *file = bench_files; file->name; ++file)
-        if (!strcmp(file->name, bench_input_name))
-            input_size = file->size;
+    if (bench_stream) {
+        input_size = receive_stream_file();
+    } else {
+        for (const struct bench_file *file = bench_files; file->name; ++file)
+            if (!strcmp(file->name, bench_input_name))
+                input_size = file->size;
+    }
     for (int i = 0; i < 16; ++i)
         AE350_REG(AE350_USER(i)) = 0;
     AE350_REG(AE350_USER(7)) = input_size;

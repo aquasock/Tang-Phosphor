@@ -1313,3 +1313,35 @@ Stream files from the SD card to the AE350 so nothing is baked into a .tpi: BL61
 - User Test: PASS
 
 ---
+
+## 36 COMMIT Unreleased 2026-10-01T17:13:31-07:00
+
+#### Coming From:
+
+Unreleased 31441d4
+
+#### Purpose:
+
+Add a resident AE350 player that receives an audio file through the stream loader, so files no longer have to be baked into a .tpi.
+
+#### Outcome:
+
+A BENCH_STREAM=1 bench build now embeds only the codec and receives the input at runtime: platform_ae350.c gained receive_stream_file(), which reads START/DATA/END entries through the existing stream-loader registers into a 256 MiB DDR3 buffer at 0x60000000 and registers it with the file API under the fixed name "input.mp3"; ae350_main() calls it when bench_stream is set and passes that name to rbhost. scripts/play_stream.py streams the resident player .tpi, then the raw audio file, then polls for completion. On hardware the resident mpa player (213 KB) received a 241,414-byte MP3 ("ID3" first bytes), decoded it, and played all 441,000 samples at 44.1 kHz with zero underruns and confirmed audible, finishing in 15 s. This is the AE350 half of SD playback; the BL616/Tang-Control half is the remaining work.
+
+#### Next Steps:
+
+Implement the SD flow in the Tang-Control firmware: stream a resident player .tpi from the SD card into the AE350, then stream an SD audio file to it in cpu_mode, replacing the one-wire scripts/play_stream.py path.
+
+#### Files Modified:
+
+- scripts/play_stream.py
+- software/rbhost/Makefile
+- software/rbhost/host/platform_ae350.c
+
+#### Status:
+
+- Build: FAIL
+- Deployment: PASS
+- User Test: PASS
+
+---
