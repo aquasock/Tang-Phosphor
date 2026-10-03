@@ -189,18 +189,22 @@ module pmod_mirror_core #(
         .src_y    (oled_src_y)
     );
 
-    ui_frame_store #(.W(W), .H(H)) store_oled (
+    ui_frame_bank #(.W(W), .H(H), .OUTPUTS(2)) stores (
         .clk     (clk_pixel),
         .we      (we),
         .wr_bank (wr_bank),
         .wr_x    (wr_x),
         .wr_y    (wr_y),
         .wr_px   (wr_px),
-        .rd_bank (oled_bank),
-        .rd_x    (oled_src_x),
-        .rd_y    (oled_src_y),
-        .rd_px   (panel_px)
+        .rd_bank ({hdmi_read_bank, oled_bank}),
+        .rd_x    ({hdmi_src_x, oled_src_x}),
+        .rd_y    ({hdmi_src_y, oled_src_y}),
+        .rd_px   (bank_rd_px)
     );
+
+    // Port order follows the bank's: index 0 the panel, index 1 the transmitter.
+    assign panel_px = bank_rd_px[0];
+    assign hdmi_px  = bank_rd_px[1];
 
     // ------------------------------------------------------------------
     // HDMI backend: 11x, 1056x704 centred in 1280x720.
@@ -208,6 +212,8 @@ module pmod_mirror_core #(
     logic [6:0]  hdmi_src_x;
     logic [5:0]  hdmi_src_y;
     logic [15:0] hdmi_px;
+    logic        hdmi_read_bank;
+    logic [1:0][15:0] bank_rd_px;
 
     // The backend latches its own read bank at its frame boundary.
     generate
@@ -220,6 +226,7 @@ module pmod_mirror_core #(
             .audio_rate_48k (1'b1),
             .audio_sample_word (tone_sample_word),
             .bank           (bank),
+            .read_bank      (hdmi_read_bank),
             .rd_x           (hdmi_src_x),
             .rd_y           (hdmi_src_y),
             .rd_px          (hdmi_px),
@@ -247,19 +254,6 @@ module pmod_mirror_core #(
         assign tmds            = 3'b000;
     end
     endgenerate
-
-    ui_frame_store #(.W(W), .H(H)) store_hdmi (
-        .clk     (clk_pixel),
-        .we      (we),
-        .wr_bank (wr_bank),
-        .wr_x    (wr_x),
-        .wr_y    (wr_y),
-        .wr_px   (wr_px),
-        .rd_bank (bank),
-        .rd_x    (hdmi_src_x),
-        .rd_y    (hdmi_src_y),
-        .rd_px   (hdmi_px)
-    );
 
 
     // ------------------------------------------------------------------

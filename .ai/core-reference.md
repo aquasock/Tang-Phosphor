@@ -249,3 +249,10 @@ supported profile. Project-specific limits remain implementation limits.
 - Sources: `tools/ui_mirror_check.py`, `src/oled/oled_panel.sv`; core-log entry 52 hardware result.
 - Authority: Bench measurement.
 - Relevant rule: The PmodVGA observes the transmitter's raster and cannot disagree with it, so a checksum there would be evidence of nothing. The panel has its own mapper, its own rate and its own physical path. Because it emits the store at 1:1 with no bars, in the order the renderer writes, its expected fold equals the source's, and on hardware both read 0xd6991800 while the transmitter's scaled stream reads its own value. Source and panel signatures agreeing is the strongest available evidence that the store reaches the display, since they are folded off physically independent paths.
+
+### The frame store has one owner
+
+- Sources: `src/ui/ui_frame_bank.sv`; core-log entries 52 and 53.
+- Authority: Project structure, adopted after the risk below was found in review.
+- Relevant rule: `ui_frame_bank` owns the write bus and instantiates the store copies, so no caller can feed one copy differently from another and one source of truth is a property of the structure rather than a convention of the top level. Each output has its own read port, and each backend must read the bank it latched at its own frame boundary, never the live shared value: the swap controller flips the shared bank when the last registered output crosses a frame, which need not be this one.
+- Tang-Phosphor use: A latch that exists but is not wired to its read port is worse than no latch, because the comment then documents protection the circuit does not have. That is exactly what happened to the transmitter's bank latch between entries 48 and 53, and because the third-party transmitter cannot be elaborated by this project's simulator, only the mirror check could confirm the correction. Moving structure around is worth it for the review it forces.

@@ -127,6 +127,7 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/oled/oled_panel.sv" \
     "$project_dir/src/oled/oled_spi.sv" \
     "$project_dir/src/ui/ui_frame_store.sv" \
+    "$project_dir/src/ui/ui_frame_bank.sv" \
     "$project_dir/src/ui/ui_pattern_demo.sv" \
     "$project_dir/src/ui/ui_scanout.sv" \
     "$project_dir/src/ui/ui_swap.sv" \

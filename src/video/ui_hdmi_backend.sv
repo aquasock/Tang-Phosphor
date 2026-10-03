@@ -23,8 +23,10 @@ module ui_hdmi_backend (
     input  logic        audio_rate_48k,
     input  logic [15:0] audio_sample_word [1:0],
 
-    // The bank the outputs are reading, latched here at a frame boundary.
+    // The bank the outputs are reading, and the one this backend latched at
+    // its own frame boundary, which the store read must use.
     input  logic        bank,
+    output logic        read_bank,
     output logic [6:0]  rd_x,
     output logic [5:0]  rd_y,
     input  logic [15:0] rd_px,
@@ -64,6 +66,12 @@ module ui_hdmi_backend (
         else if (frame_start)
             rd_bank_l <= bank;
     end
+
+    // The store read must use this latched value, not the live one: the swap
+    // controller flips the shared bank when the last registered output crosses
+    // a frame, which need not be this one, so reading the live bank would let
+    // it change part way through a frame.
+    assign read_bank = rd_bank_l;
 
     wire [15:0] scan_px;
 

@@ -1897,3 +1897,37 @@ One structural item remains before the architecture can be called finished: movi
 - User Test: PASS
 
 ---
+
+## 53 COMMIT Unreleased 2026-10-02T18:11:08-07:00
+
+#### Coming From:
+
+Unreleased b56e2b0
+
+#### Purpose:
+
+Make one source of truth a property of the design rather than a convention of the top level, by giving the frame stores an owner that fans the write bus itself.
+
+#### Outcome:
+
+`src/ui/ui_frame_bank.sv` instantiates the store copies and owns the write port, so callers can only read; earlier the top level created one store per output and wired the same write signals to each, which worked but meant a future edit could give one copy a different source and nothing would fail loudly, because each copy would remain internally consistent and simply display a different frame. It costs no logic and no timing, and the measurement confirms it: Fmax moved from 79.355 to 78.946 MHz across the change. Doing the relocation properly rather than as a bulk edit exposed a real latent defect. `ui_hdmi_backend` has latched the bank at its own frame boundary since entry 48, and its comment claimed the store read used that value, but the store was wired to the live global bank instead, so the latch was dead logic and the transmitter could have had its bank changed part way through a frame by a swap triggered at another output's boundary. That is the tearing protection the design documented but did not implement, and it is unreachable by simulation because the third-party transmitter cannot be elaborated, so the mirror check is the only instrument that can confirm the rewiring. It does: after deploying and loading the image, all three measured streams return values bit-identical to the run before the change, `0xd6991800` for the source, `0xca1c5800` for the transmitter and `0xd6991800` for the panel, with liveness passing and the hold state restored. A structural change producing identical measured output is the cleanest available regression evidence, and the two agreeing folds remain the strongest single result in the project, folded as they are off physically independent paths. The suite reports nineteen passing tests. `build-pmod.tcl` and `tests/run.sh` gained the new file. The image was uploaded as `cores/console138k/pmodtang.bin` with a byte-identical SD readback and loaded over the two-wire interface. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 53 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The architecture is now complete for its purpose: one owned frame store, a presentation backend per output, a socket layer with runtime declarations, and a checker that can prove agreement with nothing attached. Two directions remain. The remaining PMOD modules become personalities, each a file and a socket declaration rather than a new structure. Then the fold into the player, where the renderer becomes a menu writing the same store and the mirror check becomes the regression gate before each release, which is where its value grows rather than shrinks. The transmitter's marginal path stays the one measured risk, documented in `build-pmod.tcl` with the placement measurements and the reason pipelining was rejected.
+
+#### Files Modified:
+
+- build-pmod.tcl
+- src/pmod_mirror_core.sv
+- src/ui/ui_frame_bank.sv
+- src/video/ui_hdmi_backend.sv
+- tests/run.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
