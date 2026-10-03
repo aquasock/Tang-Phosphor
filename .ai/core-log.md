@@ -2032,3 +2032,33 @@ The first work of the next cycle is the test that should have caught this: `test
 - User Test: PASS
 
 ---
+
+## 57 COMMIT Unreleased 2026-10-02T22:55:38-07:00
+
+#### Coming From:
+
+Unreleased 568ffda
+
+#### Purpose:
+
+Add the assertion that would have caught the panel's frame-boundary pixel fault before hardware, so the suite can see a class of defect it was structurally blind to.
+
+#### Outcome:
+
+This cycle changed one test file and no gateware, and its result is a fault that can no longer reach hardware undetected. `tests/ui_mirror_tb.sv` already decoded the SSD1331 stream out of the raw PMOD0 socket pins, so the addition is small: every frame's first transmitted pixel is recorded as it goes past, and each is required to be one of the values the pattern function produces at `(0,0)`, which are red, green, blue, white and black. The ramp's last pixel is `0xBFFF` and is none of those, which is exactly what a first pixel launched one clock early produces, so the assertion is aimed at the mechanism entry 56 fixed rather than at its symptom. It is checked over a full pattern cycle of frames rather than one because the flat fills and the orientation card produce a legal first pixel either way, so only a patterned frame can show it, which is the same blindness that let the fault survive every earlier test. The reason the value was not asserted before has been removed rather than left standing: the file declined to check a pixel's value on the stated grounds that the panel had no per-pixel strobe, which stopped being true in entry 52. The test was then proved against both revisions rather than assumed to work, which is the part worth keeping: with the fix in place the suite reports nineteen passing tests, and with `src/oled/oled_panel.sv` temporarily returned to launching the frame's first pixel without the two-clock wait it exits `134` with seventeen passing and reports frames 3, 4, 6, 8 and 9 starting with `0xf81f`, `0x07ff`, `0xff00`, `0x00ff` and `0xbf00`. Those five values are not identical to the single `0xBFFF` seen on hardware, which is recorded rather than smoothed over: either the corrupted timing shifts which two bytes the testbench assembles at the frame boundary, or the hardware and the simulation fail slightly differently, and the assertion catches the class without claiming to reproduce that one value. No bitstream was rebuilt or deployed and the standing deployment of `32e31f68a4b8bef1e2c10101cdb5edce27b619fcaf3e4cf3ce72e9a197c5fe8e` from entry 56 remains the verified image. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 57 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The placement re-measurement carried from entry 56 is the next work: the pinned seed in `build-merged.tcl` should be re-measured against the new netlist with the numbers written beside it, the discipline entries 45 and 52 applied, because a 3.7 MHz `clk_pixel` drop for a one-line state-machine change is unexplained and may be a placement artefact rather than a real cost. The panel path is otherwise closed out, with the hardware check as its gate on the bench and this assertion as its gate in simulation. After that the renderer becomes the menu writing the same frame store, and the check runs before each release, which is where its value grows rather than shrinks; the remaining PMOD modules the user has named, starting with the eight-LED Pmod, stay behind that.
+
+#### Files Modified:
+
+- tests/ui_mirror_tb.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---

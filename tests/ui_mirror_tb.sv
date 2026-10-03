@@ -343,6 +343,19 @@ module ui_mirror_tb;
 
     int         frame_count = 0;
     int         since_window = 0;
+
+    // The first pixel of every frame, as it was actually transmitted.  A frame
+    // may only start with one of the values the pattern function produces at
+    // (0,0): red, green, blue, white or black.  The ramp's last pixel is 0xBFFF
+    // and is none of those, which is what makes this the assertion that catches
+    // a first-pixel launch one clock early -- the failure the mirror check found
+    // on hardware and no test in this file could see.  It is checked over many
+    // frames rather than one because the flat fills and the orientation card
+    // produce a legal first pixel either way, so only a patterned frame shows it.
+    localparam int MAX_CAPTURED = 24;
+    logic [15:0] first_px [0:MAX_CAPTURED-1];
+    logic        first_px_seen [0:MAX_CAPTURED-1];
+    int          n_captured = 0;
     logic [7:0] px_hi = 8'h00, px_lo = 8'h00;
     logic       px_captured = 1'b0;
 
@@ -371,6 +384,10 @@ module ui_mirror_tb;
                     if (since_window == 7) begin
                         px_lo       = sh;
                         px_captured = 1'b1;
+                        if (frame_count < MAX_CAPTURED) begin
+                            first_px[frame_count]      = {px_hi, sh};
+                            first_px_seen[frame_count] = 1'b1;
+                        end
                     end
                 end
             end
@@ -408,6 +425,28 @@ module ui_mirror_tb;
         expect_eq("panel pixel high byte is data", got_dc[INIT_LEN + 7], 1'b1);
         expect_eq("panel pixel low byte is data",  got_dc[INIT_LEN + 8], 1'b1);
         if (!px_captured) note_fail("panel pixel never captured");
+
+        // A frame's first pixel may only be a value the pattern function can
+        // produce at (0,0).  0xBFFF is the ramp's last pixel, and it appearing
+        // as a frame's first pixel is the signature of the address window
+        // handing straight into the pixel loop instead of waiting.
+        for (int i = 0; i < MAX_CAPTURED; i++) begin
+            if (!first_px_seen[i]) continue;
+            n_captured = n_captured + 1;
+            case (first_px[i])
+                16'hF800, 16'h07E0, 16'h001F, 16'hFFFF, 16'h0000: ;
+                default: begin
+                    failures = failures + 1;
+                    $display("FAIL panel: frame %0d first pixel 0x%04x is not a legal frame start",
+                             i, first_px[i]);
+                end
+            endcase
+        end
+        if (n_captured < 8) begin
+            failures = failures + 1;
+            $display("FAIL panel: only %0d frames captured; a patterned frame is needed",
+                     n_captured);
+        end
     endtask
 
     // ==================================================================
@@ -418,6 +457,7 @@ module ui_mirror_tb;
     initial begin
         sw_done = 1'b0; sw_tick = 1'b0;
         fs_we = 1'b0; fs_wb = 1'b0; fs_rb = 1'b0;
+        for (int i = 0; i < MAX_CAPTURED; i++) first_px_seen[i] = 1'b0;
         fs_wx = 7'd0; fs_wy = 6'd0; fs_wpx = 16'h0000;
         fs_rx = 7'd0; fs_ry = 6'd0;
 
@@ -465,6 +505,11 @@ module ui_mirror_tb;
 
         // 4. End to end.
         wait (px_captured);
+        // Let a full pattern cycle of panel frames go by before judging the
+        // first pixels: with the demo holding zero milliseconds the pattern
+        // advances every frame, so the frames where a wrong first pixel can
+        // appear are not reached until the patterned ones arrive.
+        #200ms;
         panel_check();
         if (failures == 0)
             $display("PASS panel path: init list and frame 2 pixels through the socket layer");
