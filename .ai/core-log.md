@@ -2093,3 +2093,33 @@ Deploy the newly pinned option 2 image and put it through the same evidence the 
 - User Test: N/A
 
 ---
+
+## 59 COMMIT Unreleased 2026-10-02T23:13:14-07:00
+
+#### Coming From:
+
+Unreleased 83f7bb3
+
+#### Purpose:
+
+Put the newly pinned placement seed on the card and give it the same evidence the previous image earned, so the standing image is the fastest measured one rather than the one that happened to be there.
+
+#### Outcome:
+
+The card now holds the option 2 image rather than the option 3 image, and it earned its place rather than inheriting it. The artifact is the one entry 58's sweep built and measured at `clk_pixel` Fmax 78.674 MHz, `5507492ecbbb8de4eb695aece0f8b5e922580394d9d35bc3563de89d540210bb`, so no bitstream was rebuilt for this cycle; it was uploaded as `cores/console138k/phosphortang.bin` and the SD readback matched by size and CRC-32. The evidence is the same set the previous image earned, run on the new seed: a held-frame sweep that reached all eight patterns reports no failures, with the panel folding to the source's value and the transmitter to its own model on every one; `tools/ui_mirror_check.py` passes on pattern 6, which is one of the two patterns that failed until entry 56 and reports source, transmitter and panel all matching their models with liveness confirmed; and the encoder still reads count `0x8000_0000` with `raw` at `0xb`, the switch on and the button released, so the socket path came through the reconfiguration unchanged. The user reported acceptance of the hardware result. This closes the deployment step entry 58 carried forward and leaves the card holding a timing-MET image that is 1.9 MHz better placed than the one before it. No engineering file changed in this cycle. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 59 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The renderer now becomes the menu writing the same 96x64 frame store, which is the step the whole socket layer and the mirror check were built to support: the check runs before each release, and the encoder is the control that drives it. The remaining PMOD modules the user has named, starting with the eight-LED Pmod, are each a file and a socket declaration rather than new structure, and stay behind the menu work. One judgement call carried from the fold is still open for that cycle: the display path now has a working hold, a live socket declaration and an encoder whose state is readable, so a consumer should poll rather than expect the hardware to queue, and the same argument will return for any register that exists to save a consumer arithmetic it already gets for free.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: NOT RUN
+- Deployment: PASS
+- User Test: PASS
+
+---
