@@ -2183,3 +2183,35 @@ None.
 - User Test: N/A
 
 ---
+
+## 62 COMMIT Unreleased 2026-10-03T00:33:40-07:00
+
+#### Coming From:
+
+Unreleased 660409f
+
+#### Purpose:
+
+Implement slice 1 of the menu renderer: a frame writer that fills the 96x64 store in raster order under the swap handshake, drawing a fixed frame whose pixels are derived from cell indices so the 16-column by 8-row grid is provable before any glyph exists.
+
+#### Outcome:
+
+Added `src/ui/ui_menu_renderer.sv`, the slice-1 frame writer: it fills the back bank of the shared store in raster order at one pixel per clock, raises `render_done` for one cycle when the bank is complete, and draws a fixed frame whose 16-bit value names its own coordinate, with the cell row at `[14:12]` and the cell column at `[10:7]` above the in-cell offsets, so all 6144 pixels are distinct and the 6x8 cell that tiles the store exactly 16 columns by 8 rows is provable with no glyph, font or state input existing. Two handshake hazards were found and closed while writing it rather than left for hardware. The first is that the swap does not lower `render_enable` until the cycle after `render_done`, so a renderer that re-armed on the pulse would begin the next frame into the bank it had just written, because the bank has not flipped yet; the demo is protected from this only by its one-second dwell, and a menu has no dwell to hide behind, so this renderer instead waits for the swap to acknowledge `render_done` (enable low) and complete (enable high) before starting a frame. The second is that `hold` is consulted only between frames, so a frame in flight is never torn. `tests/ui_menu_renderer_tb.sv` proves both against a real `ui_swap` rather than an assumed stimulus: write N lands at `(N % 96, N / 96)` for 6144 writes a frame, every pixel equals the cell-index model computed independently in the test, no word repeats within a frame, every write lands in the bank the outputs are not reading and the target alternates frame to frame, a frame starts only while the swap is idle and only after the acknowledgment, and no pixel is written while `hold` is asserted. It is registered in `tests/run.sh`; the Verilator suite passes, the new check reporting four frames and 24576 pixels, with every pre-existing check unchanged. No gateware changed in this cycle and the module is not yet instantiated, so no bitstream was built or deployed and the simulation is the gate. Wiring it into `pmod_mirror_core.sv` is deferred for approval because it is not a drop-in: the renderer's frame is a single fixed image rather than the demo's eight patterns, so `tools/ui_mirror_check.py`, which identifies a frame by matching its fold against the eight-pattern model, would need that model extended before the change could be judged on hardware. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 62 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Wire `ui_menu_renderer` into `pmod_mirror_core.sv`, extend `tools/ui_mirror_check.py` with a model for the fixed cell frame, then rebuild and deploy the bring-up image and earn the evidence every other change here has had to: the mirror check green on the fixed frame, a visual pass on the panel and the VGA, and the encoder as the menu's control. That wiring changes the user-visible image from the eight demo patterns to the proof frame and invalidates the checker's pattern identification, so it is held for approval rather than assumed. The font and the text grid, then content and layout from the state inputs already wired, follow the slice order recorded in `.ai/core-reference.md`.
+
+#### Files Modified:
+
+- src/ui/ui_menu_renderer.sv
+- tests/ui_menu_renderer_tb.sv
+- tests/run.sh
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---

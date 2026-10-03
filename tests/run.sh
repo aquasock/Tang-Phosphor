@@ -11,11 +11,13 @@ hdmi_audio_output_dir="$output_dir/hdmi_audio"
 ui_control_output_dir="$output_dir/ui_control"
 ui_time_output_dir="$output_dir/ui_time"
 ui_album_output_dir="$output_dir/ui_album"
+ui_menu_output_dir="$output_dir/ui_menu"
 ae350_bridge_output_dir="$output_dir/ae350_bridge"
 ae350_loader_output_dir="$output_dir/ae350_loader"
 mkdir "$iosys_output_dir" "$audio_output_dir" "$audio_policy_output_dir" \
     "$hdmi_audio_output_dir" "$ui_control_output_dir" "$ui_time_output_dir" \
-    "$ui_album_output_dir" "$ae350_bridge_output_dir" "$ae350_loader_output_dir"
+    "$ui_album_output_dir" "$ui_menu_output_dir" \
+    "$ae350_bridge_output_dir" "$ae350_loader_output_dir"
 trap 'find "$output_dir" -depth -delete' EXIT
 
 verilator --binary --timing -Wno-fatal -DSIM \
@@ -42,6 +44,13 @@ verilator --binary --timing -Wno-fatal -DSIM \
     "$project_dir/src/ui/phosphor_album_ui.sv" \
     "$project_dir/src/ui/phosphor_time_digits.sv"
 "$ui_album_output_dir/Vphosphor_album_ui_tb"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module ui_menu_renderer_tb --Mdir "$ui_menu_output_dir" \
+    "$test_dir/ui_menu_renderer_tb.sv" \
+    "$project_dir/src/ui/ui_menu_renderer.sv" \
+    "$project_dir/src/ui/ui_swap.sv"
+"$ui_menu_output_dir/Vui_menu_renderer_tb"
 
 verilator --binary --timing -Wno-fatal \
     --top-module audio_test_source_tb --Mdir "$audio_output_dir" \
