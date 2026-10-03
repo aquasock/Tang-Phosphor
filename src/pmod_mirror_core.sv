@@ -69,6 +69,7 @@ module pmod_mirror_core #(
     localparam [3:0] PERS_OLEDRGB = 4'd1;
     localparam [3:0] PERS_VGA_J1  = 4'd2;
     localparam [3:0] PERS_VGA_J2  = 4'd3;
+    localparam [3:0] PERS_ENC     = 4'd4;   // rotary encoder, either socket
 
     localparam integer W = 96;
     localparam integer H = 64;
@@ -427,6 +428,52 @@ module pmod_mirror_core #(
         .signature (hdmi_signature)
     );
 
+    // ------------------------------------------------------------------
+    // Rotary encoder.  One instance per socket because the module can sit on
+    // either, and it drives nothing on any of them, so only its decoded state
+    // needs selecting rather than its lanes.
+    // ------------------------------------------------------------------
+    logic [31:0] enc0_count, enc1_count;
+    logic [3:0]  enc0_raw,   enc1_raw;
+    logic        enc0_button, enc0_switch, enc1_button, enc1_switch;
+
+    pmod_enc enc_on_pmod0 (
+        .clk (clk_pixel), .rst (rst),
+        .lane_i (p0_lane_i), .lane_o (), .lane_oe (),
+        .count (enc0_count), .raw (enc0_raw),
+        .button (enc0_button), .switch_on (enc0_switch)
+    );
+
+    pmod_enc enc_on_pmod1 (
+        .clk (clk_pixel), .rst (rst),
+        .lane_i (p1_lane_i), .lane_o (), .lane_oe (),
+        .count (enc1_count), .raw (enc1_raw),
+        .button (enc1_button), .switch_on (enc1_switch)
+    );
+
+    logic [31:0] enc_count_sel;
+    logic [3:0]  enc_raw_sel;
+    logic        enc_button_sel, enc_switch_sel;
+
+    always_comb begin
+        if (pmod0_personality == PERS_ENC) begin
+            enc_count_sel  = enc0_count;
+            enc_raw_sel    = enc0_raw;
+            enc_button_sel = enc0_button;
+            enc_switch_sel = enc0_switch;
+        end else if (pmod1_personality == PERS_ENC) begin
+            enc_count_sel  = enc1_count;
+            enc_raw_sel    = enc1_raw;
+            enc_button_sel = enc1_button;
+            enc_switch_sel = enc1_switch;
+        end else begin
+            enc_count_sel  = 32'h8000_0000;   // centred, as at reset
+            enc_raw_sel    = 4'hf;
+            enc_button_sel = 1'b0;
+            enc_switch_sel = 1'b0;
+        end
+    end
+
     ui_debug_regs debug_registers (
         .clk                (clk_pixel),
         .resetn             (resetn),
@@ -450,7 +497,11 @@ module pmod_mirror_core #(
         .pmod1_personality  (pmod1_personality),
         .pmod0_flipped      (pmod0_flipped),
         .pmod1_flipped      (pmod1_flipped),
-        .hold               (hold)
+        .hold               (hold),
+        .enc_count          (enc_count_sel),
+        .enc_raw            (enc_raw_sel),
+        .enc_button         (enc_button_sel),
+        .enc_switch         (enc_switch_sel)
     );
 
     // ------------------------------------------------------------------

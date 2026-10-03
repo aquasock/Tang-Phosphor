@@ -45,6 +45,10 @@ module ui_debug_regs (
     input  logic [31:0] hdmi_crc,
     input  logic [31:0] vga_frames,
     input  logic [31:0] vga_crc,
+    input  logic [31:0] enc_count,
+    input  logic [3:0]  enc_raw,
+    input  logic        enc_button,
+    input  logic        enc_switch,
 
     // Declared configuration, out to the socket layer.
     output logic [3:0]  pmod0_personality,
@@ -118,6 +122,13 @@ module ui_debug_regs (
                 6'h0b: rdata_q <= hdmi_crc;
                 6'h0c: rdata_q <= vga_frames;
                 6'h0d: rdata_q <= vga_crc;
+                6'h0e: rdata_q <= enc_count;
+                // Layout, stated rather than implied: bits 7:4 the four pins
+                // as read, bit 3 the switch normalised, bit 2 the button
+                // normalised.  The first version wrote a 36-bit concatenation
+                // into a 32-bit register, which truncated harmlessly but left
+                // the comment describing bits nobody could find.
+                6'h0f: rdata_q <= {24'b0, enc_raw, enc_switch, enc_button, 2'b0};
                 default: rdata_q <= 32'd0;
             endcase
         end

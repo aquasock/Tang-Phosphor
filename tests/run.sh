@@ -123,6 +123,7 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/pmod/pmod_io_buf.sv" \
     "$project_dir/src/pmod/pmod_oledrgb.sv" \
     "$project_dir/src/pmod/pmod_vga.sv" \
+    "$project_dir/src/pmod/pmod_enc.sv" \
     "$project_dir/src/video/ui_vga_backend.sv" \
     "$project_dir/src/oled/oled_panel.sv" \
     "$project_dir/src/oled/oled_spi.sv" \

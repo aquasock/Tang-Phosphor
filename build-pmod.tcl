@@ -8,6 +8,7 @@ add_file -type verilog "src/pmod/pmod_slot.sv"
 add_file -type verilog "src/pmod/pmod_io_buf.sv"
 add_file -type verilog "src/pmod/pmod_oledrgb.sv"
 add_file -type verilog "src/pmod/pmod_vga.sv"
+add_file -type verilog "src/pmod/pmod_enc.sv"
 
 # Panel protocol.
 add_file -type verilog "src/oled/oled_panel.sv"
@@ -56,12 +57,12 @@ set_option -use_sspi_as_gpio 1
 set_option -use_mspi_as_gpio 1
 set_option -use_cpu_as_gpio 0
 set_option -multi_boot 1
-# Placement option measured, not assumed: on this netlist option 0 fails the
-# 74.25 MHz constraint at 65.724 MHz, while 2 reaches 77.543, 3 reaches 76.412
-# and 4 reaches 77.500.  An 11 MHz spread across options means the design sits
-# near the edge and the option decides which side it lands.  2 is pinned here
-# for the best margin; re-measure when the netlist changes materially, as
-# entry 45 did for the merged image.
+# Placement option measured, not assumed.  With the encoder personality added
+# the spread is: option 0 reaches 70.026 MHz and fails the 74.25 constraint,
+# 3 reaches 73.973 and also fails, while 2 reaches 78.666 and 4 reaches 78.270.
+# An unchanged netlist moves this by over 8 MHz, so the option decides whether
+# the design closes at all.  2 is pinned for the best margin; re-measure on
+# every material netlist change, as entry 45 did for the merged image.
 set_option -place_option 2
 
 run all

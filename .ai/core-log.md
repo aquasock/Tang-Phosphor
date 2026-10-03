@@ -1931,3 +1931,37 @@ The architecture is now complete for its purpose: one owned frame store, a prese
 - User Test: PASS
 
 ---
+
+## 54 COMMIT Unreleased 2026-10-02T19:31:43-07:00
+
+#### Coming From:
+
+Unreleased 81795b8
+
+#### Purpose:
+
+Bring up the Digilent Pmod ENC as a rotary control on the second socket, which is the first personality whose pins are all inputs and the first intended to drive the interface rather than display it.
+
+#### Outcome:
+
+`src/pmod/pmod_enc.sv` debounces the four module pins, decodes the quadrature pair into a count, and normalises the push button and slide switch, all against a contract recorded in the file rather than inferred by its consumers. It drives nothing: every module pin is an input to the host, so both the lane outputs and the enables stay low, and the socket layer only ever reads. Two encoder instances exist, one per socket, because the module can sit on either; only their decoded state is selected, never their lanes, since there are no lanes to drive. The bring-up produced one real bug and one real design error, and both were found by differential measurement rather than by reasoning. The bug was seating: the module is a 1x6 part, so it occupies one row of the dock's 2x6 socket rather than spanning both, and in the row the lane mapping assumed, the personality read pins 7-10, which the module does not touch. That is the same physical situation the `flipped` bit already existed for, an upside-down module, so the fix was a single declaration and no new code; the differential that proved it was the raw pins reading `1111` with the flip clear, which is the empty row, and changing to a real state with it set, with the count advancing by exactly four per detent across two independent measurements, five clicks giving plus twenty and four clicks giving plus sixteen. The design error was the button polarity: the manual states that the button reads low in its native state, my normalisation inverted it, and a released button therefore read as pressed. It was caught by reading a known state rather than by reasoning about the manual's wording, and the fix is one line. A third item was removed rather than added. A derived `steps` register was implemented to divide the four-count detent down to one step per click, and the user rejected the need for it on the grounds that a detent is always four counts and any other delta means the module is broken, which is the consumer's concern and not the hardware's. That rejection was worth more than it looked: deleting the register and its offset-rebase arithmetic raised `clk_pixel` Fmax from 77.272 to 85.470 MHz, taking the margin from 2.5 percent to 15, and it removed a convenience register whose only purpose was to do arithmetic the consumer already gets for free -- which is the first step towards the convenience layer the hardware should not own. The counts-per-detent ratio, the incremental nature of the counter, the reset to centred on reload and the fact that a press shorter than the polling interval will be missed by design are all recorded in the file as a contract, since the consumer is deliberately responsible for polling properly. Placement was re-measured against the new netlist and the numbers written into `build-pmod.tcl`: option 0 reaches 70.026 MHz and fails, option 3, which was the default until entry 53, reaches 73.973 and also fails, while option 2 reaches 78.666 and 4 reaches 78.270, so option 2 is pinned. On hardware the personality reads back as configured, the count centres on load, the button reads zero when released where the inverted version read one, and the removed register returns zero because nothing decodes it. The suite reports nineteen passing tests. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 54 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Two modules the user has named remain: the eight-LED Pmod and whatever else follows, each a file and a socket declaration. The `flipped` bit's second meaning, covering a 1x6 module in the other row as well as an upside-down module, belongs in `core-reference.md` with the encoder's contract and pinout. After the modules, the fold into the player, where the renderer becomes a menu and the mirror check becomes the regression gate. One judgement call is left deliberately open for the fold: whether a register derived for a consumer's convenience is a hardware fact or a software shortcut, since `steps` was rejected as the latter and the same argument will return for anything similar.
+
+#### Files Modified:
+
+- build-pmod.tcl
+- src/debug/ui_debug_regs.sv
+- src/pmod/pmod_enc.sv
+- src/pmod_mirror_core.sv
+- tests/run.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
