@@ -190,7 +190,7 @@ always @(posedge clk) begin
         5'd9: read_hi <= {16'b0, audible_stream_id};
         // Mirror block, word indices 48-57 (0xc0-0xe4).  Layouts match the
         // socket bring-up core bit for bit, so the checker's decoding carries
-        // over: control packs the pattern above the declaration, and the
+        // over: control packs the renderer's frame selector above the declaration, and the
         // encoder state keeps raw at 7:4, switch at 3, button at 2.
         5'd16: read_hi <= {13'b0, render_pattern, 2'b0,
                            pmod1_flipped, pmod0_flipped,

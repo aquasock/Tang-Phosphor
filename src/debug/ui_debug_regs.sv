@@ -106,9 +106,11 @@ module ui_debug_regs (
                 // Reads back in the same layout it is written in, so a host
                 // that echoes the register sees what it sent: hold at bit 0,
                 // personalities at 7:4 and 11:8, flips at 12 and 13.  The
-                // pattern sits above them at 18:16.  An earlier version packed
-                // hold at bit 3, which is how the mirror check managed to read
-                // a pattern bit as "held" on its first run.
+                // renderer's frame selector sits above them at 18:16; slice 1
+                // draws one frame, so it reads zero, and the field keeps its
+                // position so the host map does not move.  An earlier version
+                // packed hold at bit 3, which is how the mirror check managed
+                // to read a frame-selector bit as "held" on its first run.
                 6'h04: rdata_q <= {13'b0, pattern, 2'b0,
                                    pmod1_flipped, pmod0_flipped,
                                    pmod1_personality, pmod0_personality,

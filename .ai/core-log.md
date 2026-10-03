@@ -2215,3 +2215,41 @@ Wire `ui_menu_renderer` into `pmod_mirror_core.sv`, extend `tools/ui_mirror_chec
 - User Test: N/A
 
 ---
+
+## 63 COMMIT Unreleased 2026-10-03T00:55:56-07:00
+
+#### Coming From:
+
+Unreleased 280f8d3
+
+#### Purpose:
+
+Wire the slice-1 menu renderer into the bring-up core in place of the demo and retarget the mirror check to the frame it draws, so the renderer reaches the store and the checker judges the frame that is actually displayed.
+
+#### Outcome:
+
+`src/pmod_mirror_core.sv` now instantiates `ui_menu_renderer` where `ui_pattern_demo` was, so the store the panel, HDMI and PmodVGA read is filled by the menu's frame writer rather than the demo; the `DEMO_HOLD_MS` parameter is gone, the hold now freezes the menu renderer between frames, and the 3-bit field the host reads at 18:16 of the control register is tied to zero with the comment stating why (a menu publishes one frame, the demo reported a pattern index, and the position is kept so the host map does not move). `src/tang_phosphor_top.sv` drops the now-absent parameter connection; the two `build` tcl file lists and the integration test's source list swap `ui_pattern_demo.sv` for `ui_menu_renderer.sv`; the register-map comments in `src/debug/ui_debug_regs.sv` and `src/debug/debug_regs.sv` now describe that field as the renderer's frame selector. `tools/ui_mirror_check.py` no longer identifies one of the demo's eight patterns by fold: it models the single cell frame, computes the source, panel and transmitter folds directly, and compares each stream against them, which is all a one-frame renderer can support; the pattern-identification, uniform-frame retry and nearest-model language are gone because the demo they guarded is gone. The demo module is retained in the tree as the reference implementer of the contract but is no longer instantiated or built. Verification: `tests/ui_menu_renderer_tb.sv` still passes, and `tests/ui_mirror_tb.sv` now asserts that every captured panel frame begins with the menu frame's (0,0) value `0x0000` -- the previous frame's last pixel `0x77DE` would be the one-clock-early launch -- and cross-checks the core's published source signature against a host model written independently in the testbench, which passes at `0x76491800`; the same value comes out of the Python model in `tools/ui_mirror_check.py`, so the checker is validated against the RTL rather than only on a bench, with the transmitter's scaled model at `0x6c435800` and the panel's expected fold equal to the source's. The full Verilator suite passes, twenty-one checks with no failures. `scripts/build-pmod.sh` built the bring-up core with timing MET, `clk_pixel` Fmax `81.503` MHz against the `74.250` MHz constraint, which is 2.8 MHz better margin than the demo's pinned option 2 measured at `78.666`, and produced `build/pmod/tang_phosphor_pmod.bin`, SHA-256 `db4f85a0f43448597bf8ee1f529a7253fbe2ef0f2ebc0db2020ba69dc6d6f0d6`. Deployment and user testing did not run: no FT2232 or other JTAG device is attached to this machine, so the `.fs` was not flashed and the mirror check was not run against hardware, and the merged player build was not run either because the mirror check targets the bring-up map and the player change is the single removed parameter connection, which a repository-wide search confirms leaves no dangling reference. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 63 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Flash `build/pmod/tang_phosphor_pmod.fs` and run `tools/ui_mirror_check.py` on the seated configuration, expecting source and panel to read `0x76491800` and the transmitter `0x6c435800`, then confirm the fixed cell frame visually on the panel; if the bench is still in the VGA configuration it needs its own socket declaration and seating and must be re-established first. After the renderer is on hardware, slice 2 is the 6x8 font and the text grid, with a test that renders known strings and checks pixels, followed by content and layout from the state inputs already wired and re-verification of both configurations.
+
+#### Files Modified:
+
+- build-merged.tcl
+- build-pmod.tcl
+- src/debug/debug_regs.sv
+- src/debug/ui_debug_regs.sv
+- src/pmod_mirror_core.sv
+- src/tang_phosphor_top.sv
+- tests/run.sh
+- tests/ui_mirror_tb.sv
+- tools/ui_mirror_check.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

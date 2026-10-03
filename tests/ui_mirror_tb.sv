@@ -39,6 +39,32 @@ module ui_mirror_tb;
         $display("FAIL %s", what);
     endtask
 
+    // The frame the host model predicts, computed here independently of the
+    // renderer so a drift between them fails in simulation rather than on a
+    // bench: tools/ui_mirror_check.py judges hardware with this same function.
+    function automatic logic [15:0] exp_cell_pixel(input int px, input int py);
+        int col, in_col, row, in_row;
+        begin
+            col    = px / 6;
+            in_col = px % 6;
+            row    = py / 8;
+            in_row = py % 8;
+            exp_cell_pixel = {1'b0, row[2:0], 1'b0, col[3:0], in_col[2:0], in_row[2:0], 1'b0};
+        end
+    endfunction
+
+    // signature <- signature * 5 + pixel (mod 2^32), matching ui_checksum.sv.
+    function automatic logic [31:0] exp_frame_fold;
+        logic [31:0] acc;
+        begin
+            acc = 32'd0;
+            for (int y = 0; y < H; y++)
+                for (int x = 0; x < W; x++)
+                    acc = acc * 32'd5 + {16'b0, exp_cell_pixel(x, y)};
+            exp_frame_fold = acc;
+        end
+    endfunction
+
     task automatic expect_eq(input string what, input int got, input int want);
         if (got !== want) begin
             failures = failures + 1;
@@ -304,7 +330,7 @@ module ui_mirror_tb;
         else                   core_resetn <= 1'b1;
     end
 
-    pmod_mirror_core #(.HDMI_BACKEND(1'b0), .TRANSPORT(1'b0), .DEMO_HOLD_MS(0)) core (
+    pmod_mirror_core #(.HDMI_BACKEND(1'b0), .TRANSPORT(1'b0)) core (
         .clk_pixel    (clk),
         .uart_rx      (1'b1),
         .uart_tx      (),
@@ -344,14 +370,13 @@ module ui_mirror_tb;
     int         frame_count = 0;
     int         since_window = 0;
 
-    // The first pixel of every frame, as it was actually transmitted.  A frame
-    // may only start with one of the values the pattern function produces at
-    // (0,0): red, green, blue, white or black.  The ramp's last pixel is 0xBFFF
-    // and is none of those, which is what makes this the assertion that catches
-    // a first-pixel launch one clock early -- the failure the mirror check found
-    // on hardware and no test in this file could see.  It is checked over many
-    // frames rather than one because the flat fills and the orientation card
-    // produce a legal first pixel either way, so only a patterned frame shows it.
+    // The first pixel of every frame, as it was actually transmitted.  The menu
+    // renderer's frame is fixed and begins at (0,0) with the cell word for that
+    // coordinate, 0x0000; a frame's last pixel is 0x77DE.  A frame that begins
+    // with 0x77DE is the signature of the address window handing straight into
+    // the pixel loop instead of waiting -- the one-clock-early launch the mirror
+    // check found on hardware before entry 56.  Asserting the exact start value
+    // over many frames is what keeps that regression caught.
     localparam int MAX_CAPTURED = 24;
     logic [15:0] first_px [0:MAX_CAPTURED-1];
     logic        first_px_seen [0:MAX_CAPTURED-1];
@@ -410,41 +435,35 @@ module ui_mirror_tb;
         if (vccen !== 1'b1)  note_fail("panel VCCEN high by pixel time");
         if (pmoden !== 1'b1) note_fail("panel PMODEN high by pixel time");
 
-        // Frame 3 is the first that can carry the pattern: the renderer fills
-        // the back bank, the swap lands at the end of frame 1, and each
-        // backend latches its read bank at its own next frame boundary, so the
-        // panel picks the new bank up at frame 3.
+        // Frame 3 is the first that can carry the menu frame: the renderer fills
+        // the back bank, the swap lands at the end of frame 1, and each backend
+        // latches its read bank at its own next frame boundary, so the panel
+        // picks the new bank up at frame 3.
         expect_eq("panel reached frame 3", frame_count >= 3 ? 1 : 0, 1);
         // The two bytes that follow the address window must be emitted as data,
         // which is what proves the pixel stream comes out of the frame store and
-        // follows the window.  The pixel's *value* is not asserted here: with
-        // DEMO_HOLD_MS shortened the pattern advances every frame, so which
-        // pattern a captured frame belongs to is not fixed.  Comparing values
-        // against a model is the mirror check's job, and the panel's stream
-        // joins it once the panel has a per-pixel strobe.
+        // follows the window.  The pixel's value is checked against the menu
+        // model in the first-pixel loop below; a full per-pixel comparison of
+        // the panel stream is the mirror check's job on hardware.
         expect_eq("panel pixel high byte is data", got_dc[INIT_LEN + 7], 1'b1);
         expect_eq("panel pixel low byte is data",  got_dc[INIT_LEN + 8], 1'b1);
         if (!px_captured) note_fail("panel pixel never captured");
 
-        // A frame's first pixel may only be a value the pattern function can
-        // produce at (0,0).  0xBFFF is the ramp's last pixel, and it appearing
-        // as a frame's first pixel is the signature of the address window
-        // handing straight into the pixel loop instead of waiting.
+        // Every captured frame must start with the menu frame's (0,0) pixel.
+        // A frame starting with the previous frame's last pixel (0x77DE) is the
+        // one-clock-early launch: the address window handing into the loop.
         for (int i = 0; i < MAX_CAPTURED; i++) begin
             if (!first_px_seen[i]) continue;
             n_captured = n_captured + 1;
-            case (first_px[i])
-                16'hF800, 16'h07E0, 16'h001F, 16'hFFFF, 16'h0000: ;
-                default: begin
-                    failures = failures + 1;
-                    $display("FAIL panel: frame %0d first pixel 0x%04x is not a legal frame start",
-                             i, first_px[i]);
-                end
-            endcase
+            if (first_px[i] !== 16'h0000) begin
+                failures = failures + 1;
+                $display("FAIL panel: frame %0d first pixel 0x%04x is not the expected 0x0000",
+                         i, first_px[i]);
+            end
         end
         if (n_captured < 8) begin
             failures = failures + 1;
-            $display("FAIL panel: only %0d frames captured; a patterned frame is needed",
+            $display("FAIL panel: only %0d frames captured; at least 8 are needed",
                      n_captured);
         end
     endtask
@@ -505,10 +524,8 @@ module ui_mirror_tb;
 
         // 4. End to end.
         wait (px_captured);
-        // Let a full pattern cycle of panel frames go by before judging the
-        // first pixels: with the demo holding zero milliseconds the pattern
-        // advances every frame, so the frames where a wrong first pixel can
-        // appear are not reached until the patterned ones arrive.
+        // Let enough panel frames go by before judging the first pixels that the
+        // swap has landed and the panel is steady on the menu frame.
         #200ms;
         panel_check();
         if (failures == 0)
@@ -531,6 +548,23 @@ module ui_mirror_tb;
                 failures = failures + 1;
                 $display("FAIL renderer liveness: %0d frames, %0d panel ticks in 8M cycles",
                          renders, ticks);
+            end
+        end
+
+        // 6. The host model the mirror check uses, checked against the RTL.
+        //    The tool judges hardware with this frame function; if it drifts
+        //    from the renderer the gate fails a correct board, so the model is
+        //    verified here and not only on the bench.
+        begin
+            logic [31:0] exp = exp_frame_fold();
+            wait (core.render_done);
+            repeat (4) @(posedge clk);
+            if (core.source_signature !== exp) begin
+                failures = failures + 1;
+                $display("FAIL source model: measured 0x%08x modelled 0x%08x",
+                         core.source_signature, exp);
+            end else begin
+                $display("PASS source model: signature 0x%08x matches the host frame", exp);
             end
         end
 

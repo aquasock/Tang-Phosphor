@@ -17,7 +17,7 @@ add_file -type verilog "src/oled/oled_spi.sv"
 # Renderer and presentation backends.
 add_file -type verilog "src/ui/ui_frame_store.sv"
 add_file -type verilog "src/ui/ui_frame_bank.sv"
-add_file -type verilog "src/ui/ui_pattern_demo.sv"
+add_file -type verilog "src/ui/ui_menu_renderer.sv"
 add_file -type verilog "src/ui/ui_scanout.sv"
 add_file -type verilog "src/ui/ui_swap.sv"
 add_file -type verilog "src/ui/ui_checksum.sv"

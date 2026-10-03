@@ -292,8 +292,7 @@ pmod_mirror_core #(
     .HDMI_BACKEND   (1'b1),
     .TRANSPORT      (1'b0),
     .EXTERNAL_AUDIO (1'b1),
-    .EXPOSE_STATE   (1'b1),
-    .DEMO_HOLD_MS   (1000)
+    .EXPOSE_STATE   (1'b1)
 ) display (
     .clk_pixel          (clk_pixel),
     .clk_pixel_x5       (clk_pixel_x5),

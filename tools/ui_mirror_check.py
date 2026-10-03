@@ -7,8 +7,8 @@
 # that are earned rather than eyeballed:
 #
 #   MIRROR    each measured stream matches a model computed here, in Python,
-#             from the pattern definition and the scaling geometry.  A frozen
-#             frame passes this check honestly, because three screens showing
+#             from the renderer's frame definition and the scaling geometry.  A
+#             frozen frame passes this check honestly, because screens showing
 #             the same frozen frame really are mirrored.
 #   LIVENESS  the frame counters advance.  This is the check that catches a
 #             stopped renderer, which the mirror check cannot: a frozen frame
@@ -65,51 +65,36 @@ REG_VGA_SIG     = 0x34
 MAGIC = 0x54504830          # "TPH0"
 MASK32 = 0xFFFFFFFF
 
-# Geometry and pattern definitions, mirrored from the RTL.  These are the
-# model: if they drift from src/ui/ui_pattern_demo.sv and src/video/ui_hdmi_scan.sv
+# Geometry and frame definition, mirrored from the RTL.  These are the model:
+# if they drift from src/ui/ui_menu_renderer.sv and src/video/ui_hdmi_scan.sv
 # the check fails loudly rather than silently passing.
 W_SRC, H_SRC = 96, 64
 K, ACTIVE_X, ACTIVE_Y = 11, 112, 8
 FRAME_W, FRAME_H = 1280, 720              # visible window at the transmitter
-LAST_PAT = 7
 
 # Personality codes from src/pmod_mirror_core.sv.  Only one of them changes what
 # this tool can judge, because only the panel is a genuinely independent stream.
 PERS_OLEDRGB = 1
 
 
-def pattern_pixel(px, py, p):
-    """src/ui/ui_pattern_demo.sv pattern_pixel()."""
-    if p == 0:
-        return 0xF800
-    if p == 1:
-        return 0x07E0
-    if p == 2:
-        return 0x001F
-    if p == 3:
-        return 0xFFFF
-    if p == 4:
-        return 0x0000
-    if p == 5:
-        bars = [0xF800, 0x07E0, 0x001F, 0x07FF, 0xF81F, 0xFFE0, 0xFFFF]
-        i = px // 12
-        return bars[i] if i < len(bars) else 0x0000
-    if p == 6:
-        return ((px >> 2) << 11) | (py << 5) | (py >> 1)
-    if px == 0 or px == W_SRC - 1 or py == 0 or py == H_SRC - 1:
-        return 0xFFFF
-    if px < 8 and py < 8:
-        return 0xFFFF
-    if px == py:
-        return 0x07E0
-    if px + py == W_SRC - 1:
-        return 0xF800
-    return 0x0000
+def cell_pixel(px, py):
+    """src/ui/ui_menu_renderer.sv cell_pixel().
+
+    The slice-1 menu frame names its own coordinate: cell row at 14:12, cell
+    column at 10:7, then the in-cell column and row, so every pixel carries
+    where it belongs and the whole frame is a check on the address arithmetic.
+    """
+    col, in_col = divmod(px, 6)
+    row, in_row = divmod(py, 8)
+    return (((row & 0x7) << 12)
+            | ((col & 0xF) << 7)
+            | ((in_col & 0x7) << 4)
+            | ((in_row & 0x7) << 1))
 
 
-def source_frame(p):
+def source_frame():
     """The store as the renderer fills it: x fastest, then y."""
-    return [pattern_pixel(x, y, p) for y in range(H_SRC) for x in range(W_SRC)]
+    return [cell_pixel(x, y) for y in range(H_SRC) for x in range(W_SRC)]
 
 
 def fold(pixels):
@@ -186,7 +171,7 @@ def render_moves(dev, seconds):
 
     The hold bit is not a trustworthy source for this: an earlier build packed
     it at a different position in the read than in the write, which is exactly
-    how a checker mistakes a pattern bit for a hold bit.  Watching the counter
+    how a checker mistakes a frame-selector bit for a hold bit.  Watching the counter
     is unambiguous.
     """
     before = dev.peek(REG_RENDER)
@@ -202,9 +187,6 @@ def main():
                     help="path to Tang-Control's tangctl.py")
     ap.add_argument("--settle", type=float, default=0.35,
                     help="seconds to wait after setting hold, for the frame to publish")
-    ap.add_argument("--attempts", type=int, default=8,
-                    help="frames to try when the held frame is a uniform fill, "
-                         "whose agreement would prove nothing")
     ap.add_argument("--frames", type=int, default=12,
                     help="how many frames to generate while measuring liveness")
     ap.add_argument("--map", choices=sorted(MAPS), default="bringup",
@@ -281,67 +263,34 @@ def main():
                             + " did not advance")
 
     # ---- compare against the model, with the renderer held ---------------
-    # Holding makes the published signatures stable, so the model has a single
-    # definite frame to be right or wrong about.
-    #
-    # Identify which frame each stream is showing, independently, by matching
-    # its measured signature against the model for every pattern.  The pattern
-    # register is not trusted for this: it reports what the writer is about to
-    # draw, not what a backend has latched.  Identification is deliberately
-    # per-stream, because an earlier version accepted a source match on the
-    # *previous* pattern while reporting the *current* one and so printed PASS
-    # beside two numbers that plainly disagreed.
-    source_by_fold = {fold(source_frame(p)): p for p in range(LAST_PAT + 1)}
-    transmit_by_fold = {fold(emitted_stream(source_frame(p))): p
-                       for p in range(LAST_PAT + 1)}
-    # A uniform fill folds to one value across the whole store, so three
-    # streams agreeing on one is not evidence of anything.  Release the hold
-    # and look again on the next frame rather than bank a free pass: a gate
-    # that can pass vacuously is not a gate.
-    uniform = (0, 1, 2, 3, 4)
-    attempts = 0
-    while True:
-        dev.poke(REG_CONTROL, (control & ~1) | 1)
-        time.sleep(args.settle)
-        held = dev.read_state()
-        attempts += 1
-        pattern = source_by_fold.get(held["src_sig"])
-        panel_pattern = source_by_fold.get(held["oled_sig"])
-        transmitter_pattern = transmit_by_fold.get(held["hdmi_sig"])
-        if pattern is None or pattern not in uniform or attempts >= args.attempts:
-            break
-        dev.poke(REG_CONTROL, control & ~1)
-        time.sleep(1.1)
+    # Holding makes the published signatures stable, so the model has one
+    # definite frame to be right or wrong about.  The menu draws a single fixed
+    # frame, so unlike the demo's eight patterns there is nothing to identify:
+    # each stream either matches the one model or it does not.  The hold is
+    # still set here because it is what makes the comparison land on a settled
+    # frame, and it is restored to whatever was found on the way out, below.
+    dev.poke(REG_CONTROL, (control & ~1) | 1)
+    time.sleep(args.settle)
+    held = dev.read_state()
 
-    results["attempts"] = attempts
-    register_pattern = (held["control"] >> 16) & 0x7
-
-    frame = source_frame(pattern if pattern is not None else 0)
-    expect_src = fold(frame)
-    expect_hdmi = fold(emitted_stream(frame))
+    expect_src = fold(source_frame())
+    expect_hdmi = fold(emitted_stream(source_frame()))
     # The panel emits the store contents at 1:1 with no bars, in the same
     # order the renderer writes them, so its expected fold is the source's.
     expect_panel = expect_src
 
-    src_ok = pattern is not None and held["src_sig"] == expect_src
-    hdmi_ok = transmitter_pattern is not None and transmitter_pattern == pattern
-    panel_ok = panel_pattern is not None and panel_pattern == pattern
+    src_ok = held["src_sig"] == expect_src
+    hdmi_ok = held["hdmi_sig"] == expect_hdmi
+    panel_ok = (not oled_declared) or held["oled_sig"] == expect_panel
 
-    results["pattern"] = pattern
-    results["identified"] = {"source": pattern, "transmitter": transmitter_pattern,
-                             "panel": panel_pattern}
-    results["register_pattern"] = register_pattern
-    # A uniform frame folds to a single value across the whole store, so three
-    # streams agreeing on one is not evidence of anything.  Say so instead of
-    # banking a free pass.
-    results["weak_frame"] = pattern in (0, 1, 2, 3, 4) if pattern is not None else None
+    register_frame = (held["control"] >> 16) & 0x7
+    results["register_frame"] = register_frame
     results["expected"] = {"source": f"0x{expect_src:08x}",
                            "transmitter": f"0x{expect_hdmi:08x}",
                            "panel": f"0x{expect_panel:08x}"}
     results["measured"] = {"source": f"0x{held['src_sig']:08x}",
                            "transmitter": f"0x{held['hdmi_sig']:08x}",
                            "panel": f"0x{held['oled_sig']:08x}"}
-    panel_ok = (not oled_declared) or (panel_pattern is not None and panel_pattern == pattern)
 
     results["mirror"] = {
         "source": src_ok,
@@ -349,18 +298,14 @@ def main():
         "panel": panel_ok,
     }
     if not src_ok:
-        failures.append(f"mirror: source 0x{held['src_sig']:08x} matches no pattern "
-                        f"(nearest model 0x{expect_src:08x})")
+        failures.append(f"mirror: source 0x{held['src_sig']:08x} does not match the "
+                        f"menu frame model 0x{expect_src:08x}")
     if not hdmi_ok:
-        failures.append(f"mirror: transmitter shows pattern {transmitter_pattern}, "
-                        f"source shows {pattern}")
+        failures.append(f"mirror: transmitter 0x{held['hdmi_sig']:08x} does not match "
+                        f"the scaled model 0x{expect_hdmi:08x}")
     if oled_declared and not panel_ok:
-        failures.append(f"mirror: panel shows pattern {panel_pattern}, "
-                        f"source shows {pattern}")
-
-    if results["weak_frame"]:
-        print("NOTE: identified frame is a uniform fill, where agreement proves "
-              "nothing; re-run until a patterned frame is captured.")
+        failures.append(f"mirror: panel 0x{held['oled_sig']:08x} does not match "
+                        f"the source model 0x{expect_panel:08x}")
 
     # ---- restore whatever we found ---------------------------------------
     dev.poke(REG_CONTROL, control)
@@ -377,8 +322,7 @@ def main():
         else:
             which = ", ".join(sorted(results.get("liveness", {}).get("moved", {})))
             print(f"liveness      : {'PASS' if liveness_moved else 'FAIL'} ({which})")
-        print(f"pattern       : source p{pattern}, transmitter p{transmitter_pattern}, "
-              f"panel p{panel_pattern}   (register said {register_pattern})")
+        print(f"frame         : menu slice-1 fixed frame   (renderer reported {register_frame})")
         print(f"source        : measured 0x{held['src_sig']:08x}  modelled 0x{expect_src:08x}"
               f"  {'PASS' if src_ok else 'FAIL'}")
         print(f"transmitter   : measured 0x{held['hdmi_sig']:08x}  modelled 0x{expect_hdmi:08x}"

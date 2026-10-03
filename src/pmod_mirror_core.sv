@@ -39,9 +39,6 @@ module pmod_mirror_core #(
     // the integration test turns it off and the socket layer keeps its
     // power-on personalities.
     parameter bit   TRANSPORT         = 1'b1,
-    // Renderer dwell on each pattern.  A parameter so a test can shorten the
-    // one-second hold to something a simulator can reach.
-    parameter integer DEMO_HOLD_MS    = 1000,
     // The player owns its own transport and its own audio: the register bank
     // stays inside for the bring-up core, and the state comes out here so a
     // host that already has a map can place it.  Audio follows the same split.
@@ -112,7 +109,12 @@ module pmod_mirror_core #(
     logic       pmod0_flipped;
     logic       pmod1_flipped;
     logic       hold;
-    logic [2:0] demo_pattern;
+    // The renderer's frame selector, reported to the host at 18:16 of the
+    // control register.  The demo reported which of eight test patterns it was
+    // drawing; a menu frame writer draws one published frame at a time, so
+    // slice 1 fixes this at zero.  The field keeps its position and width so the
+    // host map does not move -- the menu is held to the existing protocol.
+    logic [2:0] frame_sel;
 
     assign pmod0_personality = EXPOSE_STATE ? i_pmod0_personality : pmod0_personality_r;
     assign pmod1_personality = EXPOSE_STATE ? i_pmod1_personality : pmod1_personality_r;
@@ -223,6 +225,11 @@ module pmod_mirror_core #(
 
     // ------------------------------------------------------------------
     // Renderer and the shared pixel stores.
+    //
+    // One frame writer fills the back bank and raises render_done; the swap
+    // decides when that bank becomes the displayed one.  That was the demo's
+    // job while the architecture was being proven and is the menu renderer's
+    // now, so the demo's test patterns are no longer part of the design.
     // ------------------------------------------------------------------
     logic        we;
     logic        wr_bank;
@@ -230,13 +237,12 @@ module pmod_mirror_core #(
     logic [5:0]  wr_y;
     logic [15:0] wr_px;
 
-    ui_pattern_demo #(.W(W), .H(H), .CLK_MHZ(CLK_MHZ), .HOLD_MS(DEMO_HOLD_MS)) demo (
+    ui_menu_renderer #(.W(W), .H(H)) renderer (
         .clk           (clk_pixel),
         .rst           (rst),
         .bank          (bank),
         .render_enable (render_enable),
         .hold          (hold),
-        .pattern       (demo_pattern),
         .we            (we),
         .wr_bank       (wr_bank),
         .wr_x          (wr_x),
@@ -244,6 +250,12 @@ module pmod_mirror_core #(
         .wr_px         (wr_px),
         .render_done   (render_done)
     );
+
+    // Slice 1 draws exactly one frame, so the selector the host reads at 18:16
+    // is zero.  It is tied here rather than driven by the renderer because a
+    // menu has no pattern index to report; the field is kept at its position so
+    // the host map does not move.
+    assign frame_sel = 3'd0;
 
     // ------------------------------------------------------------------
     // OLED backend: 1:1, so its raster is the image and nothing is a bar.
@@ -569,7 +581,7 @@ module pmod_mirror_core #(
         .request_rdata      (debug_rdata),
         .uptime_cycles      (uptime_cycles),
         .render_frames      (render_frames),
-        .pattern            (demo_pattern),
+        .pattern            (frame_sel),
         .source_bank        (bank),
         .source_crc         (source_signature),
         .oled_frames        (oled_frames),
@@ -711,7 +723,7 @@ module pmod_mirror_core #(
     assign o_render_frames   = render_frames;
     assign o_oled_frames     = oled_frames;
     assign o_hdmi_frames     = hdmi_frames;
-    assign o_pattern         = demo_pattern;
+    assign o_pattern         = frame_sel;
     assign o_frame_tick      = oled_frame_start;
     assign o_source_bank     = bank;
     assign o_enc_count       = enc_count_sel;
