@@ -2062,3 +2062,34 @@ The placement re-measurement carried from entry 56 is the next work: the pinned 
 - User Test: N/A
 
 ---
+
+## 58 COMMIT Unreleased 2026-10-02T23:05:38-07:00
+
+#### Coming From:
+
+Unreleased 37d633e
+
+#### Purpose:
+
+Re-measure the merged placement against the current netlist and pin the fastest seed by measurement rather than by inheritance.
+
+#### Outcome:
+
+The merged placement was re-swept because entry 56's one-line change moved `clk_pixel` Fmax from 80.503 to 76.771 MHz, which is more than such a change should cost and could have been either a real cost or a placement artefact. Four options were built from the current netlist and every one meets timing, so the standing note that options 1 and 4 fail setup was measured against a different netlist and no longer holds: option 0 reaches 77.264 MHz, option 2 78.674, option 3 76.771 and option 4 76.150, all above the 74.250 MHz constraint. Two things came out of it besides the numbers. The build is deterministic, which the pinned-seed discipline depends on: option 3 reproduced both its artifact and its exact Fmax, `32e31f68a4b8bef1e2c10101cdb5edce27b619fcaf3e4cf3ce72e9a197c5fe8e` at 76.771 MHz, the same values entry 56 deployed and verified. And the seed still moves the clock by 2.5 MHz across options, so pinning it is worth doing: the default moved from 3 to 2 because option 2 is the fastest of them, with all four measurements written beside it in `scripts/build-merged.sh` and the stale claim about options 1 and 4 removed rather than left to mislead a future reader. `build-merged.tcl`'s literal seed was also two revisions out of step with the script's default, because the script always sets the environment variable and the literal applies only when `gw_sh` is run by hand; it now matches and says why. The deployed image is deliberately left alone: the card still holds option 3, which meets timing, and re-deploying the faster seed with the mirror check as its gate is the next step rather than something to assume. No bitstream was rebuilt for deployment in this cycle and none was uploaded. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 58 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Deploy the newly pinned option 2 image and put it through the same evidence the previous one earned, which is the mirror check on a patterned frame, the encoder read, and a visual pass, so that the card holds the fastest measured seed rather than the previous one; that is a hardware cycle and the check is its gate. After that the renderer becomes the menu writing the same 96x64 frame store, with the check running before each release, which is where its value grows rather than shrinks. The remaining PMOD modules the user has named, starting with the eight-LED Pmod, stay behind that.
+
+#### Files Modified:
+
+- build-merged.tcl
+- scripts/build-merged.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---
