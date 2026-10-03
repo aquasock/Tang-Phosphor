@@ -1965,3 +1965,40 @@ Two modules the user has named remain: the eight-LED Pmod and whatever else foll
 - User Test: PASS
 
 ---
+
+## 55 COMMIT Unreleased 2026-10-02T22:07:32-07:00
+
+#### Coming From:
+
+Unreleased da6551e
+
+#### Purpose:
+
+Fold the PMOD socket layer and its runtime configuration into the player itself, so the frames the player renders reach every screen from the player and the mirror check becomes the gate that proves it, with the rotary encoder as the first personality that is not a display.
+
+#### Outcome:
+
+The folded player now owns the whole socket surface. `src/pmod_mirror_core.sv` gained the inputs it had never had -- both personalities, both seating orientations and the renderer hold -- plus the encoder's decoded state as outputs, with the bring-up core's own register bank kept on separate signals and selected by `EXPOSE_STATE`, which is the same split `EXTERNAL_AUDIO` already makes for audio; `src/tang_phosphor_top.sv` now drives them from the player's `debug_regs` and reads the encoder back, and `src/pmod_mirror_top.sv` and `tests/ui_mirror_tb.sv` tie the new inputs off because both run with the bank inside. Without those inputs the player's register block, which is what a `/tang.ini` parser is meant to drive, wrote to nothing: the sockets ran on the bring-up core's power-on default and the hold bit was inert, so a developer could set a socket declaration and a freeze that reached no logic. The fold's first measurement was therefore the checker failing against a panel that was visually perfect, and the cause was not the panel. Nine wires in the player top were undeclared, and this tool gives an implicit net connected to a module port a width of one, so the 4-bit personality and the 32-bit encoder count were silently truncated: personality 4 became 0, which left the encoder's socket undeclared and made the core report its own defaults instead of the module's pins, and the count, always a multiple of four, read zero however far the knob turned. The OLED worked throughout on luck, because personality 1 fits in one bit, and the build log had named every one of those wires from the start; they were harmless only while they carried nothing. Explicit declarations fixed it, and the same truncation was why `raw` reading `0xf`'s low bit had looked like a real pin level while the encoder was in fact dead. The hold is now verified rather than assumed: with the renderer held, the pattern and the render count stay static while the panel keeps producing its own frames, where before the fold the pattern advanced through p3, p5 and p0 while held. `tools/ui_mirror_check.py` was wrong in a second way: it accepted a source match on the pattern before the one it reported and so printed PASS beside two numbers that plainly disagreed, and it could stop on a uniform fill, which any reordering satisfies; it now identifies each stream independently against all eight patterns, refuses to bank a verdict on a uniform frame and releases the hold to try the next one, which is how it reached a patterned frame at all. The user's decision that the player's sockets must power up released then exposed a defect no register could have shown: `src/oled/oled_panel.sv` runs its power-up and its 44-byte initialisation list once after configuration and never returns to them except through `rst`, so with the socket still released those bytes went out on a high-impedance pin and were lost, and a later declaration could only feed pixels to a panel that was never initialised or switched on, leaving it dark permanently rather than until configured. The engine is now held in reset until its socket is declared as OLEDRGB, so the init lands on a live socket, and because `ui_swap` waits on every output's frame tick the undeclared socket is masked out of that wait as well; without that second half, gating the engine would have stalled the renderer and blanked the HDMI on any card with no PMOD, which is a worse fault than the one being fixed. Both halves were measured rather than argued: undeclared, the render counter advanced while the panel frame counter stayed at zero, and declaring `0xc0 = 0x2410` released the engine, which ran its init and then produced frames at roughly 74 per second, after which the user confirmed the OLED was lit. The encoder was verified on hardware in the same session: the count resets to its centred `0x8000_0000`, five detents move it by exactly twenty, and `raw` reads `0xf` with the switch on and the button held and `0xb` with the button released and the switch still on. `scripts/build-merged.sh` with the pinned place3 seed reports timing MET with `clk_pixel` Fmax 80.503 MHz, and the artifact `1b9c8c80e813c92b1fbeb6380e12981a0bc41c865d3bf0c6fa89d10a4bb2a011` was uploaded as `cores/console138k/phosphortang.bin` with a byte-identical SD readback; the bring-up core still builds and meets timing at 85.470 MHz, and the suite reports nineteen passing tests. One limitation is recorded rather than excluded: the panel's stream folds to a value matching no whole frame for patterns 5 and 6, reproducibly `0x621c8400` and `0x27e05f33` against models of `0xef831c00` and `0x44328c00`, while patterns 0 to 4 and 7 agree exactly, so the check passes on pattern 7 and fails on 5 and 6 and the gate is not yet green. The agreements on 0 to 4 carry little weight because a flat colour folds to the same value under any reordering, and pattern 7, the card built to make a shift or a flip visible, agrees exactly, which suggests the panel is displaying correctly and the fault is in how the checksum captures its stream; but no tested permutation -- rotation by one either way, a dropped or duplicated pixel, column-major order, a per-row shift or a byte swap -- reproduces the measured values, so that remains a hypothesis for the next cycle rather than a diagnosis. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 55 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The panel stream's disagreement on patterns 5 and 6 is the next cycle, and the first thing to instrument is the checksum's capture rather than the display: `panel_px` is the live frame-store read bus sampled on the cycle after the panel engine latches its byte, so the folded sequence and the transmitted sequence can differ by a pixel, and the fix would be to fold the same registered value the engine sends. Because a fixed skew would also have broken pattern 7, the interaction with the engine's two-clock inter-pixel wait is the part that needs measuring, and the tool's own check should be made to cover a patterned frame on every run before it is called a gate. After that the renderer becomes the menu and the check runs before each release, which is where its value grows rather than shrinks. The remaining modules the user has named, starting with the eight-LED Pmod, stay behind that.
+
+#### Files Modified:
+
+- build-merged.tcl
+- src/boards/console138k_merged.cst
+- src/debug/debug_regs.sv
+- src/pmod_mirror_core.sv
+- src/pmod_mirror_top.sv
+- src/tang_phosphor_top.sv
+- tests/ui_mirror_tb.sv
+- tools/ui_mirror_check.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

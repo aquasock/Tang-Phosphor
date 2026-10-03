@@ -41,7 +41,12 @@ module pmod_mirror_core #(
     parameter bit   TRANSPORT         = 1'b1,
     // Renderer dwell on each pattern.  A parameter so a test can shorten the
     // one-second hold to something a simulator can reach.
-    parameter integer DEMO_HOLD_MS    = 1000
+    parameter integer DEMO_HOLD_MS    = 1000,
+    // The player owns its own transport and its own audio: the register bank
+    // stays inside for the bring-up core, and the state comes out here so a
+    // host that already has a map can place it.  Audio follows the same split.
+    parameter bit   EXTERNAL_AUDIO    = 1'b0,
+    parameter bit   EXPOSE_STATE      = 1'b0
 ) (
     input  logic       clk_pixel,
     input  logic       clk_pixel_x5,
@@ -52,18 +57,81 @@ module pmod_mirror_core #(
     // Without it the swap would wait forever on a tick that never comes, which
     // is exactly the path the integration test needs to exercise.
     input  logic       frame_tick_in,
+
+    // Player-supplied audio, used when EXTERNAL_AUDIO is set.
+    input  logic       clk_audio_in,
+    input  logic       audio_rate_48k_in,
+    input  logic [15:0] audio_sample_word_in [1:0],
+
+    // Socket declaration and renderer hold, used when EXPOSE_STATE is set.  A
+    // host that keeps its own register map owns the bank, so the bank in here
+    // never sees a write and these ports carry the configuration instead.  It
+    // is the same split EXTERNAL_AUDIO makes for the audio.  Without them a
+    // folded host could write a socket declaration and a hold bit that reached
+    // nothing, which is what it did: both sockets then ran on this core's
+    // power-on defaults and the hold was inert.
+    input  logic [3:0]  i_pmod0_personality,
+    input  logic [3:0]  i_pmod1_personality,
+    input  logic        i_pmod0_flipped,
+    input  logic        i_pmod1_flipped,
+    input  logic        i_render_hold,
+
+    // Mirror state, for a host that keeps its own register map.
+    output logic [31:0] o_src_signature,
+    output logic [31:0] o_hdmi_signature,
+    output logic [31:0] o_panel_signature,
+    output logic [31:0] o_render_frames,
+    output logic [31:0] o_oled_frames,
+    output logic [31:0] o_hdmi_frames,
+    output logic [2:0]  o_pattern,
+    output logic        o_frame_tick,
+    output logic        o_source_bank,
+    // Encoder state, so a host with its own map can place it.  Raw by design:
+    // a consumer polls these and does its own arithmetic.
+    output logic [31:0] o_enc_count,
+    output logic [3:0]  o_enc_raw,
+    output logic        o_enc_button,
+    output logic        o_enc_switch,
     inout  wire [7:0]  pmod0_io,
     inout  wire [7:0]  pmod1_io,
     output logic       tmds_clock,
     output logic [2:0] tmds
 );
-    // Declared configuration, written by the host over the transport.
+    // Declared configuration.  The bring-up core owns its register bank, so
+    // these come from the registers inside it; a host that owns the bank sets
+    // them over the ports above instead.  EXPOSE_STATE picks which, and the
+    // register bank's copies are kept separate so the mux is explicit rather
+    // than a second driver on a port.
+    logic [3:0] pmod0_personality_r;
+    logic [3:0] pmod1_personality_r;
+    logic       pmod0_flipped_r;
+    logic       pmod1_flipped_r;
+    logic       hold_r;
     logic [3:0] pmod0_personality;
     logic [3:0] pmod1_personality;
     logic       pmod0_flipped;
     logic       pmod1_flipped;
     logic       hold;
     logic [2:0] demo_pattern;
+
+    assign pmod0_personality = EXPOSE_STATE ? i_pmod0_personality : pmod0_personality_r;
+    assign pmod1_personality = EXPOSE_STATE ? i_pmod1_personality : pmod1_personality_r;
+    assign pmod0_flipped     = EXPOSE_STATE ? i_pmod0_flipped     : pmod0_flipped_r;
+    assign pmod1_flipped     = EXPOSE_STATE ? i_pmod1_flipped     : pmod1_flipped_r;
+    assign hold              = EXPOSE_STATE ? i_render_hold       : hold_r;
+
+    // An undeclared socket is not an output.  The panel engine below is held in
+    // reset until this socket is declared as OLEDRGB, because that module's
+    // power-up and its 44-byte initialisation list are a one-shot conversation
+    // that has to land on a connected device.  At configuration every socket is
+    // released -- the safe state, and the one an absent /tang.ini produces -- so
+    // an init issued then goes out on a high-impedance pin and is lost, and a
+    // later declaration can only feed pixels to a panel that was never
+    // initialised or switched on, which stays dark however long you wait.
+    // Gating the engine on the declaration is what makes the released power-on
+    // state safe rather than merely quiet.
+    wire oled_declared = (pmod0_personality == PERS_OLEDRGB) ||
+                         (pmod1_personality == PERS_OLEDRGB);
 
     localparam [3:0] PERS_NONE    = 4'd0;
     localparam [3:0] PERS_OLEDRGB = 4'd1;
@@ -99,15 +167,28 @@ module pmod_mirror_core #(
     wire [31:0] active_sample_rate;
     wire [15:0] tone_sample_word [1:0];
 
-    audio_test_source #(.PIXEL_CLOCK_HZ(74_250_000)) audio_timebase (
-        .clk_pixel         (clk_pixel),
-        .resetn            (resetn),
-        .rate_48k          (1'b1),
-        .clk_audio         (clk_audio),
-        .sample_tick       (sample_tick),
-        .active_sample_rate(active_sample_rate),
-        .audio_sample_word (tone_sample_word)
-    );
+    logic [15:0] hdmi_audio [1:0];
+    logic        hdmi_audio_rate_48k;
+
+    generate
+    if (EXTERNAL_AUDIO) begin : g_external_audio
+        assign clk_audio           = clk_audio_in;
+        assign hdmi_audio          = audio_sample_word_in;
+        assign hdmi_audio_rate_48k = audio_rate_48k_in;
+    end else begin : g_test_audio
+        audio_test_source #(.PIXEL_CLOCK_HZ(74_250_000)) audio_timebase (
+            .clk_pixel         (clk_pixel),
+            .resetn            (resetn),
+            .rate_48k          (1'b1),
+            .clk_audio         (clk_audio),
+            .sample_tick       (sample_tick),
+            .active_sample_rate(active_sample_rate),
+            .audio_sample_word (tone_sample_word)
+        );
+        assign hdmi_audio          = tone_sample_word;
+        assign hdmi_audio_rate_48k = 1'b1;
+    end
+    endgenerate
 
     // ------------------------------------------------------------------
     // Bank swap, fed by both backends' frame ticks.
@@ -124,8 +205,12 @@ module pmod_mirror_core #(
     localparam integer SWAP_OUTPUTS = 2;
 
     logic [1:0] swap_ticks;
+    // Wait only for the outputs that exist: an undeclared socket is not one, so
+    // it must not be able to hold the swap open.  Without this an unconfigured
+    // card would freeze the renderer, and the HDMI -- which needs no socket
+    // declaration at all -- would show nothing because a PMOD was absent.
     assign swap_ticks = {HDMI_BACKEND ? hdmi_frame_tick : frame_tick_in,
-                         oled_frame_start};
+                         oled_frame_start | ~oled_declared};
 
     ui_swap #(.OUTPUTS(SWAP_OUTPUTS)) swap (
         .clk           (clk_pixel),
@@ -224,8 +309,8 @@ module pmod_mirror_core #(
             .clk_pixel_x5   (clk_pixel_x5),
             .resetn         (resetn),
             .clk_audio      (clk_audio),
-            .audio_rate_48k (1'b1),
-            .audio_sample_word (tone_sample_word),
+            .audio_rate_48k (hdmi_audio_rate_48k),
+            .audio_sample_word (hdmi_audio),
             .bank           (bank),
             .read_bank      (hdmi_read_bank),
             .rd_x           (hdmi_src_x),
@@ -493,11 +578,11 @@ module pmod_mirror_core #(
         .hdmi_crc           (hdmi_signature),
         .vga_frames         (vga_frames),
         .vga_crc            (32'd0),
-        .pmod0_personality  (pmod0_personality),
-        .pmod1_personality  (pmod1_personality),
-        .pmod0_flipped      (pmod0_flipped),
-        .pmod1_flipped      (pmod1_flipped),
-        .hold               (hold),
+        .pmod0_personality  (pmod0_personality_r),
+        .pmod1_personality  (pmod1_personality_r),
+        .pmod0_flipped      (pmod0_flipped_r),
+        .pmod1_flipped      (pmod1_flipped_r),
+        .hold               (hold_r),
         .enc_count          (enc_count_sel),
         .enc_raw            (enc_raw_sel),
         .enc_button         (enc_button_sel),
@@ -513,7 +598,8 @@ module pmod_mirror_core #(
 
     pmod_oledrgb #(.CLK_MHZ(CLK_MHZ), .SPI_DIV(6)) oled (
         .clk         (clk_pixel),
-        .rst         (rst),
+        // Held off until the socket is declared: see oled_declared above.
+        .rst         (rst | ~oled_declared),
         .px_x        (panel_x),
         .px_y        (panel_y),
         .px_data     (panel_px),
@@ -618,6 +704,20 @@ module pmod_mirror_core #(
         .i  (p1_io_i),
         .io (pmod1_io)
     );
+
+    assign o_src_signature   = source_signature;
+    assign o_hdmi_signature  = hdmi_signature;
+    assign o_panel_signature = panel_signature;
+    assign o_render_frames   = render_frames;
+    assign o_oled_frames     = oled_frames;
+    assign o_hdmi_frames     = hdmi_frames;
+    assign o_pattern         = demo_pattern;
+    assign o_frame_tick      = oled_frame_start;
+    assign o_source_bank     = bank;
+    assign o_enc_count       = enc_count_sel;
+    assign o_enc_raw         = enc_raw_sel;
+    assign o_enc_button      = enc_button_sel;
+    assign o_enc_switch      = enc_switch_sel;
 
     logic unused_ok;
     always_comb unused_ok = oled_in_image ^ (^oled_lane_i) ^ (^p0_lane_i)

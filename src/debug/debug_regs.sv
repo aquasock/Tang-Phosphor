@@ -43,11 +43,40 @@ module debug_regs (
     input  [31:0] boundary_count,
     input  [31:0] boundary_gap_samples,
     input  [15:0] audible_stream_id,
+
+    // Mirror block, added by the socket bring-up fold.  Addresses live in the
+    // previously unused hi-bank slots from word index 40 (0xa0); nothing above
+    // moves, because Tang-Control and the firmware already depend on the rest.
+    // Values are raw on purpose: meanings live with the consumer, and a
+    // register derived for a consumer's convenience was rejected once already
+    // when it cost 10.6 percent of Fmax.
+    input  [31:0] src_signature,
+    input  [31:0] hdmi_signature,
+    input  [31:0] oled_signature,
+    input  [31:0] render_frames,
+    input  [31:0] oled_frames,
+    input  [31:0] hdmi_frames,
+    input        source_bank,
+    input  [2:0]  render_pattern,
+    input  [31:0] enc_count,
+    input  [3:0]  enc_raw,
+    input         enc_button,
+    input         enc_switch,
+    output reg [3:0] pmod0_personality,
+    output reg [3:0] pmod1_personality,
+    output reg       pmod0_flipped,
+    output reg       pmod1_flipped,
+    output reg       render_hold,
     output reg [31:0] request_rdata
 );
 
 localparam [31:0] MAGIC = 32'h5450_4830; // "TPH0"
 localparam [31:0] BUILD_DATE = 32'h2026_0927;
+
+// The mirror block's control registers are the ports above.  Power-on declares
+// nothing on either socket, which leaves both released: that is the safe state,
+// and the same one a missing /tang.ini produces, since an undeclared module
+// must never be driven.
 
 reg [31:0] uptime_cycles;
 reg [31:0] frame_count;
@@ -62,6 +91,13 @@ always @(posedge clk) begin
         request_count <= 0;
         write_count <= 0;
         scratch <= 0;
+        // Safe state: nothing declared, so every socket stays released until a
+        // host says otherwise.
+        pmod0_personality <= 4'd0;
+        pmod1_personality <= 4'd0;
+        pmod0_flipped     <= 1'b0;
+        pmod1_flipped     <= 1'b0;
+        render_hold       <= 1'b0;
     end else begin
         uptime_cycles <= uptime_cycles + 1'b1;
         if (frame_tick)
@@ -72,6 +108,13 @@ always @(posedge clk) begin
                 write_count <= write_count + 1'b1;
                 if (request_address == 32'h0000_0020)
                     scratch <= request_wdata;
+                else if (request_address == 32'h0000_00c0) begin
+                    render_hold       <= request_wdata[0];
+                    pmod0_personality <= request_wdata[7:4];
+                    pmod1_personality <= request_wdata[11:8];
+                    pmod0_flipped     <= request_wdata[12];
+                    pmod1_flipped     <= request_wdata[13];
+                end
             end
         end
     end
@@ -145,6 +188,23 @@ always @(posedge clk) begin
         5'd7: read_hi <= boundary_count;
         5'd8: read_hi <= boundary_gap_samples;
         5'd9: read_hi <= {16'b0, audible_stream_id};
+        // Mirror block, word indices 48-57 (0xc0-0xe4).  Layouts match the
+        // socket bring-up core bit for bit, so the checker's decoding carries
+        // over: control packs the pattern above the declaration, and the
+        // encoder state keeps raw at 7:4, switch at 3, button at 2.
+        5'd16: read_hi <= {13'b0, render_pattern, 2'b0,
+                           pmod1_flipped, pmod0_flipped,
+                           pmod1_personality, pmod0_personality,
+                           3'b0, render_hold};
+        5'd17: read_hi <= {31'b0, source_bank};
+        5'd18: read_hi <= src_signature;
+        5'd19: read_hi <= hdmi_signature;
+        5'd20: read_hi <= oled_signature;
+        5'd21: read_hi <= render_frames;
+        5'd22: read_hi <= oled_frames;
+        5'd23: read_hi <= hdmi_frames;
+        5'd24: read_hi <= enc_count;
+        5'd25: read_hi <= {24'b0, enc_raw, 2'b0, enc_switch, enc_button};
         default: read_hi <= 32'hdead_beef;
     endcase
 

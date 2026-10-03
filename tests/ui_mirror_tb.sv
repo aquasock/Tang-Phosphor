@@ -314,7 +314,14 @@ module ui_mirror_tb;
         .pmod0_io     (io0),
         .pmod1_io     (io1),
         .tmds_clock   (),
-        .tmds         ()
+        .tmds         (),
+        // EXPOSE_STATE is clear here, so the core's own register bank supplies
+        // the socket declaration and the hold and these are unused.
+        .i_pmod0_personality (4'd0),
+        .i_pmod1_personality (4'd0),
+        .i_pmod0_flipped     (1'b0),
+        .i_pmod1_flipped     (1'b0),
+        .i_render_hold       (1'b0)
     );
 
     // Decode the SSD1331 pins out of the raw socket pins using the normal

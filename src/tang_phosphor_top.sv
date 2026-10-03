@@ -3,6 +3,11 @@
 module tang_phosphor_top (
     input        sys_clk,
 
+    // PMOD sockets.  Driven by the display stack: what each socket does is a
+    // runtime declaration, so these are the only pins the top owns for them.
+    inout        [7:0] pmod0_io,
+    inout        [7:0] pmod1_io,
+
     input        UART_RXD,
     output       UART_TXD,
 
@@ -62,6 +67,34 @@ always @(posedge clk_pixel) begin
     else
         resetn <= 1'b1;
 end
+
+assign overlay_x = 8'd0;
+assign overlay_y = 8'd0;
+
+wire        display_tmds_clock;
+wire [2:0]  display_tmds;
+wire [31:0] mirror_src_signature, mirror_hdmi_signature, mirror_panel_signature;
+wire [31:0] mirror_render_frames, mirror_oled_frames, mirror_hdmi_frames;
+wire [2:0]  mirror_pattern;
+wire        mirror_source_bank;
+
+// Socket declaration, seating orientation and renderer hold, written by the
+// debug register block and carried into the core; plus the encoder state the
+// core hands back.  Declared explicitly rather than left implicit, because
+// this tool gives an undeclared net connected to a module port a width of one,
+// which silently truncated all of it: the 4-bit personality 4 became 0, so the
+// encoder's socket was never declared, and the 32-bit count -- always a
+// multiple of four, so always zero in bit 0 -- read back as zero no matter what
+// the knob did.  The build log names every one of these wires; they were
+// harmless only while they were dead ends.  The OLED worked throughout on luck:
+// personality 1 happens to fit in one bit.
+// (overlay_x/overlay_y are the same hazard and are left implicit: both are tied
+// to a constant and never carry a value.)
+wire [3:0]  display_pmod0_personality, display_pmod1_personality;
+wire        display_pmod0_flipped, display_pmod1_flipped, display_hold;
+wire [31:0] enc_count;
+wire [3:0]  enc_raw;
+wire        enc_button, enc_switch;
 
 wire overlay;
 wire [7:0] overlay_x;
@@ -249,41 +282,59 @@ audio_test_source audio_timebase (
     .audio_sample_word(tone_sample_word)
 );
 
-phosphor_video video (
-    .resetn(resetn),
-    .clk_pixel(clk_pixel),
-    .clk_pixel_x5(clk_pixel_x5),
-    .clk_audio(clk_audio),
-    .audio_rate_48k(hdmi_audio_rate_48k),
-    .audio_sample_word(audio_sample_word),
-    .ui_visible(ui_visible),
-    .ui_playlist(ui_playlist),
-    .ui_paused(pause_requested),
-    .ui_player_state(player_state),
-    .ui_current_track(ui_current_track),
-    .ui_track_count(ui_track_count),
-    .ui_window_start(ui_window_start),
-    .ui_lengths_0_3(ui_lengths_0_3),
-    .ui_lengths_4_7(ui_lengths_4_7),
-    .ui_length_8(ui_length_8),
-    .ui_text_address(ui_text_address),
-    .ui_text_data(ui_text_data),
-    .ui_artwork_valid(ui_artwork_valid),
-    .ui_artwork_address(ui_artwork_address),
-    .ui_artwork_data(ui_artwork_data),
-    .ui_samples_played(samples_played),
-    .ui_total_samples(total_samples),
-    .ui_elapsed_seconds(elapsed_seconds),
-    .ui_duration_seconds(duration_seconds),
-    .overlay(overlay),
-    .overlay_x(overlay_x),
-    .overlay_y(overlay_y),
-    .overlay_color(overlay_color),
-    .frame_tick(frame_tick),
-    .tmds_clk_p(tmds_clk_p),
-    .tmds_clk_n(tmds_clk_n),
-    .tmds_d_p(tmds_d_p),
-    .tmds_d_n(tmds_d_n)
+// The display stack, folded in whole.  This is the same module the socket
+// bring-up core runs, with its transport off because this design already has
+// one, and its audio taken from the player's decoder rather than an internal
+// test tone.  Everything else -- one frame store, a scan mapper per backend,
+// the socket layer, the personalities, the checksums and the bank swap --
+// comes with it, which is why the fold is an instantiation rather than a port.
+pmod_mirror_core #(
+    .HDMI_BACKEND   (1'b1),
+    .TRANSPORT      (1'b0),
+    .EXTERNAL_AUDIO (1'b1),
+    .EXPOSE_STATE   (1'b1),
+    .DEMO_HOLD_MS   (1000)
+) display (
+    .clk_pixel          (clk_pixel),
+    .clk_pixel_x5       (clk_pixel_x5),
+    .resetn             (resetn),
+    .uart_rx            (1'b1),
+    .uart_tx            (),
+    .frame_tick_in      (1'b0),
+    .clk_audio_in       (clk_audio),
+    .audio_rate_48k_in  (hdmi_audio_rate_48k),
+    .audio_sample_word_in (audio_sample_word),
+    .pmod0_io           (pmod0_io),
+    .pmod1_io           (pmod1_io),
+    .tmds_clock         (display_tmds_clock),
+    .tmds               (display_tmds),
+    .o_src_signature    (mirror_src_signature),
+    .o_hdmi_signature   (mirror_hdmi_signature),
+    .o_panel_signature  (mirror_panel_signature),
+    .o_render_frames    (mirror_render_frames),
+    .o_oled_frames      (mirror_oled_frames),
+    .o_hdmi_frames      (mirror_hdmi_frames),
+    .o_pattern          (mirror_pattern),
+    .o_frame_tick       (frame_tick),
+    .o_source_bank      (mirror_source_bank),
+    // The player owns the register bank, so the socket declaration, the seating
+    // orientation and the renderer hold are written here and carried in; the
+    // mirror state and the encoder state come back out to be read here.
+    .i_pmod0_personality(display_pmod0_personality),
+    .i_pmod1_personality(display_pmod1_personality),
+    .i_pmod0_flipped    (display_pmod0_flipped),
+    .i_pmod1_flipped    (display_pmod1_flipped),
+    .i_render_hold      (display_hold),
+    .o_enc_count        (enc_count),
+    .o_enc_raw          (enc_raw),
+    .o_enc_button       (enc_button),
+    .o_enc_switch       (enc_switch)
+);
+
+ELVDS_OBUF display_tmds_output [3:0] (
+    .I  ({clk_pixel, display_tmds}),
+    .O  ({tmds_clk_p, tmds_d_p}),
+    .OB ({tmds_clk_n, tmds_d_n})
 );
 
 // Keep the proven TangCore control/OSD protocol for early bring-up. The ROM
@@ -342,7 +393,8 @@ pcm_sink audio_player (
     .underrun_count(audio_underruns),
     .error_code(audio_error), .detected_format(detected_format),
     .playback_rate_valid(playback_rate_valid), .playback_rate(playback_rate),
-    .audible_stream_id(audible_stream_id), .boundary_count(boundary_count),
+    .audible_stream_id(audible_stream_id),
+    .boundary_count(boundary_count),
     .boundary_gap_samples(boundary_gap_samples)
 );
 
@@ -412,6 +464,23 @@ debug_regs debug_registers (
     .boundary_count(boundary_count),
     .boundary_gap_samples(boundary_gap_samples),
     .audible_stream_id(audible_stream_id),
+    .src_signature(mirror_src_signature),
+    .hdmi_signature(mirror_hdmi_signature),
+    .oled_signature(mirror_panel_signature),
+    .render_frames(mirror_render_frames),
+    .oled_frames(mirror_oled_frames),
+    .hdmi_frames(mirror_hdmi_frames),
+    .render_pattern(mirror_pattern),
+    .source_bank(mirror_source_bank),
+    .enc_count(enc_count),
+    .enc_raw(enc_raw),
+    .enc_button(enc_button),
+    .enc_switch(enc_switch),
+    .pmod0_personality(display_pmod0_personality),
+    .pmod1_personality(display_pmod1_personality),
+    .pmod0_flipped(display_pmod0_flipped),
+    .pmod1_flipped(display_pmod1_flipped),
+    .render_hold(display_hold),
     .request_rdata(player_debug_rdata)
 );
 

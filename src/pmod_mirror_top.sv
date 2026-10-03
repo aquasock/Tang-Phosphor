@@ -57,7 +57,14 @@ module pmod_mirror_top (
         .pmod0_io     (pmod0_io),
         .pmod1_io     (pmod1_io),
         .tmds_clock   (hdmi_tmds_clock),
-        .tmds         (hdmi_tmds)
+        .tmds         (hdmi_tmds),
+        // The bring-up core owns its register bank, so its socket declaration
+        // and hold come from the registers inside it and these are unused.
+        .i_pmod0_personality (4'd0),
+        .i_pmod1_personality (4'd0),
+        .i_pmod0_flipped     (1'b0),
+        .i_pmod1_flipped     (1'b0),
+        .i_render_hold       (1'b0)
     );
 
     ELVDS_OBUF tmds_output [3:0] (

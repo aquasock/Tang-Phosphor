@@ -195,3 +195,41 @@ GRP_LOC ae350_exts_handshake R[2:15]C[146:164];
 // from the macro.  Gowin's constraint reader also exhausts memory when
 // primitive groups grow beyond the handshake group above (more instances,
 // a larger region, or wide data vectors), so keep further groups small.
+
+// PMOD0, the socket furthest from the HDMI port.
+IO_LOC "pmod0_io[0]" V18;
+IO_LOC "pmod0_io[1]" V19;
+IO_LOC "pmod0_io[2]" G21;
+IO_LOC "pmod0_io[3]" G22;
+IO_LOC "pmod0_io[4]" F18;
+IO_LOC "pmod0_io[5]" E18;
+IO_LOC "pmod0_io[6]" C22;
+IO_LOC "pmod0_io[7]" B22;
+
+// PMOD1, the socket beside the HDMI port.
+IO_LOC "pmod1_io[0]" W19;
+IO_LOC "pmod1_io[1]" W20;
+IO_LOC "pmod1_io[2]" F19;
+IO_LOC "pmod1_io[3]" F20;
+IO_LOC "pmod1_io[4]" E22;
+IO_LOC "pmod1_io[5]" D22;
+IO_LOC "pmod1_io[6]" E21;
+IO_LOC "pmod1_io[7]" D21;
+
+IO_PORT "pmod0_io[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[4]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[5]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[6]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod0_io[7]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+
+IO_PORT "pmod1_io[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[4]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[5]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[6]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
+IO_PORT "pmod1_io[7]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8;
