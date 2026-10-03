@@ -55,6 +55,12 @@ set_option -use_sspi_as_gpio 1
 set_option -use_mspi_as_gpio 1
 set_option -use_cpu_as_gpio 0
 set_option -multi_boot 1
-set_option -place_option 3
+# Placement option measured, not assumed: on this netlist option 0 fails the
+# 74.25 MHz constraint at 65.724 MHz, while 2 reaches 77.543, 3 reaches 76.412
+# and 4 reaches 77.500.  An 11 MHz spread across options means the design sits
+# near the edge and the option decides which side it lands.  2 is pinned here
+# for the best margin; re-measure when the netlist changes materially, as
+# entry 45 did for the merged image.
+set_option -place_option 2
 
 run all

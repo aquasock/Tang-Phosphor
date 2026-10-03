@@ -267,14 +267,21 @@ def main():
 
     results["pattern"] = pattern
     results["pattern_from"] = "bits 18:16" if pattern == candidates[0] else "bits 2:0"
-    results["expected"] = {"source": f"0x{expect_src:08x}", "transmitter": f"0x{expect_hdmi:08x}"}
+    # The panel emits the store contents at 1:1 with no bars, in the same
+    # order the renderer writes them, so its expected fold is the source's.
+    expect_panel = expect_src
+    results["expected"] = {"source": f"0x{expect_src:08x}",
+                           "transmitter": f"0x{expect_hdmi:08x}",
+                           "panel": f"0x{expect_panel:08x}"}
     results["measured"] = {"source": f"0x{held['src_sig']:08x}",
-                          "transmitter": f"0x{held['hdmi_sig']:08x}"}
+                           "transmitter": f"0x{held['hdmi_sig']:08x}",
+                           "panel": f"0x{held['oled_sig']:08x}"}
+    panel_ok = held["oled_sig"] == expect_panel
 
     results["mirror"] = {
         "source": src_ok or src_ok_prev,
         "transmitter": hdmi_ok,
-        "panel": "not implemented",
+        "panel": panel_ok,
     }
     if not (src_ok or src_ok_prev):
         failures.append(f"mirror: source signature 0x{held['src_sig']:08x} "
@@ -282,6 +289,9 @@ def main():
     if not hdmi_ok:
         failures.append(f"mirror: transmitter signature 0x{held['hdmi_sig']:08x} "
                         f"!= modelled 0x{expect_hdmi:08x} for pattern {pattern}")
+    if not panel_ok:
+        failures.append(f"mirror: panel signature 0x{held['oled_sig']:08x} "
+                        f"!= modelled 0x{expect_panel:08x} for pattern {pattern}")
 
     # ---- restore whatever we found ---------------------------------------
     dev.poke(REG_CONTROL, control)
@@ -303,7 +313,8 @@ def main():
               f"  {'PASS' if (src_ok or src_ok_prev) else 'FAIL'}")
         print(f"transmitter   : measured 0x{held['hdmi_sig']:08x}  modelled 0x{expect_hdmi:08x}"
               f"  {'PASS' if hdmi_ok else 'FAIL'}")
-        print("panel         : not implemented (needs a per-pixel strobe)")
+        print(f"panel         : measured 0x{held['oled_sig']:08x}  modelled 0x{expect_panel:08x}"
+              f"  {'PASS' if panel_ok else 'FAIL'}")
         print(f"restored hold : {'set' if hold_in else 'clear'}")
 
     if failures:

@@ -37,7 +37,10 @@ module pmod_oledrgb #(
     input  logic [7:0]  lane_i,
 
     // Frame boundary, for the bank swap.
-    output logic        frame_start
+    output logic        frame_start,
+
+    // One pulse per pixel the panel is shown.
+    output logic        px_strobe
 );
     logic cs_n, mosi, sck, dc, res_n, vccen, pmoden;
 
@@ -68,6 +71,7 @@ module pmod_oledrgb #(
         .res_n       (res_n),
         .vccen       (vccen),
         .pmoden      (pmoden),
-        .frame_start (frame_start)
+        .frame_start (frame_start),
+        .px_strobe   (px_strobe)
     );
 endmodule

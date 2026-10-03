@@ -1863,3 +1863,37 @@ The panel needs a per-pixel strobe out of `src/oled/oled_panel.sv` and a third c
 - User Test: PASS
 
 ---
+
+## 52 COMMIT Unreleased 2026-10-02T18:00:29-07:00
+
+#### Coming From:
+
+Unreleased 37f801d
+
+#### Purpose:
+
+Complete the mirror check with the panel's own stream, and settle where this core's Fmax actually comes from before adding anything else to it.
+
+#### Outcome:
+
+The panel now reports a per-pixel strobe, asserted at the launch of each pixel's high byte so that it lands on a cycle where the coordinate and therefore the pixel data are unchanged, and a third checksum instance folds that stream. The panel is the only genuinely independent third stream: the PmodVGA observes the transmitter's raster and cannot disagree with it, so a checksum there would be evidence of nothing. Its expected value is the source's own fold, because 1:1 scaling with no bars emits the store contents in exactly the order the renderer wrote them, and on hardware the two agree to the bit at `0xd6991800` while the transmitter's scaled stream reads its own `0xca1c5800`. That agreement is the strongest evidence the design has produced: the source signature is folded off the renderer's write port and the panel signature off the SPI stream leaving the FPGA, so two physically independent paths, running at different rates through different logic, produce the same number. The Fmax question was settled by measurement rather than by the pipeline stage first proposed. The critical path is `rgb` through the TMDS encoder's `q_m` XOR/XNOR network and population counts into the running-disparity accumulator, seventeen logic levels: the `q_m` stage is eight serial XORs by construction, so its depth is inherent to TMDS encoding and not a consequence of anything added here. Across placement options that path moves the reported Fmax by eleven MHz: option 0 fails the constraint at 65.724 MHz while option 2 reaches 77.543, option 3 76.412 and option 4 77.500, so the design sits near the edge and the option decides which side it lands on. Pipelining the encoder was rejected on second look, and the reversal is recorded because it matters: the disparity accumulator is a feedback loop inside third-party code, and a mistake there breaks HDMI output rather than costing a few MHz. `build-pmod.tcl` now pins option 2 with all four measurements written beside it and a note to re-measure when the netlist changes materially, the same discipline entry 45 applied to the merged image. Adding the strobe and the third checksum moved Fmax to 79.355 MHz, MET and better than the pinned 77.543, so the addition cost nothing and the placement shifted favourably. The suite reports nineteen passing tests. The image was uploaded as `cores/console138k/pmodtang.bin` with a byte-identical SD readback and loaded over the two-wire interface, and it is the first deployed image carrying the register-layout fix from entry 51, so the checker's layout fallback is no longer load-bearing. The check then passes on all three streams with liveness confirmed and the hold state restored. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 52 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+One structural item remains before the architecture can be called finished: moving both frame-store copies inside a single module that owns the write bus and exposes one read port per output, so that one source of truth is enforced by structure rather than by whoever last edited the top level. It costs no logic and no timing, and without it a future edit could feed the two copies different data without anything failing loudly. After that the remaining PMOD modules become personalities, then the fold into the player, where the renderer becomes a menu and the checker is the regression gate. The transmitter's marginal path stays a known, measured risk: if the margin ever genuinely bites, the cure is a deliberately staged encoder pipeline, validated against the mirror check rather than in place of it.
+
+#### Files Modified:
+
+- build-pmod.tcl
+- src/oled/oled_panel.sv
+- src/pmod/pmod_oledrgb.sv
+- src/pmod_mirror_core.sv
+- tools/ui_mirror_check.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

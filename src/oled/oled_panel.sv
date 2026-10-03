@@ -46,7 +46,13 @@ module oled_panel #(
 
     // One-cycle pulse at each frame boundary, after the last pixel of a frame
     // and before the next frame's address window.
-    output logic        frame_start
+    output logic        frame_start,
+
+    // One pulse per emitted pixel, at the launch of its high byte, so a
+    // checksum can be told what this panel is actually being shown.  It lands
+    // on the cycle after the launch, when the coordinate is unchanged and
+    // px_data therefore still describes the same pixel.
+    output logic        px_strobe
 );
     localparam integer INIT_LEN  = 44;      // documented init bytes
     localparam integer FRAME_LEN = 6;       // window commands per frame
@@ -183,9 +189,11 @@ module oled_panel #(
             spi_start   <= 1'b0;
             spi_dc      <= 1'b0;
             frame_start <= 1'b0;
+            px_strobe   <= 1'b0;
         end else begin
             spi_start   <= 1'b0;
             frame_start <= 1'b0;
+            px_strobe   <= 1'b0;
 
             if (delay != 24'd0)
                 delay <= delay - 24'd1;
@@ -297,6 +305,7 @@ module oled_panel #(
                         spi_dc    <= 1'b1;
                         spi_start <= 1'b1;
                         sent      <= 1'b1;
+                        px_strobe <= hi;
                     end else if (spi_done) begin
                         sent <= 1'b0;
                         if (hi) begin

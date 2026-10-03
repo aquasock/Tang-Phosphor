@@ -84,6 +84,8 @@ module pmod_mirror_core #(
     logic        render_done_d;
     logic [31:0] source_signature;
     logic [31:0] hdmi_signature;
+    logic [31:0] panel_signature;
+    logic        oled_px_strobe;
 
     wire rst = ~resetn;
 
@@ -408,6 +410,20 @@ module pmod_mirror_core #(
         .signature (source_signature)
     );
 
+    // The panel is the only genuinely independent third stream: the PmodVGA
+    // observes the transmitter's raster and cannot disagree with it, whereas
+    // the panel has its own mapper, its own rate and its own physical path.
+    // Its expected fold equals the source's, because 1:1 scaling with no bars
+    // emits exactly the store contents in the same order.
+    ui_checksum panel_checksum (
+        .clk       (clk_pixel),
+        .rst       (rst),
+        .strobe    (oled_px_strobe),
+        .px        (panel_px),
+        .frame     (oled_frame_start),
+        .signature (panel_signature)
+    );
+
     ui_checksum hdmi_checksum (
         .clk       (clk_pixel),
         .rst       (rst),
@@ -431,7 +447,7 @@ module pmod_mirror_core #(
         .source_bank        (bank),
         .source_crc         (source_signature),
         .oled_frames        (oled_frames),
-        .oled_crc           (32'd0),
+        .oled_crc           (panel_signature),
         .hdmi_frames        (hdmi_frames),
         .hdmi_crc           (hdmi_signature),
         .vga_frames         (vga_frames),
@@ -459,7 +475,8 @@ module pmod_mirror_core #(
         .lane_o      (oled_lane_o),
         .lane_oe     (oled_lane_oe),
         .lane_i      (oled_lane_i),
-        .frame_start (oled_frame_start)
+        .frame_start (oled_frame_start),
+        .px_strobe   (oled_px_strobe)
     );
 
     // ------------------------------------------------------------------

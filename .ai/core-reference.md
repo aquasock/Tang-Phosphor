@@ -236,3 +236,16 @@ supported profile. Project-specific limits remain implementation limits.
 - Authority: Bench observation.
 - Relevant rule: A CRT accepts the transmitter's 1280x720 raster directly and its height, width and position controls provide the overscan or underscaling to frame the picture, so no second video mode is needed for the VGA port. The bars remain part of the emitted signal regardless of how the tube is adjusted, so a check compares the signal, not what the user sees.
 - Tang-Phosphor use: This retires the 800x600 branch, and with it the 40 MHz pixel clock, the asynchronous FIFO, the duplicated store and the clock-domain crossing that would have given back the single-clock coherence the rest of the design depends on. Underscanning deliberately is how raster edges and bars get inspected by eye.
+
+### Fmax attribution on this core
+
+- Sources: Gowin place-and-route reports for the PMOD bring-up core, 2026-10-02; core-log entry 52.
+- Authority: Measured on this netlist, not inferred.
+- Relevant rule: The critical path is `rgb` through the HDMI transmitter's TMDS encoder -- the `q_m` XOR/XNOR network, the population counts and the running-disparity accumulator -- at seventeen logic levels. The `q_m` stage is eight serial XORs by construction, so that depth is inherent to TMDS encoding. Across placement options the reported Fmax spans eleven MHz: option 0 fails at 65.724 MHz while 2, 3 and 4 reach 77.543, 76.412 and 77.500. The design therefore sits near the edge and the placement option decides which side it lands on.
+- Tang-Phosphor use: `build-pmod.tcl` pins option 2 with the measurements recorded beside it and must be re-measured when the netlist changes materially. Do not pipeline the disparity accumulator to buy margin: it is a feedback loop in third-party code and an error there breaks HDMI output rather than costing frequency. If margin ever genuinely bites, stage the encoder deliberately and validate against the mirror check.
+
+### The panel stream is the independent one
+
+- Sources: `tools/ui_mirror_check.py`, `src/oled/oled_panel.sv`; core-log entry 52 hardware result.
+- Authority: Bench measurement.
+- Relevant rule: The PmodVGA observes the transmitter's raster and cannot disagree with it, so a checksum there would be evidence of nothing. The panel has its own mapper, its own rate and its own physical path. Because it emits the store at 1:1 with no bars, in the order the renderer writes, its expected fold equals the source's, and on hardware both read 0xd6991800 while the transmitter's scaled stream reads its own value. Source and panel signatures agreeing is the strongest available evidence that the store reaches the display, since they are folded off physically independent paths.
