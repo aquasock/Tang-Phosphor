@@ -2123,3 +2123,33 @@ None.
 - User Test: PASS
 
 ---
+
+## 60 COMMIT Unreleased 2026-10-02T23:29:21-07:00
+
+#### Coming From:
+
+Unreleased 7254843
+
+#### Purpose:
+
+Verify the VGA configuration on hardware, which the checker cannot prove for itself, and make the checker valid in that configuration rather than falsely failing on it.
+
+#### Outcome:
+
+The VGA works, and making it work on the bench exposed a gap in the tool that reports on the bench. Configuration B was re-established physically: the OLED came out of PMOD0 and the encoder out of PMOD1, because the PmodVGA is a dual-socket module, and J2 went to PMOD0 with J1 to PMOD1, ICs up, matching Tang-PSX's verified pairing; the card had to be power-cycled to seat them, so the image was loaded from the SD card rather than re-uploaded. Declaring `0xc0 = 0x230` selects `vga_j2` on PMOD0 and `vga_j1` on PMOD1 with no flips and no hold, and the register evidence is what the VGA has instead of a checksum, since `ui_vga_backend` derives its syncs and colour from the transmitter's raster and cannot disagree with it. Three things were measured. The renderer stays live with no panel declared, which is the first real exercise of the swap masking from entry 55: the panel engine is held off, its frame counter sits at zero, and its tick is masked out of `ui_swap`, so an undeclared output cannot stall the picture. The panel frame counter stayed at zero across the run, confirming the engine is held off rather than quietly driving sync-carrying pins. And the transmitter matched its model on all eight patterns when measured with the renderer held, fourteen samples with no failures; two apparent mismatches in a first pass were the tool's own sampling, since each `peek` is a separate round-trip and a source read and a transmitter read can straddle a pattern change, which holding removes. The user confirmed the CRT image. The gap the configuration exposed is the cycle's other half: `tools/ui_mirror_check.py` required all three frame counters to advance and always expected a panel stream, so it would have reported FAIL on a working VGA configuration, and a gate that fails on a valid board is a gate people learn to ignore. It now judges only the outputs the socket declaration actually creates, and it says plainly that the PmodVGA follows the transmitter's raster and cannot be checked independently rather than implying coverage it does not have. Run in the VGA configuration afterwards it reports source and transmitter matching their models, liveness passing on the declared counters, and the panel line reading not declared; the liveness label was also corrected, because it still named a panel that this configuration does not have. The artifact deployed remains entry 59's option 2 image and no gateware changed. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 60 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The renderer becomes the menu writing the same 96x64 frame store, which is what the socket layer, the hold and the checker were built to support, with the check running before each release and the encoder as the control that drives it. Two small debts travel with it. The VGA configuration has no automated evidence of its own beyond the transmitter it follows, so a test of the backend's sync windows and lane mapping, outstanding since entry 49, would close the last output that is verified only by eye. And the panel and VGA configurations need different socket declarations and different physical seating, so whichever one the next cycle finishes on, the other must be re-verified rather than assumed to still hold.
+
+#### Files Modified:
+
+- tools/ui_mirror_check.py
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: PASS
+
+---

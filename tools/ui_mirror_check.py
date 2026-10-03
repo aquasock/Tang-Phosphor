@@ -73,6 +73,10 @@ K, ACTIVE_X, ACTIVE_Y = 11, 112, 8
 FRAME_W, FRAME_H = 1280, 720              # visible window at the transmitter
 LAST_PAT = 7
 
+# Personality codes from src/pmod_mirror_core.sv.  Only one of them changes what
+# this tool can judge, because only the panel is a genuinely independent stream.
+PERS_OLEDRGB = 1
+
 
 def pattern_pixel(px, py, p):
     """src/ui/ui_pattern_demo.sv pattern_pixel()."""
@@ -245,6 +249,17 @@ def main():
         "hold_was_set": hold_in,
     }
 
+    # Which outputs exist is part of the configuration.  An undeclared socket is
+    # not an output: its engine is held off, so its frame counter cannot advance
+    # and its signature never publishes.  Checking it anyway fails a valid VGA
+    # configuration -- the PmodVGA takes both sockets, so declaring it means
+    # declaring no panel at all -- and a gate that fails on a working board is a
+    # gate people learn to ignore.  The VGA itself is still not independently
+    # checkable, because ui_vga_backend derives its syncs and colour from the
+    # transmitter's raster; the tool says so rather than implying coverage.
+    oled_declared = PERS_OLEDRGB in (pmod0_pers, pmod1_pers)
+    results["oled_declared"] = oled_declared
+
     # ---- liveness, measured before we disturb anything -------------------
     liveness_moved = None
     if not hold_in:
@@ -255,9 +270,10 @@ def main():
         t1 = dev.read_state()
         moved = {
             "render":      t1["render"]      > t0["render"],
-            "oled_frames": t1["oled_frames"] > t0["oled_frames"],
             "hdmi_frames": t1["hdmi_frames"] > t0["hdmi_frames"],
         }
+        if oled_declared:
+            moved["oled_frames"] = t1["oled_frames"] > t0["oled_frames"]
         liveness_moved = all(moved.values())
         results["liveness"] = {"moved": moved, "ok": liveness_moved}
         if not liveness_moved:
@@ -325,7 +341,7 @@ def main():
     results["measured"] = {"source": f"0x{held['src_sig']:08x}",
                            "transmitter": f"0x{held['hdmi_sig']:08x}",
                            "panel": f"0x{held['oled_sig']:08x}"}
-    panel_ok = held["oled_sig"] == expect_panel
+    panel_ok = (not oled_declared) or (panel_pattern is not None and panel_pattern == pattern)
 
     results["mirror"] = {
         "source": src_ok,
@@ -338,7 +354,7 @@ def main():
     if not hdmi_ok:
         failures.append(f"mirror: transmitter shows pattern {transmitter_pattern}, "
                         f"source shows {pattern}")
-    if not panel_ok:
+    if oled_declared and not panel_ok:
         failures.append(f"mirror: panel shows pattern {panel_pattern}, "
                         f"source shows {pattern}")
 
@@ -359,16 +375,20 @@ def main():
         if liveness_moved is None:
             print("liveness      : HELD -- renderer frozen on purpose, liveness not required")
         else:
-            print(f"liveness      : {'PASS' if liveness_moved else 'FAIL'} "
-                  f"(renderer, panel and transmitter counters)")
+            which = ", ".join(sorted(results.get("liveness", {}).get("moved", {})))
+            print(f"liveness      : {'PASS' if liveness_moved else 'FAIL'} ({which})")
         print(f"pattern       : source p{pattern}, transmitter p{transmitter_pattern}, "
               f"panel p{panel_pattern}   (register said {register_pattern})")
         print(f"source        : measured 0x{held['src_sig']:08x}  modelled 0x{expect_src:08x}"
               f"  {'PASS' if src_ok else 'FAIL'}")
         print(f"transmitter   : measured 0x{held['hdmi_sig']:08x}  modelled 0x{expect_hdmi:08x}"
               f"  {'PASS' if hdmi_ok else 'FAIL'}")
-        print(f"panel         : measured 0x{held['oled_sig']:08x}  modelled 0x{expect_panel:08x}"
-              f"  {'PASS' if panel_ok else 'FAIL'}")
+        if oled_declared:
+            print(f"panel         : measured 0x{held['oled_sig']:08x}  modelled 0x{expect_panel:08x}"
+                  f"  {'PASS' if panel_ok else 'FAIL'}")
+        else:
+            print("panel         : not declared; the PmodVGA follows the "
+                  "transmitter's raster, so it cannot be checked independently")
         print(f"restored hold : {'set' if hold_in else 'clear'}")
 
     if failures:
