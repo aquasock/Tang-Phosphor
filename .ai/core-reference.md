@@ -222,3 +222,17 @@ supported profile. Project-specific limits remain implementation limits.
 - Authority: Project interface definition.
 - Relevant rule: Register `0x10` is the socket control register. Bit 0 holds the renderer, bits 4-7 are the PMOD0 personality, bits 8-11 the PMOD1 personality, bit 12 is PMOD0 seated upside down and bit 13 is PMOD1. Personality numbering is 0 none, 1 oledrgb, 2 vga J1 and 3 vga J2. Register `0x14` is scratch. Reads: `0x00` magic `0x54504830`, `0x04` build date, `0x08` uptime, `0x0c` render frames, `0x18` source bank, `0x20`/`0x24` panel frames and checksum, `0x28`/`0x2c` HDMI, `0x30`/`0x34` VGA.
 - Tang-Phosphor use: This is the seam `/tang.ini` writes through. Power-on defaults select the panel on PMOD0 and nothing on PMOD1, which is the safe state, and the host is the only party that validates a declaration because it is the only party that knows what the user wrote.
+
+### Mirror check verdicts
+
+- Sources: `tools/ui_mirror_check.py`, `src/ui/ui_checksum.sv`; core-log entries 50 and 51.
+- Authority: Project interface and tooling, grounded in two real false alarms recorded in entry 51.
+- Relevant rule: Three verdicts are required, not one. MIRROR compares each measured stream against a model computed on the host; a frozen frame passes it legitimately, because screens showing the same frozen frame are mirrored. LIVENESS requires the frame counters to advance and is the only thing that catches a stopped renderer. HELD reports that the renderer is frozen on purpose, so a frozen signature is expected and liveness is not required.
+- Tang-Phosphor use: The tool sets the renderer hold before reading so it compares whole settled frames, and restores the hold state it found, because leaving a renderer frozen is precisely how the first false alarm happened. Held-ness is established by observing whether frames are being produced, never by trusting the control register's hold bit: that register once wrote hold at bit 0 and read it back at bit 3, and a tool that assumed the layout read a pattern bit as held. A signature is only meaningful beside the frame counters it belongs to.
+
+### PmodVGA on a CRT
+
+- Sources: Hardware observation on the Dell E773c, the same monitor Tang-PSX record BRD-005 verified its VGA path on, 2026-10-02.
+- Authority: Bench observation.
+- Relevant rule: A CRT accepts the transmitter's 1280x720 raster directly and its height, width and position controls provide the overscan or underscaling to frame the picture, so no second video mode is needed for the VGA port. The bars remain part of the emitted signal regardless of how the tube is adjusted, so a check compares the signal, not what the user sees.
+- Tang-Phosphor use: This retires the 800x600 branch, and with it the 40 MHz pixel clock, the asynchronous FIFO, the duplicated store and the clock-domain crossing that would have given back the single-clock coherence the rest of the design depends on. Underscanning deliberately is how raster edges and bars get inspected by eye.

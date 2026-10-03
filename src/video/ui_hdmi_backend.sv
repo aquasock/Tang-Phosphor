@@ -35,6 +35,13 @@ module ui_hdmi_backend (
     output logic [11:0] raster_y,
     output logic [23:0] raster_rgb,
 
+    // The pixel the transmitter is showing, and whether it is inside the
+    // visible window at all.  The VGA observes the same raster, so one stream
+    // covers both outputs; they cannot disagree by construction.
+    output logic [15:0] emitted_px,
+    output logic        emitted_strobe,
+    output logic        emitted_frame_end,
+
     // One-cycle pulse at the start of each frame, for the swap controller.
     output logic        frame_tick,
 
@@ -58,6 +65,8 @@ module ui_hdmi_backend (
             rd_bank_l <= bank;
     end
 
+    wire [15:0] scan_px;
+
     ui_hdmi_scan #(
         .K(11), .W(96), .H(64), .ACTIVE_X(112), .ACTIVE_Y(8),
         .X_LATENCY(2), .Y_LATENCY(0)
@@ -69,8 +78,17 @@ module ui_hdmi_backend (
         .src_px (rd_px),
         .src_x  (rd_x),
         .src_y  (rd_y),
-        .rgb    (rgb)
+        .rgb    (rgb),
+        .emitted_px (scan_px)
     );
+
+    // The visible window is 1280x720; the raster runs 1650x750 including
+    // blanking, and blanking is not part of the picture.
+    assign emitted_px     = scan_px;
+    assign emitted_strobe = (cx < 11'd1280) && (cy < 10'd720);
+    // The cycle after the last visible pixel of a frame: no strobe, so the
+    // checksum can publish without merging a coincident pixel.
+    assign emitted_frame_end = (cx == 11'd1280) && (cy == 10'd719);
 
     hdmi #(
         .VIDEO_ID_CODE(4),

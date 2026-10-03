@@ -99,9 +99,16 @@ module ui_debug_regs (
                 6'h01: rdata_q <= BUILD_DATE;
                 6'h02: rdata_q <= uptime_cycles;
                 6'h03: rdata_q <= render_frames;
-                6'h04: rdata_q <= {18'b0, pmod1_flipped, pmod0_flipped,
+                // Reads back in the same layout it is written in, so a host
+                // that echoes the register sees what it sent: hold at bit 0,
+                // personalities at 7:4 and 11:8, flips at 12 and 13.  The
+                // pattern sits above them at 18:16.  An earlier version packed
+                // hold at bit 3, which is how the mirror check managed to read
+                // a pattern bit as "held" on its first run.
+                6'h04: rdata_q <= {13'b0, pattern, 2'b0,
+                                   pmod1_flipped, pmod0_flipped,
                                    pmod1_personality, pmod0_personality,
-                                   hold, pattern};
+                                   3'b0, hold};
                 6'h05: rdata_q <= scratch;
                 6'h06: rdata_q <= {31'b0, source_bank};
                 6'h07: rdata_q <= source_crc;

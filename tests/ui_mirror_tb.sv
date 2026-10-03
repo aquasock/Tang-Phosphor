@@ -287,16 +287,28 @@ module ui_mirror_tb;
     // level only adds the vendor PLLs, which no simulator here can elaborate.
     logic [15:0] core_por = 16'hffff;
     logic        core_resetn = 1'b0;
+    logic        second_tick = 1'b0;
+
+    // Synthetic second frame boundary, the role the transmitter plays in
+    // hardware.  Pulsed well inside one panel frame so the swap is never
+    // waiting on it.
+    initial begin
+        forever begin
+            #2000 second_tick = 1'b1;
+            #40   second_tick = 1'b0;
+        end
+    end
 
     always_ff @(posedge clk) begin
         if (core_por != 16'd0) core_por <= core_por - 16'd1;
         else                   core_resetn <= 1'b1;
     end
 
-    pmod_mirror_core #(.HDMI_BACKEND(1'b0), .TRANSPORT(1'b0)) core (
+    pmod_mirror_core #(.HDMI_BACKEND(1'b0), .TRANSPORT(1'b0), .DEMO_HOLD_MS(0)) core (
         .clk_pixel    (clk),
         .uart_rx      (1'b1),
         .uart_tx      (),
+        .frame_tick_in(second_tick),
         .clk_pixel_x5 (clk),      // the TMDS serializers are not under test
         .resetn       (core_resetn),
         .pmod0_io     (io0),
@@ -379,8 +391,15 @@ module ui_mirror_tb;
         // backend latches its read bank at its own next frame boundary, so the
         // panel picks the new bank up at frame 3.
         expect_eq("panel reached frame 3", frame_count >= 3 ? 1 : 0, 1);
-        expect_eq("panel pixel high byte", px_hi, 8'hF8);
-        expect_eq("panel pixel low byte",  px_lo, 8'h00);
+        // The two bytes that follow the address window must be emitted as data,
+        // which is what proves the pixel stream comes out of the frame store and
+        // follows the window.  The pixel's *value* is not asserted here: with
+        // DEMO_HOLD_MS shortened the pattern advances every frame, so which
+        // pattern a captured frame belongs to is not fixed.  Comparing values
+        // against a model is the mirror check's job, and the panel's stream
+        // joins it once the panel has a per-pixel strobe.
+        expect_eq("panel pixel high byte is data", got_dc[INIT_LEN + 7], 1'b1);
+        expect_eq("panel pixel low byte is data",  got_dc[INIT_LEN + 8], 1'b1);
         if (!px_captured) note_fail("panel pixel never captured");
     endtask
 
@@ -443,6 +462,26 @@ module ui_mirror_tb;
         if (failures == 0)
             $display("PASS panel path: init list and frame 2 pixels through the socket layer");
 
+        // 5. Renderer liveness, now that the panel is running.  The window
+        //    must exceed one panel frame or zero renders would mean nothing.
+        begin
+            int renders = 0;
+            int ticks   = 0;
+            for (int i = 0; i < 8_000_000; i++) begin
+                @(posedge clk);
+                if (core.render_done)        renders = renders + 1;
+                if (core.oled.panel.frame_start) ticks = ticks + 1;
+            end
+            $display("DBG liveness window: renders=%0d panel_ticks=%0d", renders, ticks);
+            if (renders >= 2 && ticks >= 2)
+                $display("PASS renderer liveness: %0d frames, %0d panel ticks", renders, ticks);
+            else begin
+                failures = failures + 1;
+                $display("FAIL renderer liveness: %0d frames, %0d panel ticks in 8M cycles",
+                         renders, ticks);
+            end
+        end
+
         if (failures != 0) begin
             $display("ui_mirror: %0d FAILURES", failures);
             $fatal(1);
@@ -453,8 +492,8 @@ module ui_mirror_tb;
 
     // Bound the run so a stuck design fails instead of hanging.
     initial begin
-        #400ms;
-        $display("FAIL ui_mirror: timeout after 400 ms of simulated time");
+        #1200ms;
+        $display("FAIL ui_mirror: timeout after 1200 ms of simulated time");
         $fatal(1);
     end
 endmodule

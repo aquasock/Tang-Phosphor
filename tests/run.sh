@@ -129,7 +129,8 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/ui/ui_frame_store.sv" \
     "$project_dir/src/ui/ui_pattern_demo.sv" \
     "$project_dir/src/ui/ui_scanout.sv" \
-    "$project_dir/src/ui/ui_swap.sv"
+    "$project_dir/src/ui/ui_swap.sv" \
+    "$project_dir/src/ui/ui_checksum.sv"
 "$output_dir/ui_mirror/Vui_mirror_tb"
 
 verilator --binary --timing -Wno-fatal \

@@ -38,13 +38,20 @@ module pmod_mirror_core #(
     // block-RAM primitive that this project's simulator cannot elaborate, so
     // the integration test turns it off and the socket layer keeps its
     // power-on personalities.
-    parameter bit   TRANSPORT         = 1'b1
+    parameter bit   TRANSPORT         = 1'b1,
+    // Renderer dwell on each pattern.  A parameter so a test can shorten the
+    // one-second hold to something a simulator can reach.
+    parameter integer DEMO_HOLD_MS    = 1000
 ) (
     input  logic       clk_pixel,
     input  logic       clk_pixel_x5,
     input  logic       resetn,
     input  logic       uart_rx,
     output logic       uart_tx,
+    // Stand-in for the transmitter's frame boundary when HDMI_BACKEND is off.
+    // Without it the swap would wait forever on a tick that never comes, which
+    // is exactly the path the integration test needs to exercise.
+    input  logic       frame_tick_in,
     inout  wire [7:0]  pmod0_io,
     inout  wire [7:0]  pmod1_io,
     output logic       tmds_clock,
@@ -71,6 +78,12 @@ module pmod_mirror_core #(
     logic [11:0] raster_x;
     logic [11:0] raster_y;
     logic [23:0] raster_rgb;
+    logic [15:0] hdmi_emitted_px;
+    logic        hdmi_emitted_strobe;
+    logic        hdmi_emitted_frame_end;
+    logic        render_done_d;
+    logic [31:0] source_signature;
+    logic [31:0] hdmi_signature;
 
     wire rst = ~resetn;
 
@@ -102,10 +115,14 @@ module pmod_mirror_core #(
     logic       oled_frame_start;
     logic       hdmi_frame_tick;
 
-    localparam integer SWAP_OUTPUTS = HDMI_BACKEND ? 2 : 1;
+    // Two outputs always: with the transmitter present it supplies the second
+    // tick, and without it the test does.  A one-output swap would not
+    // exercise the logic that actually runs in hardware.
+    localparam integer SWAP_OUTPUTS = 2;
 
     logic [1:0] swap_ticks;
-    assign swap_ticks = {hdmi_frame_tick, oled_frame_start};
+    assign swap_ticks = {HDMI_BACKEND ? hdmi_frame_tick : frame_tick_in,
+                         oled_frame_start};
 
     ui_swap #(.OUTPUTS(SWAP_OUTPUTS)) swap (
         .clk           (clk_pixel),
@@ -125,7 +142,7 @@ module pmod_mirror_core #(
     logic [5:0]  wr_y;
     logic [15:0] wr_px;
 
-    ui_pattern_demo #(.W(W), .H(H), .CLK_MHZ(CLK_MHZ), .HOLD_MS(1000)) demo (
+    ui_pattern_demo #(.W(W), .H(H), .CLK_MHZ(CLK_MHZ), .HOLD_MS(DEMO_HOLD_MS)) demo (
         .clk           (clk_pixel),
         .rst           (rst),
         .bank          (bank),
@@ -204,6 +221,9 @@ module pmod_mirror_core #(
             .rd_x           (hdmi_src_x),
             .rd_y           (hdmi_src_y),
             .rd_px          (hdmi_px),
+            .emitted_px        (hdmi_emitted_px),
+            .emitted_strobe    (hdmi_emitted_strobe),
+            .emitted_frame_end (hdmi_emitted_frame_end),
             .raster_x       (raster_x),
             .raster_y       (raster_y),
             .raster_rgb     (raster_rgb),
@@ -218,6 +238,9 @@ module pmod_mirror_core #(
         assign raster_x        = 12'd0;
         assign raster_y        = 12'd0;
         assign raster_rgb      = 24'h000000;
+        assign hdmi_emitted_px     = 16'h0000;
+        assign hdmi_emitted_strobe    = 1'b0;
+        assign hdmi_emitted_frame_end = 1'b0;
         assign tmds_clock      = 1'b0;
         assign tmds            = 3'b000;
     end
@@ -358,6 +381,42 @@ module pmod_mirror_core #(
     // transmitter's.  It becomes its own number when it has its own timing.
     assign vga_frames = hdmi_frames;
 
+    // ------------------------------------------------------------------
+    // Checksums.
+    //
+    // Two independent streams can be checked: the frame as it was written into
+    // the store, and what the transmitter put on the wire.  The PmodVGA is not
+    // a third: it observes the transmitter's raster and cannot disagree with
+    // it, so a separate checksum there would be a tautology dressed as
+    // evidence.  The panel's own stream is the third genuinely independent
+    // one and needs a per-pixel strobe out of the panel engine, which is not
+    // wired yet.
+    // ------------------------------------------------------------------
+    // The source boundary is delayed one cycle because the writer's last write
+    // and its render_done coincide, and the checksum wants a pixel-free cycle.
+    always_ff @(posedge clk_pixel) begin
+        if (rst) render_done_d <= 1'b0;
+        else     render_done_d <= render_done;
+    end
+
+    ui_checksum source_checksum (
+        .clk       (clk_pixel),
+        .rst       (rst),
+        .strobe    (we),
+        .px        (wr_px),
+        .frame     (render_done_d),
+        .signature (source_signature)
+    );
+
+    ui_checksum hdmi_checksum (
+        .clk       (clk_pixel),
+        .rst       (rst),
+        .strobe    (hdmi_emitted_strobe),
+        .px        (hdmi_emitted_px),
+        .frame     (hdmi_emitted_frame_end),
+        .signature (hdmi_signature)
+    );
+
     ui_debug_regs debug_registers (
         .clk                (clk_pixel),
         .resetn             (resetn),
@@ -370,11 +429,11 @@ module pmod_mirror_core #(
         .render_frames      (render_frames),
         .pattern            (demo_pattern),
         .source_bank        (bank),
-        .source_crc         (32'd0),
+        .source_crc         (source_signature),
         .oled_frames        (oled_frames),
         .oled_crc           (32'd0),
         .hdmi_frames        (hdmi_frames),
-        .hdmi_crc           (32'd0),
+        .hdmi_crc           (hdmi_signature),
         .vga_frames         (vga_frames),
         .vga_crc            (32'd0),
         .pmod0_personality  (pmod0_personality),

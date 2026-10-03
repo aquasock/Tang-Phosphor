@@ -43,7 +43,10 @@ module ui_hdmi_scan #(
     input  logic [15:0] src_px,     // the frame store's registered read output
     output logic [6:0]  src_x,
     output logic [5:0]  src_y,
-    output logic [23:0] rgb
+    output logic [23:0] rgb,
+    // The same pixel in the form the stream is checked in: the source value
+    // inside the image, zero on a bar.  The host model reproduces this exactly.
+    output logic [15:0] emitted_px
 );
     wire in_image;
 
@@ -77,4 +80,5 @@ module ui_hdmi_scan #(
     endfunction
 
     always_comb rgb = in_rect ? expand565(src_px) : 24'h000000;
+    always_comb emitted_px = in_rect ? src_px : 16'h0000;
 endmodule

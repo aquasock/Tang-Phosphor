@@ -53,6 +53,7 @@ module pmod_mirror_top (
         .resetn       (resetn),
         .uart_rx      (uart_rx),
         .uart_tx      (uart_tx),
+        .frame_tick_in(1'b0),
         .pmod0_io     (pmod0_io),
         .pmod1_io     (pmod1_io),
         .tmds_clock   (hdmi_tmds_clock),

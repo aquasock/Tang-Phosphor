@@ -1824,3 +1824,42 @@ The next cycle finishes the checker: the per-output checksum over the emitted pi
 - User Test: PASS
 
 ---
+
+## 51 COMMIT Unreleased 2026-10-02T17:42:47-07:00
+
+#### Coming From:
+
+Unreleased e9093e1
+
+#### Purpose:
+
+Build the mirror checker the architecture has been promising, so that agreement between the outputs becomes a measured verdict rather than something the user has to look at.
+
+#### Outcome:
+
+Two per-frame signatures now cover the two streams that can genuinely disagree. `src/ui/ui_checksum.sv` folds a stream with `signature = signature * 5 + pixel`, a rolling hash rather than a CRC, and the file records why: a bit-serial CRC32 is sixteen gates deep per input bit and cannot close at 74.25 MHz with one pixel per clock, and the tabular and parallel-matrix forms are 8 KiB of LUT or a hand-derived XOR network needing its own proof. One instance covers the frame as the renderer writes it and one covers what the transmitter puts on the wire, blanking excluded. The first version cost 531 LUT/ALU, 256 registers and 30 percent of the clock; the culprit was a 32-bit pixel counter and its publish multiplexer, and removing it halved the logic and bought back 10.6 MHz, because the pixel count is a property of the frame the host models anyway. Each boundary is wired to a cycle carrying no pixel, the source one cycle after the write and the transmitter's the cycle after the last visible pixel, so a published pair is always a whole frame. `tools/ui_mirror_check.py` computes both signatures in Python from the pattern definition and the scaling geometry, sets the renderer hold so it compares settled frames, reads the registers over the transport, and restores the hold state it found. It reports three verdicts. Mirror compares each stream against the model. Liveness requires the frame counters to advance, and exists because a frozen frame is a legitimately mirrored state, so mirror alone cannot detect a stopped renderer. Held reports that the renderer is frozen on purpose, and its detection is observational rather than a register read, which mattered immediately: the tool's first run found that the control register writes hold at bit 0 and reads it back at bit 3, and a tool trusting that bit had read a pattern bit as held. That layout mismatch is fixed. Two false alarms are recorded deliberately rather than quietly repaired, because together they are the argument for the tool existing: the author froze the renderer with his own hold bit, forgot, and spent an hour hunting a defect that did not exist, and a liveness check that ran four million cycles before the panel engine's power-on delays had completed reported zero frames and looked like a reproduction until the window was moved past the panel's first frame and made longer than one panel frame. On hardware the check passes with the renderer running: the socket configuration reads back as VGA J2 on PMOD0 and VGA J1 on PMOD1 with hold clear, liveness passes on all three counters, and both measured signatures match their models exactly, which validates the scaling geometry, the bar placement and the latency compensation against a reference computed outside the FPGA. The suite reports nineteen passing tests, the new one being renderer liveness at seven frames and six panel ticks, and the panel path's pixel check was reduced from an asserted colour to the structural claim it was really making, since with the shortened hold the pattern advances every frame and a captured frame's colour is no longer fixed. The build measures `clk_pixel` Fmax 76.412 MHz against the 74.250 MHz constraint, MET but down from 83.329 after an edit that was only a register repacking, recorded as a suspected placement shift to confirm rather than explained away. The panel's own stream remains unmeasured and is the one genuinely independent comparison left, since the PmodVGA observes the transmitter's raster and cannot disagree with it. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 51 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The panel needs a per-pixel strobe out of `src/oled/oled_panel.sv` and a third checksum instance, which by the measured rate costs about 130 LUT/ALU and 100 registers and cannot pressure timing because the panel's stream is paced at sixteen clocks per pixel; the tool then reports three streams instead of two. After that, the store wrapper, moving both frame-store copies inside one module that owns the write bus so that one source of truth is structural rather than a wiring convention, at no cost in logic or timing. The Fmax question should be answered before more logic is added, and the deployed image still needs the register-layout fix, which requires a visit to the main menu.
+
+#### Files Modified:
+
+- build-pmod.tcl
+- src/debug/ui_debug_regs.sv
+- src/pmod_mirror_core.sv
+- src/pmod_mirror_top.sv
+- src/ui/ui_checksum.sv
+- src/video/ui_hdmi_backend.sv
+- src/video/ui_hdmi_scan.sv
+- tests/run.sh
+- tests/ui_mirror_tb.sv
+- tools/ui_mirror_check.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
