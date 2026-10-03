@@ -2153,3 +2153,33 @@ The renderer becomes the menu writing the same 96x64 frame store, which is what 
 - User Test: PASS
 
 ---
+
+## 61 COMMIT Unreleased 2026-10-02T23:34:34-07:00
+
+#### Coming From:
+
+Unreleased 40c1ff7
+
+#### Purpose:
+
+Record the menu renderer's contract, geometry and slice order in the durable reference before any of it is written, so the shape is settled while changing it is still cheap.
+
+#### Outcome:
+
+No gateware changed in this cycle; it fixes the shape of the next few. Scoping the menu renderer against the existing files produced one finding worth writing down before implementation, which is that `src/ui/phosphor_album_ui.sv` cannot be ported to this job. That module is a pixel-rate overlay evaluator: the raster hands it `(x, y, rgb_in)` and it returns `rgb_out`, looking glyphs and artwork up by address while the beam passes, laid out on a 16x20 cell grid. The menu needs the opposite shape, a frame writer that fills the back bank, raises `render_done` and waits for `render_enable`, which is the contract `src/ui/ui_pattern_demo.sv` already meets. So the work is a new module sharing only the state inputs rather than a port of 865 lines, and treating it as a port would carry a cell geometry that cannot fit 96x64 and a per-pixel evaluation the frame store makes pointless. The arithmetic is kind: a 6x8 cell tiles 96x64 exactly, 16 columns by 8 rows with nothing over, whereas 16x20 cells do not fit and the layout must be redesigned rather than shrunk. Two things carry over unchanged and are the reason the change is smaller than it looks. The characters keep arriving from the host, because `src/ui/phosphor_ui_control.sv` owns `text_memory`, a 256x32 block RAM the transport writes and which is double-buffered, so Tang-Control's protocol needs no change; the host owns text and the FPGA owns glyphs. And every state input a menu needs is already wired, being `visible`, `playlist`, `paused`, `player_state`, `current_track`, `track_count`, `window_start`, the eight track lengths, `elapsed_seconds`, `duration_seconds` and `samples_played`. The four slices are recorded in `.ai/core-reference.md`: the contract first with a fixed frame derived from cell indices, which proves the cell addressing before any glyph data exists; then the 6x8 font and the text grid with a test that renders known strings and checks pixels; then content and layout from the state inputs; then re-verification of both configurations, since panel and VGA need different seatings and different socket declarations and the encoder becomes the menu's control. Recording the plan rather than starting it is deliberate: the alternative was beginning a few hundred lines of RTL with no room to verify them, which is the failure this session avoided each time it came up. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 61 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Slice 1 is the next cycle and it is specified rather than sketched: a renderer that fills the 96x64 store in raster order, raises `render_done` when the back bank is complete, waits for `render_enable` before touching the other bank, and draws a fixed frame whose pixel values are derived from cell indices so the 16-column by 8-row addressing is provable. It should be built with a simulation test asserting the write order and the handshake before hardware is involved, and then worked through the mirror check and a visual pass, which is the same evidence every other change in this architecture has had to earn. After it, the font and the text grid, then the content, then the re-verification of both configurations.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
