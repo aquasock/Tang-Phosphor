@@ -57,12 +57,14 @@ set_option -use_sspi_as_gpio 1
 set_option -use_mspi_as_gpio 1
 set_option -use_cpu_as_gpio 0
 set_option -multi_boot 1
-# Placement option measured, not assumed.  With the encoder personality added
-# the spread is: option 0 reaches 70.026 MHz and fails the 74.25 constraint,
-# 3 reaches 73.973 and also fails, while 2 reaches 78.666 and 4 reaches 78.270.
-# An unchanged netlist moves this by over 8 MHz, so the option decides whether
-# the design closes at all.  2 is pinned for the best margin; re-measure on
-# every material netlist change, as entry 45 did for the merged image.
+# Placement option measured, not assumed.  The figures that first chose it --
+# option 0 at 70.026 MHz and 3 at 73.973 failing while 2 reached 78.666 and 4
+# 78.270 -- were measured on an earlier netlist; on the netlist carrying the
+# menu renderer, option 2 was re-measured at 81.503 MHz, MET against 74.250, so
+# it stays pinned and the other options were not re-swept.  An unchanged
+# netlist moves this by over 8 MHz, so the option decides whether the design
+# closes at all; re-measure on every material netlist change, as entry 45 did
+# for the merged image.
 set_option -place_option 2
 
 run all

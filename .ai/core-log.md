@@ -2253,3 +2253,35 @@ Flash `build/pmod/tang_phosphor_pmod.fs` and run `tools/ui_mirror_check.py` on t
 - User Test: NOT RUN
 
 ---
+
+## 64 COMMIT Unreleased 2026-10-03T01:23:45-07:00
+
+#### Coming From:
+
+Unreleased 752dc26
+
+#### Purpose:
+
+Put the menu renderer on the standing Phosphor core and re-pin the merged placement seed the changed netlist requires.
+
+#### Outcome:
+
+The merged image was swept with `MERGED_PLACE_OPTIONS="1 2 3 4"` and the seed again decides which side of the constraint the design lands on: option 1 reaches 73.111 MHz, option 2 72.831 and option 4 70.821, all below the 74.250 MHz `clk_pixel` constraint, while option 3 reaches 76.518 MHz and MET. The failing paths are the third-party TMDS encoder's disparity accumulator and the `tangcore_io` transport, not the renderer, so this is the placement sensitivity entry 52 recorded rather than a cost introduced by the menu frame writer, and the previous netlist's note that every option met timing with option 2 fastest no longer holds. Option 3 was uploaded to `cores/console138k/phosphortang.bin` -- the standing Phosphor player image, whose prior contents were the entry 59 artefact -- with a verified SD readback at 5018826 bytes, CRC-32 `969f32b9`, SHA-256 `c497e1344606c70583ad2159b88d9061d056d18bb23ab16a451056b222a651d5`, and loaded through `tangctl.py core` to a core reporting magic `0x54504830`, transport protocol 1 and capabilities `0x0000001f`. `tools/ui_mirror_check.py --map merged` then passed, which is the point of the cycle: with both sockets released the source measured `0x76491800` and the transmitter `0x6c435800`, both exactly the values the RTL and the checker agreed on in simulation, and after the standard OLED and rotary-encoder combo was declared by writing `0xc0 = 0x2410` (PMOD0 oledrgb, PMOD1 the encoder with its seating bit) the panel measured `0x76491800`, equal to the source as 1:1 scaling requires, with liveness confirmed on the render, HDMI and panel frame counters and the hold state restored. The panel signature is folded off the SPI stream leaving the FPGA, physically independent of the renderer's write port, so three streams agreeing on the modelled values is the strongest evidence this design produces and it now holds for the menu frame specifically; the user confirmed the HDMI picture showed the fixed cell frame. The seed was re-pinned from 2 to 3 in `build-merged.tcl`, the sweep was recorded in `scripts/build-merged.sh`, whose comment had said 2 while its own default already read 3 and now agrees, and the stale measurement note in `build-pmod.tcl` was refreshed with the option-2 re-measurement of 81.503 MHz that this cycle's bring-up build produced, MET against 74.250. No RTL changed in this cycle; the renderer reached the design in entries 62 and 63. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 64 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Slice 2 is the 6x8 font and the text grid, with a test that renders known strings and checks pixels against the cell geometry this frame proves, followed by content and layout from the state inputs already wired and then re-verification of both configurations. Two carried items remain: the bring-up core's slot on the card, `cores/console138k/pmodtang.bin`, still holds the old demo build and could be refreshed in a later cycle, and the VGA configuration needs its own socket declaration and seating before it can be re-checked, since declaring it means declaring no panel.
+
+#### Files Modified:
+
+- build-merged.tcl
+- build-pmod.tcl
+- scripts/build-merged.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

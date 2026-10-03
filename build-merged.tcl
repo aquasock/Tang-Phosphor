@@ -91,7 +91,7 @@ set_option -multi_boot 1
 # Overridden by GOWIN_PLACE_OPTION, which scripts/build-merged.sh always sets;
 # this literal applies only when gw_sh is run by hand, so keep it equal to that
 # script's default.  The swept measurements that chose it are recorded there.
-set place_option 2
+set place_option 3
 if {[info exists ::env(GOWIN_PLACE_OPTION)]} {
     set place_option $::env(GOWIN_PLACE_OPTION)
 }

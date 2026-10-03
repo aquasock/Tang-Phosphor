@@ -7,20 +7,21 @@
 # parallel, each in an isolated copy of the repository.  Bitstreams and
 # reports go to build/merged/place<N>/.
 #
-#   MERGED_PLACE_OPTIONS   placement options (default "2"; Gowin accepts
+#   MERGED_PLACE_OPTIONS   placement options (default "3"; Gowin accepts
 #                           only 0-4 for GW5A devices, SUG100 8.3).  Measured
-#                           on the netlist carrying the folded PMOD socket
-#                           layer and the panel's frame-boundary wait, every
-#                           swept option meets timing and the seed still moves
-#                           clk_pixel by 2.5 MHz: option 0 reaches 77.264 MHz,
-#                           option 2 78.674, option 3 76.771 and option 4
-#                           76.150, all above the 74.250 constraint.  Option 2
-#                           is the default because it is the fastest of them,
-#                           so the seed is pinned rather than left to Gowin;
-#                           the earlier note that options 1 and 4 fail setup
-#                           was measured against a different netlist and no
-#                           longer holds.  Re-measure when the netlist changes
-#                           materially.  See the README "Building from source".
+#                           on the netlist carrying the menu renderer, the
+#                           seed again decides which side of the constraint the
+#                           design lands on: option 1 reaches 73.111 MHz,
+#                           option 2 72.831 and option 4 70.821, all below the
+#                           74.250 constraint, while option 3 reaches 76.518
+#                           and MET, so 3 is the default and the seed stays
+#                           pinned rather than left to Gowin.  The preceding
+#                           netlist had every swept option meet timing with
+#                           option 2 fastest, so this is the re-measurement
+#                           that note called for rather than a renderer cost:
+#                           the failing paths are the third-party TMDS encoder
+#                           and the transport, neither of which the renderer
+#                           touches.  See the README "Building from source".
 #   RISCV_TOOLCHAIN_BIN    riscv64-unknown-elf toolchain directory
 
 set -euo pipefail
