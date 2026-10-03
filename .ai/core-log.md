@@ -2002,3 +2002,33 @@ The panel stream's disagreement on patterns 5 and 6 is the next cycle, and the f
 - User Test: PASS
 
 ---
+
+## 56 COMMIT Unreleased 2026-10-02T22:49:04-07:00
+
+#### Coming From:
+
+Unreleased 709ffa0
+
+#### Purpose:
+
+Fix the panel's frame-boundary pixel, which the mirror check's patterned frames exposed and the flat fills had hidden, so that all three of its streams agree on every pattern.
+
+#### Outcome:
+
+The mirror check's last open failure is closed, and the route to it was a user observation rather than a measurement. Patterns 5 and 6 had been the only two of eight where the panel's fold matched no whole frame, reproducibly `0x621c8400` and `0x27e05f33` against models of `0xef831c00` and `0x44328c00`, while source and transmitter matched their own models on every run; the flat fills could not see anything because a uniform fill folds identically under any reordering, and the orientation card agreed, so the display was believed correct and the checksum's capture was suspected instead. The user, looking at a frozen ramp frame, reported a single white pixel at the exact top-left corner, which is worth more than it looks: the ramp's first pixel should be `0x0000` while its last pixel is `0xBFFF`, so the corruption was a plausible-looking wrong pixel rather than obvious garbage. That fixed the hypothesis, and it then tested exactly: replacing each frame's first pixel with its last reproduces the measured panel fold on all eight patterns while leaving the flat fills and the orientation card unchanged, and the user confirmed the prediction independently by reporting that the corrupt pixel on the ramp was the same colour as the frame's bottom-right corner. `src/oled/oled_panel.sv` was at fault and not the checksum: the inter-pixel path waits two clocks (`S_PIXWAIT`) so that the mapper's registered mapping and the store's registered read can deliver the pixel belonging to the coordinate, but `S_FRAME` went straight into `S_PIX`, so the frame's first pixel was launched while both still held the previous raster position and carried address `(95,63)`, the last pixel of the frame that had just ended. The address window now hands over through `S_PIXWAIT` with the same two-clock wait. The defect had been present since the panel checksum was added and was invisible to every earlier test for a reason worth recording: the bring-up verification's headline result, that two physically independent paths folded to the same number, was measured on `0xd6991800`, which is pattern 3, a flat white frame whose first and last pixels are identical, so that agreement was real and blind at the same time. On hardware after deploying `32e31f68a4b8bef1e2c10101cdb5edce27b619fcaf3e4cf3ce72e9a197c5fe8e`, a held-frame sweep over all eight patterns now gives panel equal to source on every one including 5 and 6, `tools/ui_mirror_check.py` reports PASS on pattern 5 with all three measured streams matching their models, and the encoder regression is unchanged at count `0x8000_0000` with `raw` reading `0xb` with the switch on and the button released. The build reports timing MET with `clk_pixel` Fmax 76.771 MHz, down from 80.503 for a one-line state-machine change, which is recorded as a suspected placement shift to re-measure rather than explained away, and the artifact's SD readback matched; the suite still reports nineteen passing tests, but nothing in it could have caught this fault and that is the cycle's real debt, because `tests/ui_mirror_tb.sv` asserts the panel's init list, window commands and D/C polarity and then explicitly declines to assert a pixel's value on the stated grounds that the panel has no per-pixel strobe, which has been untrue since entry 52 and is now stale. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 56 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The first work of the next cycle is the test that should have caught this: `tests/ui_mirror_tb.sv` already decodes the SSD1331 stream out of the raw socket pins, so it can assert that a captured frame's first transmitted pixel is one of the values a frame's first pixel may legitimately take, which fails on the pre-fix behaviour and needs no model of the whole frame. That assertion rests on the premise the mirror check now enforces from the other side, which is that a claim measured only on flat colours is not a claim. The placement is then re-measured against the new netlist with the numbers written beside the pinned seed in `build-merged.tcl`, the discipline entries 45 and 52 applied, since a 3.7 MHz drop for a one-line change is unexplained and may not be real. After that the panel path is closed out and the renderer becomes the menu, with the check running before each release, which is where its value grows rather than shrinks.
+
+#### Files Modified:
+
+- src/oled/oled_panel.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

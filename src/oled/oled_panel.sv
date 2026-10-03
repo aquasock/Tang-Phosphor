@@ -290,7 +290,19 @@ module oled_panel #(
                                 x     <= 7'd0;
                                 y     <= 6'd0;
                                 hi    <= 1'b1;
-                                state <= S_PIX;
+                                // Present (0,0) and then wait the same two clocks
+                                // the inter-pixel path waits.  Going straight to
+                                // S_PIX launched the frame's first pixel with the
+                                // mapper and the store still holding the previous
+                                // raster position, so it carried the last pixel
+                                // of the frame that had just ended: on hardware
+                                // that showed as the ramp's bottom-right colour
+                                // appearing at the top-left corner, and it folded
+                                // a one-pixel-wrong frame, which is why patterns
+                                // 5 and 6 failed the mirror check while the flat
+                                // fills and the orientation card could not see it.
+                                delay <= 24'd2;
+                                state <= S_PIXWAIT;
                             end else begin
                                 idx <= idx + 6'd1;
                             end
