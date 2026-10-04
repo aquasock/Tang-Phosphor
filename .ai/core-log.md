@@ -2285,3 +2285,34 @@ Slice 2 is the 6x8 font and the text grid, with a test that renders known string
 - User Test: PASS
 
 ---
+## 65 COMMIT Unreleased 2026-10-04T07:02:13-07:00
+
+#### Coming From:
+
+Unreleased cf300b3
+
+#### Purpose:
+
+Establish whether Gowin's USB 1.1 SoftPHY can be brought into the shipping core at all, and measure what it costs there, before any host controller is written.
+
+#### Outcome:
+
+The SoftPHY cannot be produced the way the DDR3 controller is: its IPSpec declares no `projectName` and no `rtlFiles`, so `create_ipc -name usb_11_softphy` registers an IP that `get_ips` never returns a usable handle for and `generate_target` emits nothing, while Gowin drives this generator from the IP Core Generator dialog. Reading `libUSBSoftPHY.so` recovered that dialog's entire configuration -- a clock frequency of 36, 48 or 60 MHz and a Disable I/O Insertion toggle -- together with the file set it writes, and `scripts/gen-usb-phy-ip.sh` now reproduces that set from the local installation, keeping `usb_softphy.vp` and the other licensed files out of the repository exactly as `scripts/gen-ddr3-ip.sh` keeps the DDR3 core out. `src/pll/pll_48.mod` and its generated `src/pll/pll_48.v` supply the PHY input clock, derived from the DDR3 PLL recipe and differing from `src/pll/pll_12.v` only in the module name, the header, `MDIV_SEL` 18 to 24 and `ODIV0_SEL` 75 to 25, which is 48.0 MHz on a 1200 MHz VCO. An isolated probe first tied the UTMI inputs to constants and GowinSynthesis swept the transceiver as dead logic, reporting WARN NL0002 against 99 LUTs, and only a harness whose register drives the UTMI inputs and is fed back from the PHY's own outputs kept the core live enough to place. The merged core then built with port 1's `usb_hid_host` replaced by the SoftPHY, `pll_48` and that harness, and the swap is net negative on area against placement 3's baseline -- logic 13781 to 13582, registers 13163 to 13039, CLS 12058 to 11894, BSRAM 116 to 115 -- so the full-speed PHY costs less than the low-speed host it displaces, but its price is clocks: PLL 5/12 to 6/12 and PRIMARY 6/8 to 7/8 at 88 percent, now the scarcest resource in the design. The PHY's own domain closes at every seed, Fmax 115.311 to 122.624 MHz against its 48 MHz constraint. The placement sweep was then run both ways and overturned the single-seed conclusion this cycle first drew: without the PHY only seed 3 meets timing while seeds 0, 1, 2 and 4 fail, and with it seeds 0 and 4 meet and seed 3 does not, so the PHY does not break closure but reshuffles which seeds land, and no conclusion about this placement-sensitive design may be drawn from one seed. Surveying the standing design's margins, `clk_pixel` at its 74.250 MHz constraint is the only clock that ever fails at any seed, the design's worst setup slack at seed 3 is +0.399 ns and sits on the third-party TMDS encoder inside `display/g_hdmi.hdmi_backend/hdmi_tx/tmds_gen`, the other marginal path is the `tangcore_io` transport, and every other clock passes with wide margin everywhere. The flac and wav decoders are absent from the merged build entirely, their sources remaining in `src/audio/` without being added, so the decoder bit-reader work entry 26 proposed is obsolete, and the area their removal freed did not buy `clk_pixel` margin because the TMDS encoder is the bottleneck. One limitation is recorded rather than repaired: `build.tcl` cannot build the committed `src/tang_phosphor_top.sv`, since it omits the UI, video, PMOD and OLED sources that top instantiates, which are roughly the thirty-two files `build-merged.tcl` carries, so `scripts/build.sh` is non-functional at HEAD. No RTL was landed and the harness was reverted, so this cycle produced no artefact for the Tang and reached no hardware stage. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 65 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Buy back `clk_pixel` margin at its source, the third-party TMDS encoder, because the design's entire timing reserve is +0.399 ns and anything later added to the merged netlist competes for it; run `MERGED_PLACE_OPTIONS="0 1 2 3 4" scripts/build-merged.sh` and compare every option against the same option without the change, since a single seed has now misled this project once. The full-speed host controller is the work that follows and can begin once that margin exists, and the first integration decision it forces is which seed replaces 3. `build.tcl`'s divergence from the top it names remains open and unapproved for repair.
+
+#### Files Modified:
+
+- scripts/gen-usb-phy-ip.sh
+- src/pll/pll_48.mod
+- src/pll/pll_48.v
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---
