@@ -163,15 +163,37 @@ pll_12 controller_clock (
     .lock(pll_lock_12)
 );
 
-usb_hid_host controller_usb1 (
-    .usbclk(clk12),
-    .usbrst_n(pll_lock_12),
-    .usb_dm(usb1_dn),
-    .usb_dp(usb1_dp),
-    .game_snes(joy_usb1_raw),
-    .typ(usb_type1_raw),
-    .conerr(usb_error1_raw)
+// TinyTang keyboard link.  The keyboard drives its own USB D+ line as a GPIO
+// UART from Tang firmware, and this reads it.  Port 1's low-speed HID host is
+// displaced because both need usb1_dp; the gamepad on port 2 is untouched.
+wire [7:0]  link_mods;
+wire [7:0]  link_keys [6];
+wire        link_valid;
+wire [31:0] link_frames;
+wire [31:0] link_bad_checksum;
+wire [31:0] link_truncated;
+
+keylink_rx #(
+    .CLK_HZ (74_250_000),
+    .BAUD   (750_000)
+) keyboard_link (
+    .clk            (clk_pixel),
+    .resetn         (resetn),
+    .rx             (usb1_dp),
+    .o_modifiers    (link_mods),
+    .o_keys         (link_keys),
+    .o_valid        (link_valid),
+    .o_frames       (link_frames),
+    .o_bad_checksum (link_bad_checksum),
+    .o_truncated    (link_truncated)
 );
+
+// Drive the clk_pixel synchroniser wires from the link rather than from
+// constants: tying them low lets synthesis sweep joy_usb1_meta, and
+// console138k_merged.sdc then fails to bind its first-stage false path.
+assign joy_usb1_raw   = {link_mods[3:0], link_keys[0]};
+assign usb_type1_raw  = {link_valid, link_mods[7]};
+assign usb_error1_raw = |link_bad_checksum;
 
 usb_hid_host controller_usb2 (
     .usbclk(clk12),
@@ -475,6 +497,12 @@ debug_regs debug_registers (
     .enc_raw(enc_raw),
     .enc_button(enc_button),
     .enc_switch(enc_switch),
+    .link_frames(link_frames),
+    .link_bad_checksum(link_bad_checksum),
+    .link_truncated(link_truncated),
+    .link_mods(link_mods),
+    .link_key0(link_keys[0]),
+    .link_key1(link_keys[1]),
     .pmod0_personality(display_pmod0_personality),
     .pmod1_personality(display_pmod1_personality),
     .pmod0_flipped(display_pmod0_flipped),

@@ -62,6 +62,17 @@ module debug_regs (
     input  [3:0]  enc_raw,
     input         enc_button,
     input         enc_switch,
+
+    // TinyTang keyboard link (src/input/keylink_rx.sv).  These are here so the
+    // link can be tested without a display: the counters say whether frames
+    // are arriving intact, and the report says what the keyboard sent, both of
+    // which are readable over the transport.
+    input  [31:0] link_frames,
+    input  [31:0] link_bad_checksum,
+    input  [31:0] link_truncated,
+    input  [7:0]  link_mods,
+    input  [7:0]  link_key0,
+    input  [7:0]  link_key1,
     output reg [3:0] pmod0_personality,
     output reg [3:0] pmod1_personality,
     output reg       pmod0_flipped,
@@ -205,6 +216,13 @@ always @(posedge clk) begin
         5'd23: read_hi <= hdmi_frames;
         5'd24: read_hi <= enc_count;
         5'd25: read_hi <= {24'b0, enc_raw, 2'b0, enc_switch, enc_button};
+        // Keyboard link.  Word 26 onwards is new, so nothing already reading
+        // this map has to move.
+        5'd26: read_hi <= link_frames;
+        5'd27: read_hi <= link_bad_checksum;
+        5'd28: read_hi <= link_truncated;
+        // Last accepted report: modifiers, then the first two keycodes.
+        5'd29: read_hi <= {8'b0, link_mods, link_key0, link_key1};
         default: read_hi <= 32'hdead_beef;
     endcase
 

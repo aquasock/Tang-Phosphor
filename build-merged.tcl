@@ -35,6 +35,7 @@ add_file -type verilog "src/ui/phosphor_ui_control.sv"
 add_file -type verilog "src/ui/phosphor_album_ui.sv"
 add_file -type verilog "src/ui/phosphor_time_digits.sv"
 add_file -type verilog "src/usb_hid_host.v"
+add_file -type verilog "src/input/keylink_rx.sv"
 
 add_file -type verilog "src/hdmi/audio_clock_regeneration_packet.sv"
 add_file -type verilog "src/hdmi/audio_info_frame.sv"

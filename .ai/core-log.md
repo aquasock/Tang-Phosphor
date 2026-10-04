@@ -2376,3 +2376,34 @@ Slice B is the keyboard side: a small QMK module or patch for `keyboards/keychro
 - User Test: N/A
 
 ---
+## 68 COMMIT Unreleased 2026-10-04T10:44:22-07:00
+
+#### Coming From:
+
+Unreleased 7fab9ff
+
+#### Purpose:
+
+Put the keyboard link's receiver into the shipping core and make it readable over the transport, so a keyboard can be tested on hardware with register reads rather than with eyes.
+
+#### Outcome:
+
+`keylink_rx` is now instantiated in `src/tang_phosphor_top.sv` on `usb1_dp`, displacing port 1's `usb_hid_host` because both need that pin; port 2's low-speed host and gamepad are untouched. The receiver's counters and its last accepted report were added to the debug register map at word indices 26 to 29, which are addresses `0xe8`, `0xec`, `0xf0` and `0xf4`: frames received, bad checksums, truncated frames, and a packed last report of modifiers plus the first two keycodes. Nothing already reading that map moved, because the additions precede the `default` arm and those indices were unused. The wires feeding the clk_pixel synchroniser chain are driven from the link rather than from constants, which is deliberate: entry 66 recorded that tying `joy_usb1_raw` low lets synthesis sweep `joy_usb1_meta`, after which `console138k_merged.sdc` cannot bind its first-stage false path and the build fails. `src/input/keylink_rx.sv` was added to `build-merged.tcl`. The merged build with the receiver in it meets timing at placement 3 with `clk_pixel` reaching 80.315 MHz against its 74.250 MHz constraint, down from 82.089 MHz without the link but still well clear of it, and the cost is 37 more LUTs, 111 more registers and one BSRAM fewer, the last because the receiver displaced the low-speed host's ROM. Nothing was deployed and no hardware was tested: the keyboard's own end was flashed onto the Keychron K2 HE in the same session, but the software that consumes this receiver belongs on TinyTang, where the desktop lives, so the hardware result is recorded with that work rather than this commit. This cycle also re-scoped the effort and the reasoning belongs here: the desktop runs on the BL616 and the keyboard is wired to FPGA pins exclusive to the FPGA, so keycodes have to travel keyboard, FPGA pins, nestang core, BL616, desktop; Tang-Phosphor is not on that path, and this receiver is landed here because it is the right home for a USB host should this core ever bolt one on. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 68 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The receiver is portable RTL and the next cycle carries it to TinyTang: a fourth nestang patch that instantiates it in place of port 1's host and maps the arrow keycodes, Enter and Escape into the joypad word the core already reports to the BL616 as response `0x03` every 20 ms, which needs no firmware change and is observable as pointer movement. That is followed by a real keycode channel, a new FPGA-to-BL616 response carrying the keyboard report and firmware that injects it as console input, so the desktop and shell accept typing rather than navigation alone. Two items remain carried from earlier cycles: `build.tcl` still cannot build the committed `src/tang_phosphor_top.sv`, and `PMOD-003` still does not say which core's register map its socket control address belongs to.
+
+#### Files Modified:
+
+- build-merged.tcl
+- src/debug/debug_regs.sv
+- src/tang_phosphor_top.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---
