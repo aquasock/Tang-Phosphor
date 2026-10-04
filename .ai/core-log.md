@@ -2316,3 +2316,32 @@ Buy back `clk_pixel` margin at its source, the third-party TMDS encoder, because
 - User Test: N/A
 
 ---
+## 66 COMMIT Unreleased 2026-10-04T08:36:20-07:00
+
+#### Coming From:
+
+Unreleased 3cc32c0
+
+#### Purpose:
+
+Close `clk_pixel` at every placement seed, because the design's whole timing reserve sat on the third-party TMDS encoder's disparity path and anything later added to the merged netlist would have to compete for it.
+
+#### Outcome:
+
+`src/hdmi/tmds_channel.sv` was changed in two ways that target that path. First, `q_m` is a cumulative XOR of the video byte and the reference writes it as a serial chain, `q_m[i+1] = q_m[i] ~^ video_data[i+1]`, whose seven dependent LUT levels terminate at the disparity accumulator; it is now a Kogge-Stone prefix tree three levels deep, with the XNOR branch expressed as the XOR prefix inverted on odd bits (`pre_xor ^ 8'b1010_1010`) and `q_m[8] = ~xnor_branch`, which is the same function exactly. Second, the encoder is split into two `clk_pixel` stages, `q_m` registering alongside `mode`, `control_data` and `data_island_data` so the disparity decision and the mode select run from registered values. Because the split is uniform across all five modes the TMDS symbol stream is delayed by exactly one pixel clock, and since the stream carries its own sync the picture, the guard bands and the framing are unchanged, so no latency compensation was needed anywhere. The rewrite was proved equivalent before it was trusted: a bench in `build/tmds-check/` ran the rewritten module against the original pulled from git with random video, island, control and mode traffic and found zero mismatches over 400003 cycles, the new output equalling the reference delayed by one pixel clock, and the project suite passes unchanged including `ui_mirror` and the HDMI scan test. The placement sweep then went from one closing seed to five: before the change `clk_pixel` reached 68.971, 73.111, 72.831, 76.518 and 70.821 MHz at seeds 0 through 4 with only seed 3 meeting its 74.250 MHz constraint, and afterwards it reaches 76.314, 75.011, 78.088, 82.089 and 86.655 MHz with TNS zero everywhere and worst setup slack between +0.137 and +1.928 ns. The encoder has left the critical path entirely; the tightest remaining paths are the `tangcore_io` transport on `clk_pixel` and the AE350 register block on `bus_clk`, and the cost of the change is 44 registers and roughly fifteen fewer LUTs with BSRAM unchanged. The merged image was uploaded as `cores/console138k/phosphortang.bin` at 4971210 bytes with CRC-32 `15d7a59b` and a matching SD readback, loaded to `active_core` 80 with `peek 0` returning `0x54504830`, and `tools/ui_mirror_check.py --map merged` passed with source `0x76491800` and transmitter `0x6c435800`, the same two values entry 64 recorded before the change, so the rendered frame is provably identical rather than merely plausible; the user confirmed the HDMI picture. This cycle also closed the PMOD question that entry 64 left open, and the answer was physical rather than logical. With the merged core loaded and both sockets declared, and with the pinout report confirming all sixteen `pmod0_io` and `pmod1_io` pins placed as `io` at the documented balls, neither the OLED panel nor a PmodVGA produced anything, and the same was true on the bring-up image at `cores/console138k/pmodtang.bin`, which had previously driven the VGA; the socket enable chain was therefore audited end to end and found correct, through `EXPOSE_STATE` and the register wiring from `debug_regs` to `pmod_mirror_core`, the personalities' asserted enables (`8'hff` for VGA J1, `8'h3f` for J2, `8'hfb` for the OLED), `pmod_slot`'s gating-free permutation, `pmod_io_buf`'s tri-state, and pin constraints identical to the bring-up core's. The cause was that the module was seated inverted, which swaps pins 1-4 with 7-10 while leaving power and ground in place, so two unrelated modules looked dead together across two different bitstreams with entirely correct gateware; once seated correctly the VGA worked on the merged core and then the OLED. One reference ambiguity is recorded rather than fixed: `PMOD-003` gives the socket control register as `0x10`, which is the bring-up map's address, while the merged core's is `0xc0`, and the two cores carry different register maps generally, which the checker already encodes as its `bringup` and `merged` maps. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 66 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The margin this cycle bought was the precondition for the full-speed USB host whose feasibility entry 65 recorded, so that work can begin; if further margin is wanted first, the next target is the `tangcore_io` transport, whose +0.137 ns at seed 1 is now the tightest path in the design. Two items are carried. `build.tcl` still cannot build the committed `src/tang_phosphor_top.sv`, because it omits the UI, video, PMOD and OLED sources that top instantiates, so `scripts/build.sh` remains non-functional until that divergence is resolved or the build is retired. And `PMOD-003` should say which core's register map its socket control address belongs to, since a host that pokes `0x10` on the merged core silently writes nothing.
+
+#### Files Modified:
+
+- src/hdmi/tmds_channel.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
