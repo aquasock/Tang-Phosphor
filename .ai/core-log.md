@@ -2345,3 +2345,34 @@ The margin this cycle bought was the precondition for the full-speed USB host wh
 - User Test: PASS
 
 ---
+## 67 COMMIT Unreleased 2026-10-04T09:49:24-07:00
+
+#### Coming From:
+
+Unreleased 994ce89
+
+#### Purpose:
+
+Define TinyTang's keyboard link and prove the FPGA end of it in simulation, so the keyboard's firmware is written against a receiver that already works.
+
+#### Outcome:
+
+TinyTang's keyboard input will not use USB, and this cycle settled why that is possible and what it costs. The front USB-A port is two FPGA pins wired to the connector and nothing else, and the target keyboard is an STM32F401 whose USB data pins are not dedicated silicon: `keyboards/keychron/k2_he/board.h` in Keychron's own QMK fork configures GPIOA with `PIN_MODE_ALTERNATE(GPIOA_OTG_FS_DM)` and `PIN_MODE_ALTERNATE(GPIOA_OTG_FS_DP)`, so PA11 and PA12 are general-purpose pins whose mode the firmware chooses, and the STM32's USB pull-up is internal to the peripheral, so nothing external has to be defeated when the pins are taken back. The K2 HE is a boot-protocol HID device and is otherwise an ordinary full-speed one, which matters because the design's existing `usb_hid_host` is low-speed only (NEST-001) and the keyboard's receivers negotiate 12M, so USB would have required the full-speed SoftPHY host that entry 65 costed. The protocol chosen is a fixed-baud UART, one direction per wire, full duplex, with no addressing and no polling discipline imposed by anything but us; the baud is 750 kbaud because both ends divide it exactly, `clk_pixel` at 74.25 MHz giving 99 cycles per bit and the STM32F401's 72 MHz giving 96, which no standard baud rate does and which is only available because both ends are ours. `usb1_dp` carries the keyboard's PA12 and `usb1_dn` the Tang's output to PA11. The frame is `A5 LEN payload[LEN] SUM`, where LEN is 8 and the payload is the HID boot keyboard report the keyboard already builds internally, so the keyboard side is nearly free, and SUM is the 8-bit sum of every preceding frame byte. `src/input/keylink_rx.sv` implements the synchroniser, an 8N1 receiver, the frame parser, the checksum and resynchronisation, and holds the last accepted report with a one-cycle `o_valid` alongside the diagnostic counters the other transports carry. `tests/keylink_rx_tb.sv` drives the line as the keyboard would and checks that valid frames latch, that a bad checksum and a wrong length are refused and counted without latching, and that a frame abandoned part way is counted and the link recovers; `tests/run.sh` now builds it and the whole suite passes, twenty-two tests, with the new one reporting that frames latch, malformed frames are rejected and counted, and the link recovers. The bench earned its keep immediately by catching two real faults that would have been miserable on hardware: the receiver first sampled the start bit as data bit 0, because it waited only half a bit time after the falling edge instead of skipping the start bit, which shifted every received byte, and then reloaded its bit counter with the full bit period where the reload cycle is already one of them, making the period one clock long and drifting the sampling a clock per bit until the stop-bit check walked into the next byte and rejected every byte as a framing error. The debug output made both plain, the received bytes appearing as `aa 00 04 00` rather than `a5 08 02 00` and the bit samples then measuring 22 ns apart where 20 was intended. One finding about the existing tree is recorded rather than fixed: `src/iosys/uart_fixed.v` cannot be elaborated by Verilator at all, because it instantiates a parameter-check module with a string argument, which is why nothing in the tree uses it and why no test compiles it, so the receiver was written self-contained rather than made to depend on a file no simulator can read. Nothing was deployed and the user tested nothing, because this slice is deliberately simulation-only and the hardware result belongs with the keyboard's own firmware. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 67 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Slice B is the keyboard side: a small QMK module or patch for `keyboards/keychron/k2_he` that takes PA11 and PA12 as GPIO, holds them in their idle state, and emits the frame defined here at 750 kbaud carrying the same boot keyboard report the firmware already maintains, which the user flashes to the keyboard. Slice C then brings it up on hardware with the flashed keyboard and is the first cycle in this sequence with a user test. Two things are carried from earlier: `build.tcl` still cannot build the committed `src/tang_phosphor_top.sv`, and `PMOD-003` still does not say which core's register map its socket control address belongs to.
+
+#### Files Modified:
+
+- src/input/keylink_rx.sv
+- tests/keylink_rx_tb.sv
+- tests/run.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---

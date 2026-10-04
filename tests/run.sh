@@ -14,10 +14,12 @@ ui_album_output_dir="$output_dir/ui_album"
 ui_menu_output_dir="$output_dir/ui_menu"
 ae350_bridge_output_dir="$output_dir/ae350_bridge"
 ae350_loader_output_dir="$output_dir/ae350_loader"
+keylink_output_dir="$output_dir/keylink_rx"
 mkdir "$iosys_output_dir" "$audio_output_dir" "$audio_policy_output_dir" \
     "$hdmi_audio_output_dir" "$ui_control_output_dir" "$ui_time_output_dir" \
     "$ui_album_output_dir" "$ui_menu_output_dir" \
-    "$ae350_bridge_output_dir" "$ae350_loader_output_dir"
+    "$ae350_bridge_output_dir" "$ae350_loader_output_dir" \
+    "$keylink_output_dir"
 trap 'find "$output_dir" -depth -delete' EXIT
 
 verilator --binary --timing -Wno-fatal -DSIM \
@@ -150,3 +152,9 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/video/ui_hdmi_scan.sv" \
     "$project_dir/src/ui/ui_scanout.sv"
 "$output_dir/ui_hdmi_scan/Vui_hdmi_scan_tb"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module keylink_rx_tb --Mdir "$output_dir/keylink_rx" \
+    "$test_dir/keylink_rx_tb.sv" \
+    "$project_dir/src/input/keylink_rx.sv"
+"$output_dir/keylink_rx/Vkeylink_rx_tb"
