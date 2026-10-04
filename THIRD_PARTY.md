@@ -65,6 +65,26 @@ original copyright notices.
 `src/ae350/ae350_pll.v` is an adapted Gowin PLL wrapper used only by the
 standalone AE350 proof-of-life image and retains Gowin's copyright notice.
 
+## Sipeed TangMega-138K-example DDR3 configuration
+
+`src/ddr3/ddr3_ip.tcl` and the checked-in `src/ddr3/ddr3_memory_interface.ipc`
+reproduce the DDR3 memory-interface configuration from Sipeed's
+TangMega-138K-example design, option by option, for every setting the Gowin
+EDA 1.9.11.03 generator supports:
+
+- Project: https://github.com/sipeed/TangMega-138K-example
+- Design: `ddr_memory/`, whose `ddr3_memory_interface.ipc` these values follow
+- Reference commit: `06e7d8b118d345915ab6f257b7c22226f81575cd`
+- License: Apache-2.0
+
+## Gowin-generated DDR3 memory controller
+
+The DDR3 controller itself is not source in this tree. `scripts/gen-ddr3-ip.sh`
+runs Gowin EDA's generator over the configuration above and writes the
+generated, encrypted RTL to `build/ddr3-ip`, where it is licensed with Gowin
+EDA and is never committed - the same arrangement as the PLL wrappers above.
+`src/ddr3/` holds only this project's own configuration.
+
 ## LiteX Gowin AE350 integration
 
 The primitive wiring and integration approach in
