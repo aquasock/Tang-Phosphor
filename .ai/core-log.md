@@ -2407,3 +2407,32 @@ The receiver is portable RTL and the next cycle carries it to TinyTang: a fourth
 - User Test: N/A
 
 ---
+## 69 COMMIT Unreleased 2026-10-05T02:35:45-07:00
+
+#### Coming From:
+
+Unreleased a22ec9c
+
+#### Purpose:
+
+Stop the resident AE350 player built from this tree from hanging before its first decode, which TinyTang found while requalifying every format on the board.
+
+#### Outcome:
+
+`software/rbhost/Makefile` now reserves 16 bytes where a streamed player's input would go, restoring the layout the player was qualified with in entry 43. Entry 45 had let `bench-universal` build with no `BENCH_INPUT`, and the player that produced (863748 bytes, CRC `3d762d13`, reproducible from this tree) hangs on hardware: TinyTang streamed it and a 10 s WAV through its new `phosphor` command, and the AE350 logged `stream rx 1764044 first 52494646` and then nothing, the loader stayed in RUN, the RAM bridge counted ERROR responses with the first at address `0x00000000`, and its trace showed line fills at the top of the stack, a fill at address 0, then fetches from the program entry at `0x40000000`. With the code unchanged, players padded by 0 and 32 bytes hung on every run and players padded by 16 and 48 bytes played on every run, so the trigger is the image layout and not the empty input entry; instrumenting the player with step markers moved its code and the hang disappeared, even with the data layout matched to 32 bytes, and working runs also record ERROR responses from address 0. The cause is therefore not found and this is a workaround, recorded in the Makefile comment. The player built from the fixed Makefile (`make -C software/rbhost bench-universal BENCH_NAME=resident`, 863764 bytes, CRC `ef1502ed`) has the same data layout as the qualified 16-byte case, and on the entry 68 merged image it passed TinyTang's twelve-format sweep with every sample count equal to entry 43's -- `441000` for WAV, MP3, Vorbis, AAC, ALAC, WavPack and TTA, `444240` FLAC, `440735` MP2, `442368` AC-3 and WMA, and `479688` Opus at 48 kHz -- with zero underruns and the output rate switching both ways between 44.1 and 48 kHz. The corpus was regenerated deterministically by TinyTang's `tools/make_codec_corpus.sh` from the same 10 s 440 Hz tone, with `test.wma` and `test.opus` the surviving originals; the regenerated `test.flac` is 131601 bytes, 30 under the original only because ffmpeg's bitexact mode drops the encoder tag. Two facts about the merged image surfaced on the way and are recorded in TinyTang's reference rather than changed here: its FPGA player is the raw-PCM `pcm_sink`, which takes its rate from the AE350 and parses no WAV or FLAC, so a file streamed with `cpu_mode` 0 plays as raw bytes at the last announced rate; and a restart through `0x3f0` takes effect about a millisecond after the write, so a host must not read the loader's WAIT state immediately afterwards, which TinyTang now allows for. The entry 68 image also ran the AE350 path on hardware for the first time in this cycle.
+
+#### Next Steps:
+
+The hang's cause remains open, and its signature is now documented: the log stopping after `stream rx`, the loader still in RUN, and bridge ERROR responses from address 0. The first step towards it is a trap handler that records `mcause`, `mepc` and `mtval` in the program result words, since today a fault wedges the AE350 silently; the ERROR responses from address 0 in working runs suggest the CPU touches address 0 in every run and only some layouts turn that into a fault. The items carried from entry 68 stand.
+
+#### Files Modified:
+
+- software/rbhost/Makefile
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

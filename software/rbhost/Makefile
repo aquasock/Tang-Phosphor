@@ -202,6 +202,19 @@ BENCH_ELF  := $(BENCH_DIR)/$(BENCH_NAME).elf
 bench: $(BENCH_DIR)/$(BENCH_NAME).tpi
 
 # Universal resident player: every codec, streamed input, play output.
+#
+# A streamed player embeds no input, but it still reserves 16 bytes where the
+# input would go.  Without them the player hangs at the start of its first
+# decode on hardware: it jumps to address 0 between "stream rx" and the first
+# log line, the RAM bridge records ERROR responses from address 0, and the
+# AE350 never returns.  The hang follows the image's layout, not its code --
+# 0 and 32 bytes here hang every time, 16 and 48 bytes play every time, and
+# the code is identical -- and it was introduced when this rule stopped
+# requiring an input (entry 45), which removed the bytes the previously
+# qualified player had carried.  Its cause is not yet found: adding
+# instrumentation moves the code and hides it, and even working runs record
+# ERROR responses from address 0.  The padding restores the layout qualified
+# on hardware (TinyTang core-log entry 20); see Tang-Phosphor entry 69.
 bench-universal: BENCH_UNIVERSAL := 1
 bench-universal: BENCH_STREAM := 1
 bench-universal: BENCH_PLAY := 1
@@ -227,7 +240,7 @@ $(BENCH_DIR)/$(BENCH_NAME).S: $(CODECS) $(BENCH_INPUT) FORCE
 		if [ -n "$(BENCH_INPUT)" ]; then \
 			printf '%s\n' 'input_data: .incbin "$(abspath $(BENCH_INPUT))"' 'input_end:'; \
 		else \
-			printf '%s\n' 'input_data:' 'input_end:'; \
+			printf '%s\n' 'input_data: .space 16' 'input_end:'; \
 		fi; \
 		printf '%s\n' '	.balign 4' '	.globl bench_files' 'bench_files:'; \
 		if [ "$(BENCH_UNIVERSAL)" = "1" ]; then \
