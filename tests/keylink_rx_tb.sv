@@ -9,7 +9,7 @@
 module keylink_rx_tb;
 
     // 10 clocks per bit: the same integer relationship the real design has
-    // (99 at 74.25 MHz / 750 kbaud), just smaller.
+    // (264 at 74.25 MHz / 281250 baud), just smaller.
     localparam integer CLK_HZ = 750_000;
     localparam integer BAUD   = 75_000;
     localparam integer CLKS_PER_BIT = CLK_HZ / BAUD;

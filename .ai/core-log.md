@@ -2436,3 +2436,51 @@ The hang's cause remains open, and its signature is now documented: the log stop
 - User Test: PASS
 
 ---
+
+## 70 COMMIT Unreleased 2026-10-05T13:46:03-07:00
+
+#### Coming From:
+
+Unreleased 9e6f183
+
+#### Purpose:
+
+Give the merged core TinyTang's desktop layer, keyboard report and pointer mode so that it runs under TinyDesk with F12 switching between the player and the desktop, the way TinyTang's patched NES core does.
+
+#### Outcome:
+
+The merged top now carries the three pieces TinyTang's nestang patch series adds to the NES core. The desktop layer is `src/iosys/textdisp_wide.sv`, the 80x45 cell store with per-cell BGR5 colours, taken verbatim from TinyTang's patched nestang tree with its font `src/assets/font.vh` and attributed in `THIRD_PARTY.md`; `iosys_bl616.v` decodes commands 0x13 (cursor), 0x14 (five-byte cells, wrapping at column 80, with the cell phase reset at every frame) and 0x15 (enable), and the new `src/video/ui_desk_layer.sv` replaces the whole HDMI picture with the layer when both the layer enable and the TangCore overlay are set, threaded through `ui_hdmi_backend.sv` and `pmod_mirror_core.sv` with every other instantiation tied off. Because hdmi.sv samples the colour on the same edge as the coordinate's visibility, and `textdisp_wide` already looks four pixels ahead, the layer is selected combinationally with no added register, unlike nestang's one-pixel-late stock path. The keyboard link's receiver now runs at 281250 baud, 264 clocks per bit at 74.25 MHz, the rate TinyTang's NES core and the keyboard's 72 MHz STM32F401 (256 clocks) use, replacing 750k; iosys sends the latched boot report to the BL616 as response 0x08 (`AA 00 09 08 mods 00 k0..k5`) on change and every 100 ms, after pending replies and disk requests and before the joypad; and holding left-alt makes the arrows, Enter and Esc drive the pad bits the BL616 turns into a pointer and its left and right clicks, withholding those keys from the report. `tests/ui_desk_layer_tb.sv` checks every visible pixel of two whole frames, and of the frames around the enable changes, against a cell model with zero mismatches and fails with 287455 when the layer is delayed one pixel, `tests/iosys_debug_tb.sv` now covers the three commands, wrap, phase reset, the 0x08 frame and its ordering behind a pending reply, and `tests/run.sh` passes in full. `scripts/build-merged.sh` met timing with `clk_pixel` at 74.895 MHz against 74.25 MHz and BSRAM at 127 of 340, up from 115; the place3 image `tang_phosphor_merged.bin`, 5129930 bytes, MD5 `28536b620a1c0b324ea43c5cf08036a4`, went onto the card as `/cores/console138k/phosphortang.bin` with the previous image kept as `.bak`, alongside TinyTang firmware `aafca8e-dirty.a7d2d8d` and a `phosphor.tdsh` that leaves the desktop up. After a power cycle the user reported everything working: the track played on the core's own screen, F12 switched to TinyDesk and back both during the track and after it ended without the menu core appearing, typing reached TinyDesk, and left-alt drove the pointer. The core-syntax audit required by this entry was performed against `.ai/core-syntax.md`, which was re-read; `.ai/core.md` was not read, as TinyTang's handoff directs, and `git diff` confirms it unchanged; the complete `.ai/` diff adds only this entry, which is number 70 of 70 in the active log.
+
+#### Next Steps:
+
+The layer's path leaves `clk_pixel` under 1% of slack, so any further logic on the HDMI path should be checked against timing first. The work continues in TinyTang with a background playback task on the BL616 in place of the blocking `phosphor play` and then a Phosphor app in TinyDesk, which may want Phosphor-side registers for now-playing state. The resident player's layout hang from entry 69 remains open, and the `.bak` core on TinyTang's card can be removed once the user is satisfied.
+
+#### Files Modified:
+
+- THIRD_PARTY.md
+- build-merged.tcl
+- build-pmod.tcl
+- src/ae350/ae350_ddr3_top.sv
+- src/ae350/ae350_smoke_top.sv
+- src/assets/font.vh
+- src/input/keylink_rx.sv
+- src/iosys/iosys_bl616.v
+- src/iosys/textdisp_wide.sv
+- src/pmod_mirror_core.sv
+- src/pmod_mirror_top.sv
+- src/tang_phosphor_top.sv
+- src/video/ui_desk_layer.sv
+- src/video/ui_hdmi_backend.sv
+- tests/iosys_debug_tb.sv
+- tests/keylink_rx_tb.sv
+- tests/run.sh
+- tests/ui_desk_layer_tb.sv
+- tests/ui_mirror_tb.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

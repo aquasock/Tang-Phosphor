@@ -46,6 +46,25 @@ The following files are taken from nand2mario's NESTang repository at commit
 
 The GPL-3.0 text is provided in `LICENSE`.
 
+## TinyTang desktop text layer
+
+The following files come from nestang as modified by TinyTang's nestang patch
+series (`third_party/patches/0002-desktop-text-layer.patch` through
+`0007-wide-layer-alignment.patch`, applied to the NESTang commit above):
+
+- `src/iosys/textdisp_wide.sv`, added by the TinyTang patches
+- `src/assets/font.vh`, unmodified from NESTang commit
+  `c2450818e1f0c858e13c5dd16746ee5221a5c760`
+
+- Project: https://github.com/aquasock/TinyTang
+- Authors: the TinyTang contributors; nand2mario for `font.vh`
+- License: GNU General Public License v3.0 (the TinyTang patch files carry
+  GPL-3.0 lines because they modify nestang)
+
+The GPL-3.0 text is provided in `LICENSE`. `src/iosys/iosys_bl616.v` carries
+TinyTang's desktop-layer commands 0x13-0x15 and keyboard report response 0x08
+in the same form as the TinyTang nestang patches.
+
 ## hdl-util HDMI
 
 The files under `src/hdmi/` originated in:

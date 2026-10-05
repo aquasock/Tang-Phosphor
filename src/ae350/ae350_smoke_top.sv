@@ -122,6 +122,8 @@ iosys_bl616 #(
     .overlay_y(8'b0),
     .joy1(12'b0),
     .joy2(12'b0),
+    .link_mods(8'd0),
+    .link_keys(48'd0),
     .mgmt_readdata(16'b0),
     .fdd_request(2'b0),
     .debug_valid(debug_valid),

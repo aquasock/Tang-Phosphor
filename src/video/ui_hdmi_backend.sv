@@ -44,6 +44,17 @@ module ui_hdmi_backend (
     output logic        emitted_strobe,
     output logic        emitted_frame_end,
 
+    // TinyTang desktop layer: cell writes and enables from iosys, on
+    // clk_pixel.  Composited over the whole picture by ui_desk_layer.
+    input  logic        desk_we,
+    input  logic [6:0]  desk_x,
+    input  logic [5:0]  desk_y,
+    input  logic [6:0]  desk_ch,
+    input  logic [14:0] desk_fg,
+    input  logic [14:0] desk_bg,
+    input  logic        desk_overlay,
+    input  logic        desk_on,
+
     // One-cycle pulse at the start of each frame, for the swap controller.
     output logic        frame_tick,
 
@@ -54,6 +65,9 @@ module ui_hdmi_backend (
 );
     wire [10:0] cx;
     wire [9:0]  cy;
+    wire [10:0] frame_width;
+    wire [9:0]  frame_height;
+    wire [23:0] picture_rgb;
     wire [23:0] rgb;
 
     wire rst = ~resetn;
@@ -86,8 +100,26 @@ module ui_hdmi_backend (
         .src_px (rd_px),
         .src_x  (rd_x),
         .src_y  (rd_y),
-        .rgb    (rgb),
+        .rgb    (picture_rgb),
         .emitted_px (scan_px)
+    );
+
+    ui_desk_layer desk (
+        .clk          (clk_pixel),
+        .cx           (cx),
+        .cy           (cy),
+        .frame_width  (frame_width),
+        .frame_height (frame_height),
+        .we           (desk_we),
+        .wx           (desk_x),
+        .wy           (desk_y),
+        .wch          (desk_ch),
+        .wfg          (desk_fg),
+        .wbg          (desk_bg),
+        .overlay      (desk_overlay),
+        .layer_on     (desk_on),
+        .picture_rgb  (picture_rgb),
+        .rgb          (rgb)
     );
 
     // The visible window is 1280x720; the raster runs 1650x750 including
@@ -118,8 +150,8 @@ module ui_hdmi_backend (
         .tmds_clock         (tmds_clock),
         .cx                 (cx),
         .cy                 (cy),
-        .frame_width        (),
-        .frame_height       (),
+        .frame_width        (frame_width),
+        .frame_height       (frame_height),
         .screen_width       (),
         .screen_height      ()
     );

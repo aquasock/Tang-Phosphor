@@ -100,6 +100,14 @@ wire overlay;
 wire [7:0] overlay_x;
 wire [7:0] overlay_y;
 wire [14:0] overlay_color;
+// TinyTang desktop layer, from iosys to the HDMI compositor.
+wire        wide_we;
+wire [6:0]  wide_x;
+wire [5:0]  wide_y;
+wire [6:0]  wide_ch;
+wire [14:0] wide_fg;
+wire [14:0] wide_bg;
+wire        wide_on;
 wire [15:0] hid1;
 wire [15:0] hid2;
 wire frame_tick;
@@ -175,7 +183,7 @@ wire [31:0] link_truncated;
 
 keylink_rx #(
     .CLK_HZ (74_250_000),
-    .BAUD   (750_000)
+    .BAUD   (281_250)
 ) keyboard_link (
     .clk            (clk_pixel),
     .resetn         (resetn),
@@ -188,10 +196,55 @@ keylink_rx #(
     .o_truncated    (link_truncated)
 );
 
-// Drive the clk_pixel synchroniser wires from the link rather than from
-// constants: tying them low lets synthesis sweep joy_usb1_meta, and
-// console138k_merged.sdc then fails to bind its first-stage false path.
-assign joy_usb1_raw   = {link_mods[3:0], link_keys[0]};
+// Pointer mode, as in the NES core: while left-alt (HID modifier bit 2) is
+// held, the arrows, Enter and Esc become the desktop pointer's pad bits and
+// are withheld from the typed report; released, the keyboard only types.
+// Both halves are needed because these keycodes reach the BL616 twice, once
+// in the pad word and once in the keyboard report.
+wire link_pointer_mode = link_mods[2];
+
+function [11:0] link_key_to_pad;
+    input [7:0] k;
+    begin
+        case (k)
+            8'h52:   link_key_to_pad = 12'b0000_0001_0000;  // Up    -> bit 4
+            8'h51:   link_key_to_pad = 12'b0000_0010_0000;  // Down  -> bit 5
+            8'h50:   link_key_to_pad = 12'b0000_0100_0000;  // Left  -> bit 6
+            8'h4F:   link_key_to_pad = 12'b0000_1000_0000;  // Right -> bit 7
+            8'h28:   link_key_to_pad = 12'b0001_0000_0000;  // Enter -> A, left click
+            8'h29:   link_key_to_pad = 12'b0000_0000_0001;  // Esc   -> B, right click
+            default: link_key_to_pad = 12'b0000_0000_0000;
+        endcase
+    end
+endfunction
+
+function [7:0] link_withhold_if_pointer;
+    input [7:0] k;
+    begin
+        if (link_pointer_mode &&
+            (k == 8'h52 || k == 8'h51 || k == 8'h50 || k == 8'h4F ||
+             k == 8'h28 || k == 8'h29))
+            link_withhold_if_pointer = 8'd0;
+        else
+            link_withhold_if_pointer = k;
+    end
+endfunction
+
+// The report relayed to the BL616 as response 0x08, key 0 in the low byte.
+wire [47:0] link_report_keys = {
+    link_withhold_if_pointer(link_keys[5]), link_withhold_if_pointer(link_keys[4]),
+    link_withhold_if_pointer(link_keys[3]), link_withhold_if_pointer(link_keys[2]),
+    link_withhold_if_pointer(link_keys[1]), link_withhold_if_pointer(link_keys[0])
+};
+
+// The pad word still passes through the clk_pixel synchroniser below: leaving
+// it driven by the link keeps joy_usb1_meta from being swept, which
+// console138k_merged.sdc needs to bind its first-stage false path.
+assign joy_usb1_raw   = link_pointer_mode
+                      ? (link_key_to_pad(link_keys[0]) | link_key_to_pad(link_keys[1])
+                       | link_key_to_pad(link_keys[2]) | link_key_to_pad(link_keys[3])
+                       | link_key_to_pad(link_keys[4]) | link_key_to_pad(link_keys[5]))
+                      : 12'b0;
 assign usb_type1_raw  = {link_valid, link_mods[7]};
 assign usb_error1_raw = |link_bad_checksum;
 
@@ -346,6 +399,14 @@ pmod_mirror_core #(
     .i_pmod0_flipped    (display_pmod0_flipped),
     .i_pmod1_flipped    (display_pmod1_flipped),
     .i_render_hold      (display_hold),
+    .i_desk_we          (wide_we),
+    .i_desk_x           (wide_x),
+    .i_desk_y           (wide_y),
+    .i_desk_ch          (wide_ch),
+    .i_desk_fg          (wide_fg),
+    .i_desk_bg          (wide_bg),
+    .i_desk_overlay     (overlay),
+    .i_desk_on          (wide_on),
     .o_enc_count        (enc_count),
     .o_enc_raw          (enc_raw),
     .o_enc_button       (enc_button),
@@ -372,6 +433,15 @@ iosys_bl616 #(
     .overlay_x(overlay_x),
     .overlay_y(overlay_y),
     .overlay_color(overlay_color),
+    .wide_x(wide_x),
+    .wide_y(wide_y),
+    .wide_ch(wide_ch),
+    .wide_fg(wide_fg),
+    .wide_bg(wide_bg),
+    .wide_we(wide_we),
+    .wide_on(wide_on),
+    .link_mods(link_mods),
+    .link_keys(link_report_keys),
     .joy1(joy_usb1),
     .joy2(joy_usb2),
     .hid1(hid1),

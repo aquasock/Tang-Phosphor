@@ -347,7 +347,15 @@ module ui_mirror_tb;
         .i_pmod1_personality (4'd0),
         .i_pmod0_flipped     (1'b0),
         .i_pmod1_flipped     (1'b0),
-        .i_render_hold       (1'b0)
+        .i_render_hold       (1'b0),
+        .i_desk_we           (1'b0),
+        .i_desk_x            (7'd0),
+        .i_desk_y            (6'd0),
+        .i_desk_ch           (7'd0),
+        .i_desk_fg           (15'd0),
+        .i_desk_bg           (15'd0),
+        .i_desk_overlay      (1'b0),
+        .i_desk_on           (1'b0)
     );
 
     // Decode the SSD1331 pins out of the raw socket pins using the normal

@@ -23,6 +23,17 @@ wire [15:0] hid1;
 wire [15:0] hid2;
 reg [11:0] joy1 = 0;
 reg [11:0] joy2 = 0;
+reg [7:0] link_mods = 0;
+reg [47:0] link_keys = 0;
+wire [6:0] wide_x;
+wire [5:0] wide_y;
+wire [6:0] wide_ch;
+wire [14:0] wide_fg;
+wire [14:0] wide_bg;
+wire wide_we;
+wire wide_on;
+integer wide_writes = 0;
+reg [36:0] wide_cells [0:3599];
 reg [1:0] fdd_request = 0;
 wire [7:0] rom_loading;
 wire [7:0] rom_do;
@@ -59,7 +70,11 @@ reg [31:0] bus_data [0:127];
 iosys_bl616 #(.FREQ(CLOCK_HZ), .CORE_ID(16'h0050)) dut (
     .clk(clk), .hclk(clk), .resetn(resetn),
     .overlay(overlay), .overlay_x(8'b0), .overlay_y(8'b0),
-    .overlay_color(overlay_color), .joy1(joy1), .joy2(joy2),
+    .overlay_color(overlay_color),
+    .wide_x(wide_x), .wide_y(wide_y), .wide_ch(wide_ch),
+    .wide_fg(wide_fg), .wide_bg(wide_bg), .wide_we(wide_we), .wide_on(wide_on),
+    .link_mods(link_mods), .link_keys(link_keys),
+    .joy1(joy1), .joy2(joy2),
     .hid1(hid1), .hid2(hid2),
     .rom_loading(rom_loading), .rom_do(rom_do), .rom_do_valid(rom_do_valid),
     .mgmt_address(mgmt_address), .mgmt_read(mgmt_read), .mgmt_readdata(mgmt_readdata),
@@ -80,6 +95,13 @@ iosys_bl616 #(.FREQ(CLOCK_HZ), .CORE_ID(16'h0050)) dut (
 always @(posedge clk)
     if (debug_valid && debug_write && debug_address == 32'h20)
         scratch <= debug_wdata;
+
+// The desktop layer's write port, captured the way textdisp_wide stores it.
+always @(posedge clk)
+    if (wide_we) begin
+        wide_cells[wide_y * 80 + wide_x] <= {wide_bg, wide_fg, wide_ch};
+        wide_writes <= wide_writes + 1;
+    end
 
 // Record every register write and the cycle on which it occurred.
 always @(posedge clk) begin
@@ -396,6 +418,32 @@ task automatic check_response(
     end
 endtask
 
+task automatic send_frame(input [7:0] cmd, input integer n, input [8*16-1:0] payload);
+    integer i;
+    begin
+        repeat (4) @(posedge clk);
+        send_byte(8'haa); send_byte((n + 1) >> 8); send_byte(n + 1);
+        send_byte(cmd);
+        for (i = 0; i < n; i = i + 1)
+            send_byte(payload[8*(n-1-i) +: 8]);
+    end
+endtask
+
+task automatic check_keyboard_response(input [7:0] mods, input [47:0] keys);
+    integer i;
+    reg [7:0] bytes [0:11];
+    begin
+        for (i = 0; i < 12; i = i + 1)
+            receive_byte(bytes[i]);
+        if (bytes[0] !== 8'haa || bytes[1] !== 0 || bytes[2] !== 9 ||
+            bytes[3] !== 8'h08 || bytes[4] !== mods || bytes[5] !== 0)
+            $fatal(1, "FAIL keyboard response header");
+        for (i = 0; i < 6; i = i + 1)
+            if (bytes[6 + i] !== keys[8*i +: 8])
+                $fatal(1, "FAIL keyboard response key %0d", i);
+    end
+endtask
+
 initial begin
     #500;
     resetn = 1;
@@ -556,7 +604,68 @@ initial begin
     if (mgmt_read_count !== 512)
         $fatal(1, "FAIL FDD write consumed %0d FIFO bytes", mgmt_read_count);
 
-    $display("PASS iosys debug, block writes, controller timing, and FDD write protocol");
+    // TinyTang desktop layer: cursor, cell writes with column wrap, enable.
+    if (wide_on !== 0)
+        $fatal(1, "FAIL desk layer enabled at reset");
+    send_frame(8'h13, 2, {8'd78, 8'd3});
+    send_frame(8'h14, 15, {8'h41, 8'h7f, 8'hff, 8'h00, 8'h1f,
+                           8'h42, 8'h00, 8'h1f, 8'h7c, 8'h00,
+                           8'h43, 8'h03, 8'he0, 8'h00, 8'h00});
+    repeat (4) @(posedge clk);
+    if (wide_writes !== 3)
+        $fatal(1, "FAIL desk layer write count %0d", wide_writes);
+    if (wide_cells[3*80 + 78] !== {15'h001f, 15'h7fff, 7'h41} ||
+        wide_cells[3*80 + 79] !== {15'h7c00, 15'h001f, 7'h42} ||
+        wide_cells[4*80 + 0]  !== {15'h0000, 15'h03e0, 7'h43})
+        $fatal(1, "FAIL desk layer cell contents or wrap");
+    // A truncated frame must not misalign the next frame's cells.
+    send_frame(8'h14, 2, {8'h44, 8'h00});
+    send_frame(8'h13, 2, {8'd0, 8'd0});
+    send_frame(8'h14, 5, {8'h45, 8'h00, 8'h01, 8'h00, 8'h02});
+    repeat (4) @(posedge clk);
+    if (wide_writes !== 4 || wide_cells[0] !== {15'h0002, 15'h0001, 7'h45})
+        $fatal(1, "FAIL desk layer phase reset between frames");
+    send_frame(8'h15, 1, 8'h01);
+    repeat (4) @(posedge clk);
+    if (wide_on !== 1)
+        $fatal(1, "FAIL desk layer enable");
+    send_frame(8'h15, 1, 8'h00);
+    repeat (4) @(posedge clk);
+    if (wide_on !== 0)
+        $fatal(1, "FAIL desk layer disable");
+
+    // A keyboard report change is relayed as response 0x08.
+    fork
+        begin
+            @(negedge clk);
+            link_mods = 8'h04;
+            link_keys = 48'h0000_0000_1716_04;
+        end
+        check_keyboard_response(8'h04, 48'h0000_0000_1716_04);
+    join
+
+    // A pending command response is sent before a keyboard report.
+    // The report above reloaded kbd_timer, which holds this change back
+    // until it is released on the cycle the reply becomes pending, so both
+    // are eligible on the same arbiter cycle.
+    fork
+        send_request(8'h01, 16'h3001, 32'h20, 0, 0);
+        begin
+            @(negedge clk);
+            link_keys = 48'h0000_0000_0000_05;
+            wait (dut.response_req != dut.response_ack);
+            @(negedge clk);
+            if (dut.send_state != dut.SEND_IDLE)
+                $fatal(1, "FAIL arbiter test setup");
+            dut.kbd_timer = 0;
+        end
+        begin
+            check_response(8'h01, 0, 16'h3001, 32'h20, 32'h1234_5678);
+            check_keyboard_response(8'h04, 48'h0000_0000_0000_05);
+        end
+    join
+
+    $display("PASS iosys debug, block writes, controller timing, FDD write, desk layer, and keyboard protocol");
     $finish;
 end
 

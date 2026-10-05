@@ -15,11 +15,12 @@ ui_menu_output_dir="$output_dir/ui_menu"
 ae350_bridge_output_dir="$output_dir/ae350_bridge"
 ae350_loader_output_dir="$output_dir/ae350_loader"
 keylink_output_dir="$output_dir/keylink_rx"
+desk_layer_output_dir="$output_dir/ui_desk_layer"
 mkdir "$iosys_output_dir" "$audio_output_dir" "$audio_policy_output_dir" \
     "$hdmi_audio_output_dir" "$ui_control_output_dir" "$ui_time_output_dir" \
     "$ui_album_output_dir" "$ui_menu_output_dir" \
     "$ae350_bridge_output_dir" "$ae350_loader_output_dir" \
-    "$keylink_output_dir"
+    "$keylink_output_dir" "$desk_layer_output_dir"
 trap 'find "$output_dir" -depth -delete' EXIT
 
 verilator --binary --timing -Wno-fatal -DSIM \
@@ -27,6 +28,14 @@ verilator --binary --timing -Wno-fatal -DSIM \
     "$test_dir/iosys_debug_tb.sv" \
     "$project_dir/src/iosys/iosys_bl616.v"
 "$iosys_output_dir/Viosys_debug_tb"
+
+verilator --binary --timing -Wno-fatal \
+    -I"$project_dir/src/assets" -I"$project_dir/src/iosys" \
+    --top-module ui_desk_layer_tb --Mdir "$desk_layer_output_dir" \
+    "$test_dir/ui_desk_layer_tb.sv" \
+    "$project_dir/src/video/ui_desk_layer.sv" \
+    "$project_dir/src/iosys/textdisp_wide.sv"
+"$desk_layer_output_dir/Vui_desk_layer_tb"
 
 verilator --binary --timing -Wno-fatal \
     --top-module phosphor_ui_control_tb --Mdir "$ui_control_output_dir" \

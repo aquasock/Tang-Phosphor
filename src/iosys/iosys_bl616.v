@@ -24,6 +24,19 @@ module iosys_bl616 #(
     input [7:0] overlay_x,          // 0-255
     input [7:0] overlay_y,          // 0-223
     output [14:0] overlay_color,    // BGR5
+    // TinyTang desktop layer: the write port and enable of textdisp_wide.
+    // Additive -- a host that never sends 0x13-0x15 leaves the layer off.
+    output reg  [6:0]  wide_x,      // 0..79
+    output reg  [5:0]  wide_y,      // 0..44
+    output reg  [6:0]  wide_ch,
+    output reg  [14:0] wide_fg,     // BGR5
+    output reg  [14:0] wide_bg,     // BGR5
+    output reg         wide_we,
+    output reg         wide_on,
+    // TinyTang keyboard link report, relayed to the BL616 as response 0x08 so
+    // TinyDesk can read the keyboard while this core is loaded.
+    input  [7:0]  link_mods,        // HID modifier byte
+    input  [47:0] link_keys,        // six usage codes, key 0 in the low byte
     input [11:0] joy1,              // DS2/SNES joystick 1: (R L X A RT LT DN UP START SELECT Y B)
     input [11:0] joy2,              // DS2/SNES joystick 2
     output reg [15:0] hid1,         // USB HID joystick 1
@@ -368,6 +381,14 @@ reg we;
 reg [7:0] cursor_x;
 reg [7:0] cursor_y;
 
+// TinyTang desktop layer: its own write cursor and cell assembly, separate
+// from the legacy page's cursor so the two never interfere.
+reg [6:0] wide_cx;
+reg [5:0] wide_cy;
+reg [2:0] wide_phase;               // byte within a 5-byte cell
+reg [7:0] wide_fgh;
+reg [7:0] wide_bgh;
+
 reg [7:0] response_type;
 reg response_req;
 reg response_ack;
@@ -408,6 +429,9 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x10 <extended request>    versioned debug/control request with CRC-16
 // 0x11 <stream frame>        credit-based stream control/data with CRC-16
 // 0x12 <block write>         validated 1-64 word register write with CRC-16
+// 0x13 x[7:0] y[7:0]         TinyTang: move the desktop layer's write cursor
+// 0x14 <5 bytes per cell>    TinyTang: write desktop cells ch,fg[15:0],bg[15:0]
+// 0x15 x[7:0]                TinyTang: x[0]: desktop layer on/off
 //
 // Response payloads from FPGA to BL616:
 // 0x01 core_id[7:0]          core ID
@@ -415,6 +439,8 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x03 joy1[15:0] joy2[15:0] every 20ms, send DS2/SNES joypad state to BL616
 // 0x04 lba[15:0] <data_512>  write a sector to disk
 // 0x05 lba[15:0]             read a sector from disk (followed by command 0x0a)
+// 0x08 mods 00 key[6]        TinyTang: keyboard link report, on change (at most
+//                            every 20ms) and every 100ms as a heartbeat
 // 0x10 <extended response>   versioned debug/control response with CRC-16
 // 0x11 <stream ack>          stream status, next offset, and receive credit
 
@@ -455,6 +481,11 @@ always @(posedge clk) begin
         we <= 0;
         cursor_x <= 0;
         cursor_y <= 0;
+        wide_cx <= 0;
+        wide_cy <= 0;
+        wide_phase <= 0;
+        wide_we <= 0;
+        wide_on <= 0;
         response_req <= 0;
         debug_valid <= 0;
         debug_write <= 0;
@@ -492,6 +523,9 @@ always @(posedge clk) begin
     end else begin
         rom_do_valid <= 0;
         we <= 0;
+        wide_we <= 0;
+        wide_x <= wide_cx;
+        wide_y <= wide_cy;
         mgmt_write <= 0;
         fdd_read_finish <= 0;
         mgmt_rx <= 0;
@@ -569,6 +603,10 @@ always @(posedge clk) begin
                 else
                     recv_state <= RECV_IDLE;
                 data_cnt <= 0;
+                // A frame's first payload byte is always the first byte of a
+                // cell; carrying the phase over would let one short frame
+                // misalign every cell after it.
+                wide_phase <= 3'd0;
             end
             
             RECV_PARAM: if (rx_valid) begin
@@ -644,6 +682,42 @@ always @(posedge clk) begin
                         kbd_data <= rx_data;
                         kbd_data_valid <= 1;
                     end
+                    // TinyTang desktop layer, the same three commands the NES
+                    // core carries:
+                    //   0x13 x[7:0] y[7:0]       move the layer's write cursor
+                    //   0x14 <5 bytes per cell>  write cells from the cursor,
+                    //                            wrapping at column 80
+                    //   0x15 x[7:0]              x[0]: enable the layer
+                    // A cell is ch, fg_hi, fg_lo, bg_hi, bg_lo; colours are
+                    // BGR5 in the low 15 bits of each pair.
+                    'h13: case (data_cnt)
+                        0: wide_cx <= rx_data[6:0];
+                        1: wide_cy <= rx_data[5:0];
+                        default: ;
+                    endcase
+                    'h14: begin
+                        case (wide_phase)
+                            0: wide_ch  <= rx_data[6:0];
+                            1: wide_fgh <= rx_data;
+                            2: wide_fg  <= {wide_fgh[6:0], rx_data};
+                            3: wide_bgh <= rx_data;
+                            4: begin
+                                wide_bg <= {wide_bgh[6:0], rx_data};
+                                wide_we <= 1;
+                                // wide_x/wide_y are registered from the
+                                // cursor every cycle, so the write lands on
+                                // the cell before this advance.
+                                if (wide_cx >= 7'd79) begin
+                                    wide_cx <= 0;
+                                    if (wide_cy < 6'd44) wide_cy <= wide_cy + 6'd1;
+                                end else
+                                    wide_cx <= wide_cx + 7'd1;
+                            end
+                            default: ;
+                        endcase
+                        wide_phase <= (wide_phase == 3'd4) ? 3'd0 : wide_phase + 3'd1;
+                    end
+                    'h15: wide_on <= rx_data[0];
                     EXT_COMMAND: begin
                         if (data_cnt < 12)
                             ext_crc <= crc16_byte(ext_crc, rx_data);
@@ -940,6 +1014,7 @@ localparam SEND_DONE = 7;
 localparam SEND_DEBUG = 8;
 localparam SEND_BAUD_WAIT = 9;
 localparam SEND_STREAM_ACK = 10;
+localparam SEND_KEYBOARD = 11;
 
 reg [3:0] send_state, send_state_next;
 reg [7:0] resp_type;
@@ -957,6 +1032,19 @@ localparam [JOY_TIMER_WIDTH-1:0] JOY_UPDATE_RELOAD =
 reg [JOY_TIMER_WIDTH-1:0] joy_timer;
 reg [15:0] joy1_reg;
 reg [15:0] joy2_reg;
+// The keyboard report has its own pacing counter, so the pad and the keyboard
+// cannot reset each other's rate cap.
+reg [JOY_TIMER_WIDTH-1:0] kbd_timer;
+// The report is state and the keyboard only sends on change, so a held key
+// produces no new frames.  Resending the unchanged report every 100 ms lets
+// the reader tell a held key from a dead link.
+localparam integer KBD_HEARTBEAT_INTERVAL = FREQ / 10;
+localparam integer KBD_HEARTBEAT_WIDTH = $clog2(KBD_HEARTBEAT_INTERVAL + 1);
+localparam [KBD_HEARTBEAT_WIDTH-1:0] KBD_HEARTBEAT_RELOAD =
+    KBD_HEARTBEAT_WIDTH'(KBD_HEARTBEAT_INTERVAL);
+reg [KBD_HEARTBEAT_WIDTH-1:0] kbd_heartbeat;
+reg [7:0]  link_mods_reg;
+reg [47:0] link_keys_reg;
 reg [15:0] resp_frame_len;
 reg baud_wait_seen_busy;
 
@@ -964,6 +1052,12 @@ reg baud_wait_seen_busy;
 always @(posedge clk) begin
     if (!resetn) begin
         joy_timer <= 0;
+        kbd_timer <= 0;
+        // The first heartbeat is due one interval after reset, not at it: an
+        // all-zero report then has nothing to say.
+        kbd_heartbeat <= KBD_HEARTBEAT_RELOAD;
+        link_mods_reg <= 0;
+        link_keys_reg <= 0;
         send_state <= 0;
         tx_valid <= 0;
         response_ack <= 0;
@@ -977,32 +1071,17 @@ always @(posedge clk) begin
         
         // Joypad state transmission logic
         joy_timer <= joy_timer == 0 ? 0 : joy_timer - 1;
+        kbd_timer <= kbd_timer == 0 ? 0 : kbd_timer - 1;
+        kbd_heartbeat <= kbd_heartbeat == 0 ? 0 : kbd_heartbeat - 1;
 
         // UART transmission state machine
         case (send_state)
             SEND_IDLE: begin
                 send_idx <= 0;
-                if (joy_timer == 0 && (joy1 != joy1_reg || joy2 != joy2_reg)) begin
-                    joy_timer <= JOY_UPDATE_RELOAD;
-                    joy1_reg <= joy1;
-                    joy2_reg <= joy2;
-                    send_state_next <= SEND_JOYPAD;
-                    resp_type <= SEND_JOYPAD;
-                    send_state <= SEND_HEADER;
-                    resp_frame_len <= 5;
-                end else if (fdd_request[1] && fdd_state == FDD_READY) begin
-                    send_state_next <= SEND_FDD_WRITE;
-                    resp_type <= SEND_FDD_WRITE;
-                    send_state <= SEND_HEADER;
-                    mgmt_address_tx <= 16'hf200;    // read {drive, sector}
-                    resp_frame_len <= 515;
-                end else if (fdd_request[0] && fdd_state == FDD_READY) begin
-                    send_state_next <= SEND_FDD_READ;
-                    resp_type <= SEND_FDD_READ;
-                    send_state <= SEND_HEADER;
-                    mgmt_address_tx <= 16'hf200;    // read {drive, sector}
-                    resp_frame_len <= 3;
-                end else if (response_req != response_ack) begin
+                // Replies somebody is waiting for go first, then disk
+                // requests, and only then unprompted pad and keyboard traffic.
+                // A burst of input must not starve a reply the BL616 blocks on.
+                if (response_req != response_ack) begin
                     if (response_type == EXT_COMMAND) begin
                         send_state_next <= SEND_DEBUG;
                         resp_type <= EXT_COMMAND;
@@ -1024,6 +1103,37 @@ always @(posedge clk) begin
                         send_state <= SEND_HEADER;
                         resp_frame_len <= 2;
                     end
+                end else if (fdd_request[1] && fdd_state == FDD_READY) begin
+                    send_state_next <= SEND_FDD_WRITE;
+                    resp_type <= SEND_FDD_WRITE;
+                    send_state <= SEND_HEADER;
+                    mgmt_address_tx <= 16'hf200;    // read {drive, sector}
+                    resp_frame_len <= 515;
+                end else if (fdd_request[0] && fdd_state == FDD_READY) begin
+                    send_state_next <= SEND_FDD_READ;
+                    resp_type <= SEND_FDD_READ;
+                    send_state <= SEND_HEADER;
+                    mgmt_address_tx <= 16'hf200;    // read {drive, sector}
+                    resp_frame_len <= 3;
+                end else if (kbd_timer == 0 &&
+                             (link_mods != link_mods_reg || link_keys != link_keys_reg ||
+                              kbd_heartbeat == 0)) begin
+                    kbd_timer <= JOY_UPDATE_RELOAD;
+                    kbd_heartbeat <= KBD_HEARTBEAT_RELOAD;
+                    link_mods_reg <= link_mods;
+                    link_keys_reg <= link_keys;
+                    send_state_next <= SEND_KEYBOARD;
+                    resp_type <= 8'h08;
+                    send_state <= SEND_HEADER;
+                    resp_frame_len <= 9;            // type byte + 8 report bytes
+                end else if (joy_timer == 0 && (joy1 != joy1_reg || joy2 != joy2_reg)) begin
+                    joy_timer <= JOY_UPDATE_RELOAD;
+                    joy1_reg <= joy1;
+                    joy2_reg <= joy2;
+                    send_state_next <= SEND_JOYPAD;
+                    resp_type <= SEND_JOYPAD;
+                    send_state <= SEND_HEADER;
+                    resp_frame_len <= 5;
                 end
             end
 
@@ -1080,6 +1190,30 @@ always @(posedge clk) begin
                     if (send_idx == 3) begin
                         send_state <= SEND_IDLE;
                     end
+                end
+            end
+
+            // The keyboard link report in HID boot-report layout: modifiers,
+            // the reserved byte, then the six usage codes in the order the
+            // keyboard sent them.  Unprompted, so it never sets response_ack:
+            // acking here would retire a request that is still waiting.
+            SEND_KEYBOARD: begin
+                if (tx_ready && ~tx_valid) begin
+                    case (send_idx)
+                        0: tx_data <= link_mods_reg;
+                        1: tx_data <= 8'h00;
+                        2: tx_data <= link_keys_reg[7:0];
+                        3: tx_data <= link_keys_reg[15:8];
+                        4: tx_data <= link_keys_reg[23:16];
+                        5: tx_data <= link_keys_reg[31:24];
+                        6: tx_data <= link_keys_reg[39:32];
+                        7: tx_data <= link_keys_reg[47:40];
+                        default: ;
+                    endcase
+                    tx_valid <= 1;
+                    send_idx <= send_idx + 1;
+                    if (send_idx == 7)
+                        send_state <= SEND_IDLE;
                 end
             end
 

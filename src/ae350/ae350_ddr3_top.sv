@@ -98,6 +98,8 @@ module ae350_ddr3_top (
         .overlay_y     (8'd0),
         .joy1          (12'd0),
         .joy2          (12'd0),
+        .link_mods(8'd0),
+        .link_keys(48'd0),
         .mgmt_readdata (16'd0),
         .fdd_request   (2'd0),
         .debug_valid   (debug_valid),

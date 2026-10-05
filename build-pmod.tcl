@@ -23,6 +23,8 @@ add_file -type verilog "src/ui/ui_swap.sv"
 add_file -type verilog "src/ui/ui_checksum.sv"
 add_file -type verilog "src/video/ui_hdmi_scan.sv"
 add_file -type verilog "src/video/ui_hdmi_backend.sv"
+add_file -type verilog "src/video/ui_desk_layer.sv"
+add_file -type verilog "src/iosys/textdisp_wide.sv"
 add_file -type verilog "src/video/ui_vga_backend.sv"
 
 # HDMI transmitter and its packet machinery.

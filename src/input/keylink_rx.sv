@@ -11,10 +11,13 @@
 // the FPGA end of it.
 //
 // It is a fixed-baud UART, one direction per wire, with no addressing and no
-// polling discipline imposed by anything but us.  The baud is 750 kbaud
-// because both ends divide it exactly: clk_pixel is 74.25 MHz, so 99 cycles
-// per bit, and the keyboard's STM32F401 runs at 72 MHz, so 96.  No standard
-// baud rate divides both, which is only possible because we own both ends.
+// polling discipline imposed by anything but us.  The baud is 281250, the
+// rate the keyboard firmware sends and the NES core's receiver uses, so one
+// keyboard serves both cores.  clk_pixel divides it exactly (74.25 MHz / 281250
+// = 264 cycles per bit), and the keyboard bit-bangs it at 256 cycles per bit,
+// where its few cycles of edge jitter are well inside the receiver's
+// tolerance.  Bandwidth is no concern: a whole frame takes under half a
+// millisecond.
 //
 // Wire assignment:
 //   usb1_dp  (D+)  keyboard PA12 -> FPGA    keyboard to Tang
@@ -49,7 +52,7 @@
 
 module keylink_rx #(
     parameter integer CLK_HZ      = 74_250_000,
-    parameter integer BAUD        = 750_000,
+    parameter integer BAUD        = 281_250,
     parameter [7:0]   START_BYTE  = 8'hA5,
     parameter integer KEYS        = 6,
     // Payload size the receiver will accept: 1 modifier + 1 reserved + KEYS.
