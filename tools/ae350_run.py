@@ -78,10 +78,10 @@ HBURST_NAMES = ["SINGLE", "INCR", "WRAP4", "INCR4", "WRAP8", "INCR8", "WRAP16", 
 
 # Merged image support: the AE350 debug view is gated into a 1 KiB window at
 # 0x4000-0x43ff, and the transport stream/debug is routed to the CPU only
-# while cpu_mode is set (player debug register 0x00c0, bit 0).  --base adds
+# while cpu_mode is set (player debug register 0x00a8, bit 0).  --base adds
 # to every AE350 register address; --cpu toggles cpu_mode around run/restart.
 BASE = 0
-CPU_MODE = 0x00c0
+CPU_MODE = 0x00a8
 DIRECT = False
 
 
@@ -267,7 +267,7 @@ def main():
     parser.add_argument("--base", type=lambda v: int(v, 0), default=0,
                         help="add to every AE350 register address (merged image: 0x4000)")
     parser.add_argument("--cpu", action="store_true",
-                        help="toggle cpu_mode (player register 0x00c0) around run/restart")
+                        help="toggle cpu_mode (player register 0x00a8) around run/restart")
     parser.add_argument("--direct", action="store_true",
                         help="talk straight to the FPGA over the FT2232 UART (single cable)")
     sub = parser.add_subparsers(dest="command", required=True)

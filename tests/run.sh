@@ -167,3 +167,9 @@ verilator --binary --timing -Wno-fatal \
     "$test_dir/keylink_rx_tb.sv" \
     "$project_dir/src/input/keylink_rx.sv"
 "$output_dir/keylink_rx/Vkeylink_rx_tb"
+
+verilator --binary --timing -Wno-fatal \
+    --top-module debug_regs_tb --Mdir "$output_dir/debug_regs" \
+    "$test_dir/debug_regs_tb.sv" \
+    "$project_dir/src/debug/debug_regs.sv"
+"$output_dir/debug_regs/Vdebug_regs_tb"

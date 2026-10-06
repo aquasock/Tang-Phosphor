@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import fpga_uart
 
-CPU_MODE = 0x00C0
+CPU_MODE = 0x00A8
 STATE = 0x4020
 RESTART = 0x43F0
 STATE_WAIT = 0x01

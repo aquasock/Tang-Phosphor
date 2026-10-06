@@ -45,7 +45,7 @@ module debug_regs (
     input  [15:0] audible_stream_id,
 
     // Mirror block, added by the socket bring-up fold.  Addresses live in the
-    // previously unused hi-bank slots from word index 40 (0xa0); nothing above
+    // previously unused hi-bank slots from word index 48 (0xc0); nothing above
     // moves, because Tang-Control and the firmware already depend on the rest.
     // Values are raw on purpose: meanings live with the consumer, and a
     // register derived for a consumer's convenience was rejected once already
@@ -78,6 +78,11 @@ module debug_regs (
     output reg       pmod0_flipped,
     output reg       pmod1_flipped,
     output reg       render_hold,
+    // Stream routing: 0 feeds the BL616 stream to the FPGA player, 1 to the
+    // AE350 program loader.  Its own word at 0xa8, because sharing bit 0 of
+    // the socket control word at 0xc0 meant selecting the CPU released both
+    // sockets and declaring a socket deselected the CPU.
+    output reg       cpu_mode,
     output reg [31:0] request_rdata
 );
 
@@ -109,6 +114,7 @@ always @(posedge clk) begin
         pmod0_flipped     <= 1'b0;
         pmod1_flipped     <= 1'b0;
         render_hold       <= 1'b0;
+        cpu_mode          <= 1'b0;
     end else begin
         uptime_cycles <= uptime_cycles + 1'b1;
         if (frame_tick)
@@ -126,6 +132,8 @@ always @(posedge clk) begin
                     pmod0_flipped     <= request_wdata[12];
                     pmod1_flipped     <= request_wdata[13];
                 end
+                else if (request_address == 32'h0000_00a8)
+                    cpu_mode <= request_wdata[0];
             end
         end
     end
@@ -160,7 +168,7 @@ always @(posedge clk) begin
     read_known_q <= read_known;
     case (read_index[4:0])
         5'd0: read_lo <= MAGIC;
-        5'd1: read_lo <= 32'h0001_0007; // register ABI 1.7
+        5'd1: read_lo <= 32'h0001_0008; // register ABI 1.8
         5'd2: read_lo <= BUILD_DATE;
         5'd3: read_lo <= 32'h0000_00ff;
         5'd4: read_lo <= uptime_cycles;
@@ -199,6 +207,7 @@ always @(posedge clk) begin
         5'd7: read_hi <= boundary_count;
         5'd8: read_hi <= boundary_gap_samples;
         5'd9: read_hi <= {16'b0, audible_stream_id};
+        5'd10: read_hi <= {31'b0, cpu_mode};
         // Mirror block, word indices 48-57 (0xc0-0xe4).  Layouts match the
         // socket bring-up core bit for bit, so the checker's decoding carries
         // over: control packs the renderer's frame selector above the declaration, and the

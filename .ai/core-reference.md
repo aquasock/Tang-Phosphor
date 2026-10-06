@@ -223,6 +223,13 @@ supported profile. Project-specific limits remain implementation limits.
 - Relevant rule: Register `0x10` is the socket control register. Bit 0 holds the renderer, bits 4-7 are the PMOD0 personality, bits 8-11 the PMOD1 personality, bit 12 is PMOD0 seated upside down and bit 13 is PMOD1. Personality numbering is 0 none, 1 oledrgb, 2 vga J1 and 3 vga J2. Register `0x14` is scratch. Reads: `0x00` magic `0x54504830`, `0x04` build date, `0x08` uptime, `0x0c` render frames, `0x18` source bank, `0x20`/`0x24` panel frames and checksum, `0x28`/`0x2c` HDMI, `0x30`/`0x34` VGA. The control read's bits 18:16 carry the renderer's frame selector: the demo reported which of eight test patterns it was drawing, and a menu frame writer reports which published frame it is on, which slice 1 fixes at zero because it draws exactly one. The field keeps its position and width in both the bring-up and the player maps so the host decoding does not move.
 - Tang-Phosphor use: This is the seam `/tang.ini` writes through. Power-on defaults select the panel on PMOD0 and nothing on PMOD1, which is the safe state, and the host is the only party that validates a declaration because it is the only party that knows what the user wrote.
 
+### Socket control and stream routing in the merged player map
+
+- Sources: `src/debug/debug_regs.sv`, `src/tang_phosphor_top.sv` and `tests/debug_regs_tb.sv` at register ABI 1.8; hardware test recorded in core-log entry 71.
+- Authority: Project interface definition.
+- Relevant rule: The previous record's `0x10` is the bring-up core's map only. In the merged player map the socket control word is `0x00c0`, with the same bit layout (hold `[0]`, PMOD0 personality `[7:4]`, PMOD1 `[11:8]`, flips `[12]` and `[13]`, frame selector read at `[18:16]`) plus personality `4` for the rotary encoder, and it powers up with both sockets released. Stream routing (`cpu_mode`, bit 0: clear feeds the BL616 stream to the FPGA player, set feeds the AE350 loader) is its own word at `0x00a8`, readable, and register ABI `0x04` reads `0x00010008` from that change on. Before ABI 1.8 `cpu_mode` was also bit 0 of `0x00c0`, so a host selecting the CPU for a track released both sockets and held the renderer, and a socket declaration with bit 0 clear deselected the CPU.
+- Tang-Phosphor use: A host must select the CPU at `0x00a8` and declare sockets at `0x00c0`, and should refuse a core whose ABI is older than 1.8, since that core ignores `0x00a8` and plays the file's bytes raw. The standard OLEDrgb-plus-encoder declaration is `0x2410`.
+
 ### Mirror check verdicts
 
 - Sources: `tools/ui_mirror_check.py`, `src/ui/ui_checksum.sv`; core-log entries 50 and 51.

@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import fpga_uart
 
-CPU_MODE = 0x00C0          # player debug register, bit 0 routes stream/debug to CPU
+CPU_MODE = 0x00A8          # player debug register, bit 0 routes stream/debug to CPU
 STATE = 0x4020             # AE350 loader state (BASE 0x4000 + 0x20)
 RESTART = 0x43F0           # AE350 loader restart (BASE 0x4000 + 0x3f0)
 STATE_WAIT = 0x01

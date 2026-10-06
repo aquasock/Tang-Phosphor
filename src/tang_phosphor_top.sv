@@ -513,6 +513,10 @@ stream_debug_sink stream_monitor (
     .last_offset(stream_last_offset), .stream_crc32(stream_crc32)
 );
 
+// Stream routing, owned by debug_regs at 0xa8 and declared before use: an
+// implicit net here would be one bit wide by accident rather than by design.
+wire cpu_mode;
+
 debug_regs debug_registers (
     .clk(clk_pixel),
     .resetn(resetn),
@@ -578,6 +582,7 @@ debug_regs debug_registers (
     .pmod0_flipped(display_pmod0_flipped),
     .pmod1_flipped(display_pmod1_flipped),
     .render_hold(display_hold),
+    .cpu_mode(cpu_mode),
     .request_rdata(player_debug_rdata)
 );
 
@@ -585,23 +590,14 @@ debug_regs debug_registers (
 // AE350 + DDR3 subsystem and single-transport sharing.
 //
 // The BL616 transport feeds the FPGA player by default (cpu_mode = 0).
-// Writing bit 0 of debug register 0x00c0 selects the CPU: the stream then
+// Writing bit 0 of debug register 0x00a8 selects the CPU: the stream then
 // goes to the AE350 program loader, the player takes the AE350's play
 // stream instead, and the AE350 debug view appears at 0x4000-0x43ff (the
 // subsystem's 1 KiB view aliases every 1 KiB; this window gates it away from
 // the player's 0x0000-0x3fff registers).
 // ---------------------------------------------------------------------------
-reg cpu_mode = 1'b0;
-
 wire in_ae350_window = debug_address[15:10] == 6'b01_0000;
 wire cpu_debug_valid = debug_valid && in_ae350_window;
-
-always @(posedge clk_pixel) begin
-    if (!resetn)
-        cpu_mode <= 1'b0;
-    else if (debug_valid && debug_write && debug_address == 32'h0000_00c0)
-        cpu_mode <= debug_wdata[0];
-end
 
 assign player_stream_start  = cpu_mode ? cpu_play_start  : stream_start;
 assign player_stream_end    = cpu_mode ? cpu_play_end    : stream_end;

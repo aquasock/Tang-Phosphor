@@ -2484,3 +2484,40 @@ The layer's path leaves `clk_pixel` under 1% of slack, so any further logic on t
 - User Test: PASS
 
 ---
+
+## 71 COMMIT Unreleased 2026-10-06T12:41:41-07:00
+
+#### Coming From:
+
+Unreleased 4936ed1
+
+#### Purpose:
+
+Make the PMOD OLED work under TinyTang by separating the merged core's stream-routing bit from the socket control word it shared, and by having TinyTang declare the sockets when it loads the core.
+
+#### Outcome:
+
+The OLED was dark under TinyTang for two reasons. Nothing declared the sockets, because the merged core powers up with both released (entry 55) and TinyTang has no `/tang.ini` parser, and even a hand declaration did not survive a track, because `cpu_mode` was bit 0 of the socket control word at `0xc0`: entry 55 placed the mirror block at `0xc0` on top of the `cpu_mode` register that already lived there, so `debug_regs` and `tang_phosphor_top` both decoded that write, and TinyTang's `ae350_play.cpp` writing `0xc0 = 1` for every track set hold and released both sockets, while a declaration such as `0x2410` cleared `cpu_mode` and would have sent a stream raw into `pcm_sink`. `cpu_mode` now lives in `src/debug/debug_regs.sv` at `0xa8`, the first of the unused words `0xa8`-`0xbc`, readable there, with the top taking it from an explicitly declared wire, and the register ABI at `0x04` reads 1.8; `scripts/play_stream.py`, `scripts/mp3_single_cable.py` and `tools/ae350_run.py` write `0xa8`, and `docs/debug-registers.md` now documents `0xa8`, the mirror and keyboard-link words `0xc0`-`0xf4`, the AE350 window at `0x4000`, and how the merged core's `pcm_sink` reads differently at `0x64`, `0x6c`, `0x30`, `0x8c` and `0x90` (TinyTang's `PHOS-009`). The new `tests/debug_regs_tb.sv`, registered in `tests/run.sh`, checks that each word moves only its own fields, that both read back and that reset clears both, and it reports four failures against a copy with the old aliasing restored; the full suite passes. `scripts/build-merged.sh` met timing only at placement 3, `clk_pixel` 74.435 MHz against 74.250, while placements 0, 1 and 2 failed at 72.208, 70.601 and 73.868 MHz and placement 4 was stopped at the user's direction and is treated as failed; no failing path touches `debug_regs` or `cpu_mode`, all of them being entry 70's desk-layer read address from `hdmi_tx`'s `cx` and the keyboard link's keycodes into `tangcore_io`'s pointer decode and transmit arbiter, with one `tangcore_io` stream-offset path, and placement 3's worst setup slack is +0.034 ns on the keyboard path, so entry 70's single-seed result had hidden a design that closes at one seed of four. The placement 3 image, 5031936 bytes, MD5 `2a7591833d04640aed715ce6d7d9db7e`, CRC-32 `10340a55`, went onto TinyTang's card as `/cores/console138k/phosphortang.bin` through its guarded `tinytang_put.py`, with entry 70's image kept as `phosphortang.bin.bak`. In the same approved cycle TinyTang's `ae350_play.cpp` was changed to select the CPU at `0xa8` on every play and to refuse a core older than ABI 1.8, and its `phosphor.tdsh` now declares `0xc0 = 0x2410`, overridable with `PMOD`, as a stopgap for the parser; that firmware, `f8d6fdf-dirty.43c548f`, was flashed and confirmed by `platform` after the power cycle in which the user seated the OLEDrgb in PMOD0 and the encoder in PMOD1, and the TinyTang change is logged in its own repository. On hardware `phosphor.tdsh` loaded the core as core 80 and declared the sockets, the ABI read `0x00010008`, `0xa8` read 1 and `0xc0` read `0x2410` before, during and after two plays of `/music/test.mp3`, each completing at 441000 samples at 44.1 kHz with zero underruns, the panel frame counter at `0xd8` advanced throughout, and the source and panel signatures both read `0x76491800`, the modelled menu frame. The user confirmed the OLED lit with the cell frame and the tone heard perfectly. A record for the merged map's socket control and stream routing was added to `.ai/core-reference.md` after the bring-up map's `0x10` record, which is left as written. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 71 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Restore `clk_pixel` margin across placements before anything else is added to the merged netlist: register the keyboard link's keycode comparisons ahead of `tangcore_io`'s pointer decode and arbiter, and shorten the desk layer's read-address path from `hdmi_tx`'s `cx`, then sweep placements 0 to 4 and compare each against this cycle's figures. The `/tang.ini` parser in TinyTang should replace `phosphor.tdsh`'s fixed declaration. The resident player's layout hang from entry 69 and `build.tcl`'s divergence from the committed top remain open, and the `.bak` core on TinyTang's card can be removed once the user is satisfied.
+
+#### Files Modified:
+
+- docs/debug-registers.md
+- scripts/mp3_single_cable.py
+- scripts/play_stream.py
+- src/debug/debug_regs.sv
+- src/tang_phosphor_top.sv
+- tests/debug_regs_tb.sv
+- tests/run.sh
+- tools/ae350_run.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
