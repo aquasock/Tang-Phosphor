@@ -23,8 +23,8 @@
 // array rather than a generated IP: the array is what both simulation and
 // synthesis can see, so the design can be checked before it reaches hardware.
 //
-// Latency.  The colour path is four pixels deep, so the store is addressed
-// four pixels ahead of the raster -- (cx, cy) advanced by LAT, wrapping into
+// Latency.  The colour path is five pixels deep, so the store is addressed
+// five pixels ahead of the raster -- (cx, cy) advanced by LAT, wrapping into
 // the next line and the next frame exactly as hdmi.sv's counters do -- and
 // `color` is the pixel for the coordinate being presented now, aligned with
 // the stock one-register `rgb` path.  Addressing with the raster's own cx
@@ -35,7 +35,11 @@
 // cell's colours.  That is what hardware showed.  The address is registered
 // before the store rather than decoded combinationally into it: the look-ahead
 // adds a wrap test and a carry in front of the row multiply, and unregistered
-// that path closed at +0.6 ns of a 13.5 ns pixel clock.
+// that path closed at +0.6 ns of a 13.5 ns pixel clock.  The look-ahead
+// coordinate is registered again before the multiply: from hdmi's cx through
+// the wrap, the multiply and the add into the address register it failed
+// timing at two placements of four in the merged core (Tang-Phosphor entry
+// 71), so it is two stages and the look-ahead is five.
 //
 // Colour.  fg and bg are 15-bit BGR5, the same encoding as the existing
 // `overlay_color`, so the compositor widens them the same way.
@@ -78,7 +82,7 @@ module textdisp_wide #(
     /* The coordinate whose pixel `color` must hold LAT clocks from now:
      * the raster advanced by the pipeline's depth, carried into the next line
      * (and the next frame) the way hdmi.sv's counters carry. */
-    localparam integer LAT = 4;
+    localparam integer LAT = 5;
     wire        wrap = cx >= frame_width - 11'(LAT);
     wire [10:0] ax   = wrap ? cx + 11'(LAT) - frame_width : cx + 11'(LAT);
     wire [9:0]  ay   = !wrap                   ? cy
@@ -93,7 +97,12 @@ module textdisp_wide #(
      * ever presented during blanking, where hdmi.sv sends no video data, and
      * that holds only because of the look-ahead above. */
     wire in_screen = (ax < 11'd1280) && (ay < 10'd720);
-    wire [11:0] raddr = in_screen ? (ay[9:4] * COLS + ax[10:4]) : 12'd0;
+
+    // Stage A: the look-ahead coordinate and whether it is on screen.
+    reg [10:0] axa;
+    reg [9:0]  aya;
+    reg        in_screen_a;
+    wire [11:0] raddr = in_screen_a ? (aya[9:4] * COLS + axa[10:4]) : 12'd0;
 
     always @(posedge clk) begin
         if (write_ok) mem[waddr] <= {wbg, wfg, wch};
@@ -115,9 +124,13 @@ module textdisp_wide #(
     // Stage 3: the pixel.
 
     always @(posedge hclk) begin
+        axa         <= ax;
+        aya         <= ay;
+        in_screen_a <= in_screen;
+
         raddr_r <= raddr;
-        cx0     <= ax;
-        cy0     <= ay;
+        cx0     <= axa;
+        cy0     <= aya;
 
         cell_r <= mem[raddr_r];
         cx1    <= cx0;

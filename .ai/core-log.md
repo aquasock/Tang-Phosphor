@@ -2521,3 +2521,35 @@ Restore `clk_pixel` margin across placements before anything else is added to th
 - User Test: PASS
 
 ---
+
+## 72 COMMIT Unreleased 2026-10-06T13:00:12-07:00
+
+#### Coming From:
+
+Unreleased b7ec367
+
+#### Purpose:
+
+Restore `clk_pixel` margin in the merged core so that at least three of placements 0 to 3 meet timing, after entry 71 found the design closing at one placement of four.
+
+#### Outcome:
+
+Entry 71's sweep failed at placements 0, 1 and 2 on three path groups, all added by entry 70 or earlier and none by entry 71, and each now has one register stage. The keyboard link's keycodes went through the six-compare left-alt pointer filter in `src/tang_phosphor_top.sv` and then `iosys_bl616`'s 56-bit report-changed compare into the bottom of its transmit arbiter in one cycle; the filtered report and modifiers are now registered in the top, and `src/iosys/iosys_bl616.v` keeps the compare as a registered `kbd_changed`, one clock stale, which cannot send twice because a send reloads `kbd_timer`. `src/iosys/textdisp_wide.sv` computed the desk layer's look-ahead, its wrap test against `frame_width` and the row multiply in front of `raddr_r`; the look-ahead coordinate and its on-screen flag are now a stage of their own and `LAT` is 5, and `tests/ui_desk_layer_tb.sv` passes every visible pixel at 5 and fails at 4, so the alignment PROT-009 in TinyTang's reference warns about is held. The 32-bit `stream_offset_rx == stream_expected_offset` compare in front of the stream acceptance chain and its error counter is a registered `stream_offset_match`, safe because the offset arrives in the header and the expected offset only moves when a frame drains, which the host waits on before sending the next. The full suite passes. `MERGED_PLACE_OPTIONS="0 1 2 3" scripts/build-merged.sh` met timing at all four placements, `clk_pixel` reaching 78.431, 79.276, 82.095 and 89.052 MHz against entry 71's 72.208, 70.601, 73.868 and 74.435, with worst setup slack across every clock of +0.718, +0.854, +0.703 and +2.004 ns, none on a fixed path; placement 3's worst path is now inside the DDR3 IP, so the pinned seed stays 3 and placement 4 was not built, at the user's direction. The placement 3 image, 5034698 bytes, MD5 `81de63b48ebf610f0d4db6b6b3973b0a`, CRC-32 `78fe7d2c`, went onto TinyTang's card as `/cores/console138k/phosphortang.bin` with entry 71's image kept as `phosphortang.bin.bak`; with TinyTang firmware `f8d6fdf-dirty.43c548f` unchanged, `phosphor.tdsh` loaded it as core 80, the ABI read 1.8, `0xa8` read 1, `0xc0` held `0x2410`, `/music/test.mp3` completed at 441000 samples with zero underruns through the new offset match, and the source and panel signatures both read `0x76491800`. The user reported all tests passing, the OLED, the desk layer under F12 and the Bluetooth keyboard and mouse included; the wired keyboard link was not exercised on hardware because the user no longer uses that keyboard, so the keyboard-path change rests on `tests/iosys_debug_tb.sv`, which covers the report frame and its ordering. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 72 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The design now meets timing at every placement tried with at least +0.7 ns of setup slack, so new logic can be added to the merged core again, with each addition checked by the same four-placement sweep against this entry's figures. The `/tang.ini` parser in TinyTang, the resident player's layout hang from entry 69 and `build.tcl`'s divergence from the committed top remain open, and the `.bak` Phosphor core on TinyTang's card can be removed once the user is satisfied.
+
+#### Files Modified:
+
+- src/iosys/iosys_bl616.v
+- src/iosys/textdisp_wide.sv
+- src/tang_phosphor_top.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

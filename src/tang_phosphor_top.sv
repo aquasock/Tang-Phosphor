@@ -237,6 +237,17 @@ wire [47:0] link_report_keys = {
     link_withhold_if_pointer(link_keys[1]), link_withhold_if_pointer(link_keys[0])
 };
 
+// Registered before iosys: unregistered, the six keycode compares above fed
+// iosys's 56-bit change compare and the bottom of its transmit arbiter in one
+// clk_pixel cycle, which failed timing at three placements of four (entry 71).
+// One pixel clock is nothing to a report sent at most every 20 ms.
+reg [7:0]  link_report_mods_q = 8'd0;
+reg [47:0] link_report_keys_q = 48'd0;
+always @(posedge clk_pixel) begin
+    link_report_mods_q <= link_mods;
+    link_report_keys_q <= link_report_keys;
+end
+
 // The pad word still passes through the clk_pixel synchroniser below: leaving
 // it driven by the link keeps joy_usb1_meta from being swept, which
 // console138k_merged.sdc needs to bind its first-stage false path.
@@ -440,8 +451,8 @@ iosys_bl616 #(
     .wide_bg(wide_bg),
     .wide_we(wide_we),
     .wide_on(wide_on),
-    .link_mods(link_mods),
-    .link_keys(link_report_keys),
+    .link_mods(link_report_mods_q),
+    .link_keys(link_report_keys_q),
     .joy1(joy_usb1),
     .joy2(joy_usb2),
     .hid1(hid1),

@@ -321,6 +321,12 @@ wire [15:0] response_crc = debug_response_crc(
 reg [7:0] stream_flags_rx;
 reg [15:0] stream_id_rx;
 reg [31:0] stream_offset_rx;
+// stream_offset_rx == stream_expected_offset, registered so the 32-bit compare
+// is not in front of the frame-acceptance chain (entry 71's timing).  Both
+// sides are settled thousands of clocks before the CRC byte that consults it:
+// the offset arrives in the header, and the expected offset only moves when a
+// frame's data drains, which the host waits on before sending the next frame.
+reg        stream_offset_match;
 reg [15:0] stream_length_rx;
 reg [15:0] stream_crc_rx;
 reg [15:0] stream_crc_received;
@@ -520,7 +526,9 @@ always @(posedge clk) begin
         stream_active_id <= 0;
         stream_session_active <= 0;
         stream_ack_pending <= 0;
+        stream_offset_match <= 0;
     end else begin
+        stream_offset_match <= stream_offset_rx == stream_expected_offset;
         rom_do_valid <= 0;
         we <= 0;
         wide_we <= 0;
@@ -915,7 +923,7 @@ always @(posedge clk) begin
                                                  stream_length_rx != 0 &&
                                                  stream_session_active &&
                                                  stream_id_rx == stream_active_id &&
-                                                 stream_offset_rx == stream_expected_offset &&
+                                                 stream_offset_match &&
                                                  !stream_buffer_active) begin
                                         stream_response_status <= 0;
                                         stream_response_credit <= 0;
@@ -928,7 +936,7 @@ always @(posedge clk) begin
                                                  stream_length_rx == 0 &&
                                                  stream_session_active &&
                                                  stream_id_rx == stream_active_id &&
-                                                 stream_offset_rx == stream_expected_offset) begin
+                                                 stream_offset_match) begin
                                         stream_response_status <= 0;
                                         stream_response_next_offset <= stream_expected_offset;
                                         stream_response_credit <= 0;
@@ -1045,6 +1053,11 @@ localparam [KBD_HEARTBEAT_WIDTH-1:0] KBD_HEARTBEAT_RELOAD =
 reg [KBD_HEARTBEAT_WIDTH-1:0] kbd_heartbeat;
 reg [7:0]  link_mods_reg;
 reg [47:0] link_keys_reg;
+// The report differs from the last one sent.  Registered so the 56-bit compare
+// is not in front of the arbiter's priority chain (entry 71's timing).  It is
+// one clock stale, which cannot send twice: the send reloads kbd_timer, and
+// the flag has caught up long before the timer runs out.
+reg        kbd_changed;
 reg [15:0] resp_frame_len;
 reg baud_wait_seen_busy;
 
@@ -1058,6 +1071,7 @@ always @(posedge clk) begin
         kbd_heartbeat <= KBD_HEARTBEAT_RELOAD;
         link_mods_reg <= 0;
         link_keys_reg <= 0;
+        kbd_changed <= 0;
         send_state <= 0;
         tx_valid <= 0;
         response_ack <= 0;
@@ -1073,6 +1087,7 @@ always @(posedge clk) begin
         joy_timer <= joy_timer == 0 ? 0 : joy_timer - 1;
         kbd_timer <= kbd_timer == 0 ? 0 : kbd_timer - 1;
         kbd_heartbeat <= kbd_heartbeat == 0 ? 0 : kbd_heartbeat - 1;
+        kbd_changed <= link_mods != link_mods_reg || link_keys != link_keys_reg;
 
         // UART transmission state machine
         case (send_state)
@@ -1115,9 +1130,7 @@ always @(posedge clk) begin
                     send_state <= SEND_HEADER;
                     mgmt_address_tx <= 16'hf200;    // read {drive, sector}
                     resp_frame_len <= 3;
-                end else if (kbd_timer == 0 &&
-                             (link_mods != link_mods_reg || link_keys != link_keys_reg ||
-                              kbd_heartbeat == 0)) begin
+                end else if (kbd_timer == 0 && (kbd_changed || kbd_heartbeat == 0)) begin
                     kbd_timer <= JOY_UPDATE_RELOAD;
                     kbd_heartbeat <= KBD_HEARTBEAT_RELOAD;
                     link_mods_reg <= link_mods;
