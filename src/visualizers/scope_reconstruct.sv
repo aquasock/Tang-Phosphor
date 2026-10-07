@@ -2,6 +2,8 @@
 // 2x, 15-tap half-band reconstruction of the visual observation only.
 // Coefficients match the MiSTer behavioral reference. A captured pair and
 // seven-sample history feed a shared multiplier; audio never waits for it.
+// Each tap is three registered stages: operand select and pair sum, product,
+// then accumulate, so states 9 and 10 drain the last tap before output.
 module scope_reconstruct (
     input logic clk, reset, sample_valid,
     input logic signed [15:0] left_in, right_in,
@@ -11,10 +13,10 @@ module scope_reconstruct (
     logic signed [15:0] h_l[0:7], h_r[0:7];
     logic [3:0] state;
     logic signed [35:0] acc_l, acc_r;
-    logic signed [16:0] pair;
-    logic signed [15:0] coefficient;
-    logic signed [32:0] product;
-    assign product = pair * coefficient;
+    logic signed [16:0] pair, pair_q;
+    logic signed [15:0] coefficient, coefficient_q;
+    logic signed [32:0] product_q;
+    logic [3:0] tap_pair, tap_product;
     always_comb begin
         pair = 0; coefficient = 0;
         case (state)
@@ -41,9 +43,25 @@ module scope_reconstruct (
         end
     endfunction
     always_ff @(posedge clk) begin
+        pair_q<=pair; coefficient_q<=coefficient;
+        product_q<=pair_q*coefficient_q;
+        if (reset) begin tap_pair<=0; tap_product<=0; end
+        else begin
+            tap_pair<=state>=1 && state<=8 ? state : 4'd0;
+            tap_product<=tap_pair;
+            case (tap_product)
+                1: acc_l<=36'(product_q);
+                2,3,4: acc_l<=acc_l+36'(product_q);
+                5: acc_r<=36'(product_q);
+                6,7,8: acc_r<=acc_r+36'(product_q);
+                default: begin end
+            endcase
+        end
+    end
+    always_ff @(posedge clk) begin
         point_valid <= 0;
         if (reset) begin
-            state <= 0; acc_l <= 0; acc_r <= 0;
+            state <= 0;
             left_out <= 0; right_out <= 0;
             for (integer i=0;i<8;i++) begin h_l[i]<=0; h_r[i]<=0; end
         end else begin
@@ -52,19 +70,12 @@ module scope_reconstruct (
                     for (integer i=7;i>0;i--) begin h_l[i]<=h_l[i-1]; h_r[i]<=h_r[i-1]; end
                     h_l[0]<=left_in; h_r[0]<=right_in; state<=1;
                 end
-                1,2,3,4: begin
-                    acc_l <= state==1 ? 36'(product) : acc_l+36'(product);
-                    state<=state+1'b1;
-                end
-                5,6,7,8: begin
-                    acc_r <= state==5 ? 36'(product) : acc_r+36'(product);
-                    state<=state+1'b1;
-                end
-                9: begin
+                1,2,3,4,5,6,7,8,9,10: state<=state+1'b1;
+                11: begin
                     left_out<=rounded(acc_l); right_out<=rounded(acc_r);
-                    point_valid<=1; state<=10;
+                    point_valid<=1; state<=12;
                 end
-                10: begin
+                12: begin
                     left_out<=h_l[3]; right_out<=h_r[3];
                     point_valid<=1; state<=0;
                 end

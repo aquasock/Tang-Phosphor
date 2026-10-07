@@ -528,3 +528,38 @@ None.
 - User Test: N/A
 
 ---
+
+## 81 COMMIT Unreleased 2026-10-07T02:02:46-07:00
+
+#### Coming From:
+
+Unreleased eb243a7
+
+#### Purpose:
+
+Close the O-Scope's pixel-clock timing failure recorded in entry 79 and qualify the scope on hardware.
+
+#### Outcome:
+
+Four four-placement sweeps, each built from a clean worktree of `eb243a7` carrying only the scope changes and each fixing the path the previous one exposed, took the pixel clock from entry 79's 43.082 and 46.961 MHz to 75.126 MHz at placement 3 against 74.25 MHz. `src/visualizers/scope_xy.sv` now computes brightness in three registered stages carrying row and group tags, publishes the cache on its last write, and holds the line cache in 24 explicit 64x8 lane memories that Gowin infers as distributed RAM, removing about 12000 flip-flops; it compares each port-A writer's address with a registered prefetch address instead of the muxed port-A address, registers `flush`, the frame start and `clear_all`, and gives retirement one more wait state. `src/visualizers/scope_phosphor_ram.sv` registers both ports' address, enable and data ahead of the 128 DPX9B blocks, giving three-cycle reads, and `src/visualizers/scope_reconstruct.sv` splits each filter tap into select, multiply and accumulate stages. The full suite passed, and `tests/scope_ram_tb.sv` now rejects data visible before the third edge and uses a block-distinct pattern, because its old `addr*37` pattern gave every 2048-word block identical data and hid mapping errors; deliberately misaligned variants confirmed the benches catch a short cache pipeline, an early retirement sample, a wrong prefetch row and the old two-cycle wrapper. Sweep 4 failed only at placements 0 to 2, by 0.290 to 0.732 ns on HDMI `cx` through `read_x` into the cache lane reads, while placement 3 met setup and hold with +0.157 and +0.139 ns worst slack and every other domain passing, using 19382 logic, 15519 flip-flops, 257/340 BSRAM, 6/298 DSP, PRIMARY 8/8 and PLL 7/12. Before the corrections were complete, the user had sweep 2's timing-failing placement 3 image loaded as a diagnostic and judged it visually correct; it is not the qualified image. The qualified image, 5283212 bytes, MD5 `75cbeb027133b6e123e116798ef1b560`, SHA-256 `817b35b1992319f00604731080f9009357b12997f83249fddc184e15928aa837`, is `/cores/console138k/phosphortang-oscope.bin` with `/scripts/oscope.tdsh`, leaving the entry 78 playback image in place; the user had replaced `/music`, so the twelve-format corpus and scope fixtures were regenerated with TinyTang's `tools/make_codec_corpus.sh` and `tools/make_scope_fixtures.py`, matching the recorded corpus CRCs, and uploaded beside the user's files. On TinyTang firmware `fd2933e-dirty.d2b8b07` with the unchanged on-demand player, the ABI read 1.10, `tools/oscope_check.py` passed all seven fixtures with exact sample counts, zero underruns, zero visual drops and exact native MCLK counts, `tools/i2s2_format_sweep.py` passed all thirteen plays with entry 76's sample counts and both rate transitions, and the user accepted the display and sound. `docs/oscope-handoff.md` now records the corrections, every sweep and the qualification evidence, `docs/oscope-plan.md` points to it, and the two scope records in `.ai/core-reference.md` were corrected for the qualified design. The required core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete staged `.ai` diff, confirmed that `.ai/core.md` is unchanged and that no settled entry was rewritten, and validated this entry as number 81 with 15 entries in the active log and exactly six sections.
+
+#### Next Steps:
+
+Restore timing margin across seeds by computing the pixel request and `read_x` from `cx` one clock ahead, then sweep placements 0 to 3 for at least three passing placements and requalify that image. The user intends each further visualizer, starting with the remaining two MiSTer-Phosphor visualizers, to be its own core sharing one platform, so the next structural step is extracting the platform top and a visualizer slot interface. The resident-player, RAM bridge and JTAG experiments in the working tree remain uncommitted and unqualified.
+
+#### Files Modified:
+
+- docs/oscope-handoff.md
+- docs/oscope-plan.md
+- src/visualizers/scope_phosphor_ram.sv
+- src/visualizers/scope_reconstruct.sv
+- src/visualizers/scope_xy.sv
+- tests/scope_ram_tb.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

@@ -1,125 +1,91 @@
-# O-Scope agent handoff
+# O-Scope timing closure and qualification
 
-Terminal result, 2026-10-06: simulation passes; FPGA timing fails. The user
-stopped the cycle, requested termination of the remaining two builds, and
-authorized logging, committing and pushing this handoff. No scope image or
-launch script was deployed. The proposed timing fix has **not** been implemented.
+Result, 2026-10-07: the 512x512 stereo XY scope meets setup and hold timing at
+placement 3 and is hardware-qualified (core-log entry 81). Entry 79 recorded
+the earlier timing failure that this document originally handed off; the
+behavior described in [oscope-plan.md](oscope-plan.md) and the ABI 1.10
+registers in [debug-registers.md](debug-registers.md) are unchanged.
 
-## Implemented behavior
+## Timing corrections
 
-The approved target is a 512x512 stereo XY plane, displayed as a centered
-720x720 square in 1280x720 HDMI. The visual branch observes the emitted shared
-I2S2/HDMI PCM pair and its new presence tag, reconstructs at 2x sample rate,
-queues 256 points, draws connected lines, and derives eight-bit brightness
-from timestamp age. Overflow drops visual points and breaks line continuity;
-it cannot backpressure audio. Four persistence settings and optional narrow
-glow latch at frame boundaries. The desktop retains composition priority.
+Entry 79 failed at 43.082 and 46.961 MHz against 74.25 MHz, with the plane
+read feeding the whole brightness calculation and a dynamically indexed line
+cache that Gowin built from about 12288 flip-flops. Four sweeps followed, each
+fixing the critical path the previous one exposed:
 
-ABI 1.10 adds registers 0xac through 0xb8. The scope is disabled at reset;
-`tools/oscope.tdsh` enables medium trails and glow. See
-[oscope-plan.md](oscope-plan.md) and [debug-registers.md](debug-registers.md)
-for the complete design and control contract.
+1. Brightness is three registered stages (age, trail ramp, square and round)
+   with row/group tags and a valid strobe carried alongside, and
+   `cache_ready` is set by the last actual cache write. The cache is 24
+   explicit 64x8 memories, one per row and lane, with fixed writers and
+   asynchronous reads; Gowin infers them as distributed RAM (192 RAM16SDP4).
+2. `scope_phosphor_ram` registers both ports' address, enable and data ahead
+   of the 128 DPX9B blocks, so no BSRAM pin is driven by deep logic. Reads
+   take three cycles and writes one, equally on both ports, so collision
+   checks on the unregistered inputs remain valid. The prefetch tags and the
+   retirement state machine each gained one stage; retirement still fits its
+   16-cycle slot.
+3. Cross-port collisions compare each port-A writer's own address with the
+   prefetch address instead of the muxed `a_addr`. `flush` and the frame
+   start are registered at the scope boundary, so the settings latch at
+   `cx==1`, still in the left bar.
+4. The prefetch address is a register one step ahead of `load_index`, with
+   the neighbouring rows precomputed, `clear_all` is registered, and
+   `scope_reconstruct` splits each tap into operand select and pair sum,
+   product, and accumulate stages; a reconstructed pair now takes 13 cycles
+   of the roughly 1547 available per 48 kHz sample.
 
-## Validation and build evidence
+`tests/scope_ram_tb.sv` now checks that data is not visible before the third
+edge, and its data pattern includes the block index because `addr*37` alone
+gave every 2048-word block the same nine-bit values, which hid block-mapping
+errors. Deliberately misaligned variants confirmed the benches detect a
+one-cycle-short cache pipeline, an early retirement sample, a wrong prefetch
+row and the old two-cycle RAM wrapper.
 
-The full `tests/run.sh` suite passed against the isolated scope source.
-The scope bench compares all 921600 visible pixels against an independent
-geometry/glow model and checks native-cadence full-scale jumps, forced
-overflow and discontinuities, pause, retirement, timestamp wrap and RAM
-collision regions. Reconstruction checks rounding, saturation, stereo phase
-and reset. The shared audio bench checks presence tagging of genuine zero
-PCM and coherent I2S/HDMI delivery at both native rates. The existing playback,
-HDMI, PMOD, menu, desktop, keyboard and register regressions also pass.
-`tools/check_scope_ram.sh` passes against both the portable behavioral memory
-and the installed Gowin DPX9B primitive model, covering all 128 blocks and
-both ports' two-cycle latency.
+| Sweep | Pixel Fmax by placement 0/1/2/3 (MHz) | Pixel setup TNS 0/1/2/3 (ns) |
+|---|---|---|
+| Entry 79 | 43.082 / 46.961 / not completed | -79565.688 / -67710.695 / not completed |
+| 1 | 58.982 / 60.360 / 58.313 / 59.742 | -770.941 / -706.761 / -791.418 / -862.639 |
+| 2 | 60.497 / 62.678 / 63.618 / 64.352 | -272.203 / -139.877 / -156.646 / -587.132 |
+| 3 | 66.726 / 60.954 / 72.150 / 64.229 | -30.874 / -124.073 / -1.888 / -85.841 |
+| 4 | 70.424 / 71.093 / 72.684 / 75.126 | -4.245 / -1.789 / -0.655 / 0 |
 
-The build used committed baseline `1941765` plus only this cycle's scope
-changes, excluding the checkout's earlier player/bridge/JTAG experiments.
-Tool/device: Gowin EDA 1.9.11.03, GW5AST-LV138PG484AC1/I0, revision C.
+Sweep 4 placement 3 has zero setup and zero hold violations, worst setup slack
++0.157 ns and worst hold slack +0.139 ns, and every other clock domain meets
+its constraint. It uses 19382/138240 logic including 209 RAM16, 15519
+flip-flops, 257/340 BSRAM, 6/298 DSP, PRIMARY 8/8, PLL 7/12 and LW 5/8.
+Placements 0 to 2 fail by 0.290 to 0.732 ns on one remaining path, HDMI `cx`
+through `request_pixel` and `read_x` into the cache lane reads feeding
+`above_q`, `core_q` and `below_q`; computing those from `cx` one clock ahead
+is the margin correction still to be made. Every sweep was built from a clean
+worktree of `eb243a7` carrying only the scope changes, with Gowin EDA
+1.9.11.03 for GW5AST-LV138PG484AC1/I0 revision C.
 
-| Placement | Result | Pixel Fmax | Pixel setup TNS | Violated endpoints |
-|---|---|---:|---:|---:|
-| 0 | Measured timing failure | 43.082 MHz | -79565.688 ns | 14598 |
-| 1 | Measured timing failure | 46.961 MHz | -67710.695 ns | 14627 |
-| 2 | Terminated at user request; assumed failed for handoff | Unmeasured | Unmeasured | Unmeasured |
-| 3 | Terminated at user request; assumed failed for handoff | Unmeasured | Unmeasured | Unmeasured |
+## Hardware qualification
 
-The pixel constraint remains 74.25 MHz. Placements 0/1 had no setup/hold
-violations in the other reported clock domains. Placements 2/3 were still
-routing when terminated with SIGTERM; neither produced a final bitstream or
-timing report. Their assumed failure is not a measured timing verdict.
+The placement 3 image, 5283212 bytes, MD5 `75cbeb027133b6e123e116798ef1b560`,
+SHA-256 `817b35b1992319f00604731080f9009357b12997f83249fddc184e15928aa837`, is
+`/cores/console138k/phosphortang-oscope.bin`, loaded by `/scripts/oscope.tdsh`
+(`tools/oscope.tdsh`), which declares the I2S2 in PMOD0 and enables medium
+trails with glow. The qualified playback image
+`/cores/console138k/phosphortang-i2s2-play.bin` is unchanged.
 
-Both completed builds use 24352/138240 logic resources, 27596 flip-flops,
-257/340 BSRAM blocks (including 128 DPX9B for the plane), 6/298 DSP blocks,
-8/8 primary clock routes and 7/12 PLLs. No scope clock, PLL or DDR3 access
-was added. The small line cache became about 12288 fabric registers rather
-than distributed RAM.
+The ABI read 1.10 and the scope status showed enabled, initialized and cache
+ready. `tools/oscope_check.py` passed all seven fixtures, each with its exact
+sample count (192000 at 48 kHz, 176400 at 44.1 kHz), zero underruns, zero
+visual drops, about 1233 retirement sweeps per play and exact MCLK counts of
+1228800 and 1128960 edges per 100 ms. `tools/i2s2_format_sweep.py` passed all
+thirteen plays with zero underruns and entry 76's sample counts, switching
+rate both ways. The user accepted the display and sound, including
+oscilloscope music resampled to 48 kHz.
 
-Local evidence remains under `build/oscope-session/`: `regression-final.log`,
-`ram-check.log`, `build-hardware-ram.log`, `source-manifest.json`,
-`scope-raster.png`, and the saved termination logs. Final completed build
-reports and failed bitstreams are under
-`build/oscope-stage/build/merged/place0/` and `place1/`; do not deploy them.
-The build script's temporary directory was removed after collecting results.
-These generated artifacts are ignored by Git; this document records the
-durable findings.
+The fixtures and twelve-format corpus are regenerated by
+`tools/make_scope_fixtures.py` and TinyTang's `tools/make_codec_corpus.sh`
+(which needs the original `test.wma` and `test.opus`) and live in `/music`.
 
-## Timing failure and next implementation
+## Preserved work
 
-The critical path runs from `scope/plane/b_q` through the combinational
-`intensity()` age subtraction, trail selection, quadratic brightness and
-rounding, then into `scope/cache_cache_RAMREG_*`. Placement 0's worst path
-has 23.108 ns data delay and -9.743 ns slack; placement 1's has 21.187 ns
-data delay and -7.826 ns slack. This is a scope path, not an existing HDMI
-or DDR3 failure. Additional seeds cannot be relied upon to repair this large
-gap.
-
-The proposed next change is to pipeline age/validity capture, trail ramp,
-square, rounded brightness, and cache publication. Carry row/group tags and
-valid strobes through the same stages. Move `cache_ready` publication to the
-last actual cache write, keeping publication before x=275. Prefetch currently
-ends around x=195, leaving room for added stages without changing visible
-pixel alignment. Inspect the implementation's actual cycle timing before
-choosing the final pipeline depth.
-
-Also split each of the three cache rows into eight explicit 64x8 lane
-memories, with fixed row/lane writers and independent asynchronous reads,
-to help Gowin infer distributed RAM and reduce register/data fanout. The
-current dynamic multi-dimensional write/read expression expanded into fabric
-registers. Verify inference rather than assuming this rewrite fixes it.
-
-These changes were discussed but no source edits were made before the user
-stopped work. Resume only when asked. After the change, rerun the full-raster
-bench and relevant regression checks, then rebuild. Deploy only after all
-required setup/hold constraints pass; collect hardware and user acceptance
-before calling the scope qualified.
-
-## Hardware and preserved work
-
-The I2S2 remains in PMOD0, normal orientation, JP1 SLV. OLED and encoder are
-on hold; line input and Siglent measurements remain deferred. The qualified
-playback baseline remains `1941765`, using
-`/cores/console138k/phosphortang-i2s2-play.bin` and
-`/scripts/i2s2-play.tdsh`. TinyTang firmware remains
-`fd2933e-dirty.d2b8b07`; do not rebuild it or replace its on-demand player
-with the checkout's unqualified resident-loop experiments.
-
-Six 4-second 48 kHz fixtures and one 44.1 kHz circle were uploaded to
-`/music/scope-<shape>-<rate>.wav`; no scope playback or hardware qualification
-was run. `tools/make_scope_fixtures.py` reproduces them. Once an image passes
-timing and is loaded, `tools/oscope_check.py` checks fixture sample counts,
-visual drops, retirement progress and native MCLK, and
-`tools/i2s2_format_sweep.py` repeats the twelve-format audio corpus.
-The final console probe reached the shell, but the FPGA register probe had
-no answer; no image was loaded in response.
-
-The working tree still contains unrelated changes in `software/rbhost/`,
-`src/ae350/`, `tests/ae350_ram_bridge_tb.sv`, the Rockbox submodule, AE350
-chainload/wbrace programs and OpenOCD configuration. The top/core working
-copies also contain earlier PMOD0/JTAG additions. They were excluded from
-the tested scope source and this commit. Pre-existing trimming of
-`.ai/core-log.md` and untracked `.ai/archived_logs/` were preserved locally;
-settled committed history was retained in this commit. Use a clean checkout
-or an archive of the handoff commit when rebuilding; do not accidentally
-include those experiments from the shared working tree.
+The shared working tree still contains unrelated, unqualified changes in
+`software/rbhost/`, `src/ae350/`, `tests/ae350_ram_bridge_tb.sv`, the Rockbox
+submodule, the AE350 `chainload` and `wbrace` programs, the OpenOCD
+configuration and the PMOD0 JTAG additions in the top and core. Build from a
+clean checkout so they are not included.

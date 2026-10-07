@@ -18,12 +18,20 @@ module scope_xy #(
     output logic [31:0] dropped, status, sweeps
 );
     logic [3:0] settings;
-    wire frame_start = cx==0 && cy==0;
+    // Frame start and flush are registered at the boundary, acting one pixel
+    // clock later (cx==1, still in the left bar), so clear_all is not a long
+    // path from the HDMI counters or the audio timebase.
+    logic frame_start=0, flush_q=0;
+    always_ff @(posedge clk) begin frame_start<=cx==0 && cy==0; flush_q<=flush; end
     wire mode_change = frame_start && settings!=control;
     assign enabled = settings[0];
     logic initializing;
     logic [14:0] clear_addr;
-    wire clear_all = !resetn || !enabled || flush || mode_change;
+    // Registered clear: every request (disable, flush, mode change) arises
+    // in the left bar or from a flush, so acting one clock later is unseen.
+    logic clear_q=1;
+    always_ff @(posedge clk) clear_q<=!resetn || !enabled || flush_q || mode_change;
+    wire clear_all = !resetn || clear_q;
     wire usable = enabled && !initializing && !clear_all;
     logic was_present;
     wire break_trace = audio_tick && !audio_present && was_present;
@@ -74,23 +82,26 @@ module scope_xy #(
             tick_count<=0; age_clock<=age_clock+1'b1;
         end else tick_count<=tick_count+1'b1;
     end
-    // Linear age ramp followed by a quadratic brightness curve. Each
-    // setting remains bounded by the 128-tick retirement threshold.
-    function automatic [7:0] intensity(input logic [8:0] stamp,
-                                        input logic [7:0] now_tick,
-                                        input logic [1:0] trail);
-        logic [7:0] age, base;
+    // Linear age ramp, later squared into brightness. Each setting remains
+    // bounded by the 128-tick retirement threshold.
+    function automatic [7:0] trail_ramp(input logic live,
+                                         input logic [7:0] age,
+                                         input logic [1:0] trail);
+        begin
+            trail_ramp=0;
+            if (live) case(trail)
+                0: if(age<32) trail_ramp=255-(age<<3);
+                1: if(age<64) trail_ramp=255-(age<<2);
+                2: if(age<128) trail_ramp=255-(age<<1);
+                3: if(age<16) trail_ramp=255-(age<<4);
+            endcase
+        end
+    endfunction
+    function automatic [7:0] square_round(input logic [7:0] base);
         logic [15:0] energy;
         begin
-            age=now_tick-stamp[7:0]; base=0;
-            if (stamp[8]) case(trail)
-                0: if(age<32) base=255-(age<<3);
-                1: if(age<64) base=255-(age<<2);
-                2: if(age<128) base=255-(age<<1);
-                3: if(age<16) base=255-(age<<4);
-            endcase
             energy=16'(base)*16'(base)+16'd255;
-            intensity=energy[15:8];
+            square_round=energy[15:8];
         end
     endfunction
 
@@ -154,29 +165,41 @@ module scope_xy #(
     logic loading, cache_ready;
     logic [7:0] load_index;
     logic [14:0] b_addr;
+    logic [8:0] fetch_above, fetch_below;
     wire b_read=loading && usable;
-    logic b_read_d, b_read_dd;
-    logic [1:0] cache_row_d;
-    logic [5:0] cache_group_d;
+    logic b_read_d, b_read_dd, b_read_ddd;
+    logic [1:0] cache_row_d, cache_row_dd;
+    logic [5:0] cache_group_d, cache_group_dd;
     logic [1:0] cache_row;
     logic [5:0] cache_group;
-    logic [8:0] fetch_y;
-    always_comb begin
-        case(load_index[7:6])
-            0: fetch_y=source_y==0?9'd0:source_y-1'b1;
-            2: fetch_y=source_y==511?9'd511:source_y+1'b1;
-            default: fetch_y=source_y;
+    logic bright_valid;
+    logic [1:0] bright_row;
+    logic [5:0] bright_group;
+    // The prefetch address is a register, one step ahead of load_index, so
+    // the cross-port hazard compares two registers. The neighbouring rows
+    // settle at cx==1, before the first prefetch read at cx==2.
+    wire [7:0] next_index=load_index+1'b1;
+    logic [8:0] next_fetch_y;
+    always_comb
+        case(next_index[7:6])
+            0: next_fetch_y=fetch_above;
+            2: next_fetch_y=fetch_below;
+            default: next_fetch_y=source_y;
         endcase
-        b_addr={fetch_y,load_index[5:0]};
+    always_ff @(posedge clk) begin
+        fetch_above<=source_y==0?9'd0:source_y-1'b1;
+        fetch_below<=source_y==511?9'd511:source_y+1'b1;
     end
     always_ff @(posedge clk) begin
         if (!resetn || clear_all) begin
-            source_y<=0; phase_y<=0; loading<=0; load_index<=0;
-            b_read_d<=0; b_read_dd<=0; cache_row<=0; cache_group<=0;
-            cache_row_d<=0; cache_group_d<=0; cache_ready<=0;
+            source_y<=0; phase_y<=0; loading<=0; load_index<=0; b_addr<=0;
+            b_read_d<=0; b_read_dd<=0; b_read_ddd<=0; cache_row<=0; cache_group<=0;
+            cache_row_d<=0; cache_group_d<=0; cache_row_dd<=0; cache_group_dd<=0;
+            cache_ready<=0;
         end else begin
-            b_read_d<=b_read; b_read_dd<=b_read_d;
+            b_read_d<=b_read; b_read_dd<=b_read_d; b_read_ddd<=b_read_dd;
             if(b_read_d) begin cache_row_d<=cache_row; cache_group_d<=cache_group; end
+            if(b_read_dd) begin cache_row_dd<=cache_row_d; cache_group_dd<=cache_group_d; end
             if (cx==0) begin
                 cache_ready<=0;
                 if (cy==0) begin source_y<=0; phase_y<=0; end
@@ -185,13 +208,19 @@ module scope_xy #(
                     else phase_y<=next_phase_y[5:0];
                 end
             end
-            if (cx==1 && cy<720 && usable) begin loading<=1; load_index<=0; end
+            if (cx==1 && cy<720 && usable) begin
+                loading<=1; load_index<=0;
+                b_addr<={source_y==0?9'd0:source_y-1'b1,6'd0};
+            end
             if (b_read) begin
                 cache_row<=load_index[7:6]; cache_group<=load_index[5:0];
                 if(load_index==191) loading<=0;
-                else load_index<=load_index+1'b1;
+                else begin
+                    load_index<=next_index;
+                    b_addr<={next_fetch_y,next_index[5:0]};
+                end
             end
-            if(b_read_dd && cache_row_d==2 && cache_group_d==63) cache_ready<=1;
+            if(bright_valid && bright_row==2 && bright_group==63) cache_ready<=1;
         end
     end
 
@@ -200,8 +229,12 @@ module scope_xy #(
     logic [14:0] a_addr;
     logic a_read;
     logic [7:0] a_we;
-    wire write_hazard=b_read && a_addr[14:1]==b_addr[14:1];
-    assign draw_fire=line_slot && drawing && !write_hazard;
+    // Cross-port collisions compare each port-A writer's own address with the
+    // prefetch address, not the muxed a_addr, keeping the port-A mux off the
+    // draw and retirement paths.
+    wire draw_hazard=b_read && {draw_y,draw_x[8:4]}==b_addr[14:1];
+    wire retire_hazard=b_read && retire_addr[14:1]==b_addr[14:1];
+    assign draw_fire=line_slot && drawing && !draw_hazard;
     always_comb begin
         a_addr=retire_addr; a_read=0; a_we=0;
         for(integer g=0;g<8;g++) a_data[g]=0;
@@ -209,11 +242,11 @@ module scope_xy #(
             a_addr=clear_addr; a_we=8'hff;
         end else if(usable) begin
             if(retire_begin) a_read=1;
-            else if(retire_state==3) begin
-                if(!write_hazard) a_we=expired;
+            else if(retire_state==4) begin
+                if(!retire_hazard) a_we=expired;
             end else if(line_slot && drawing) begin
                 a_addr={draw_y,draw_x[8:3]};
-                if(!write_hazard) a_we[draw_x[2:0]]=1;
+                if(!draw_hazard) a_we[draw_x[2:0]]=1;
                 for(integer g=0;g<8;g++) a_data[g]={1'b1,age_clock};
             end
         end
@@ -235,12 +268,13 @@ module scope_xy #(
             case(retire_state)
                 0: if(retire_begin) retire_state<=1;
                 1: retire_state<=2;
-                2: begin
+                2: retire_state<=3;
+                3: begin
                     for(integer g=0;g<8;g++)
                         expired[g]<=a_q[g][8] && 8'(age_clock-a_q[g][7:0])>=128;
-                    retire_state<=3;
+                    retire_state<=4;
                 end
-                3: if(!write_hazard) begin
+                4: if(!retire_hazard) begin
                     retire_state<=0; retire_addr<=retire_addr+1'b1;
                     if(&retire_addr) sweeps<=sweeps+1'b1;
                 end
@@ -249,15 +283,31 @@ module scope_xy #(
         end
     end
 
-    // The small caches have one writer per interleaved lane. Their asynchronous
-    // lookup is followed by a register, keeping the wide phosphor RAM out of
-    // the pixel palette path. No simultaneous write/read occurs in the view:
-    // cache publication finishes during the left bar.
-    logic [7:0] cache[0:2][0:7][0:63];
+    // Brightness is three registered stages after the plane read: age, trail
+    // ramp, then square and round. Age is taken as the plane data arrives.
+    // Row/group tags travel with the data; the last write publishes the cache.
+    logic age_valid, ramp_valid;
+    logic [1:0] age_row, ramp_row;
+    logic [5:0] age_group, ramp_group;
+    logic [7:0] age_live;
+    logic [7:0] age_q[0:7], ramp_q[0:7], bright_q[0:7];
     always_ff @(posedge clk) begin
-        if(b_read_dd) for(integer g=0;g<8;g++)
-            cache[cache_row_d][g][cache_group_d]<=intensity(b_q[g],age_clock,settings[2:1]);
+        if (!resetn || clear_all) begin
+            age_valid<=0; ramp_valid<=0; bright_valid<=0;
+        end else begin
+            age_valid<=b_read_ddd; ramp_valid<=age_valid; bright_valid<=ramp_valid;
+        end
+        age_row<=cache_row_dd; age_group<=cache_group_dd;
+        ramp_row<=age_row; ramp_group<=age_group;
+        bright_row<=ramp_row; bright_group<=ramp_group;
+        for(integer g=0;g<8;g++) begin
+            age_live[g]<=b_q[g][8];
+            age_q[g]<=age_clock-b_q[g][7:0];
+            ramp_q[g]<=trail_ramp(age_live[g],age_q[g],settings[2:1]);
+            bright_q[g]<=square_round(ramp_q[g]);
+        end
     end
+
     logic [8:0] source_x;
     logic [5:0] phase_x;
     wire [6:0] next_phase_x={1'b0,phase_x}+7'd32;
@@ -268,6 +318,20 @@ module scope_xy #(
         else if(next_phase_x>=45) begin source_x<=read_x+1'b1; phase_x<=6'(next_phase_x-45); end
         else begin source_x<=read_x; phase_x<=next_phase_x[5:0]; end
     end
+
+    // One 64x8 memory per cache row and interleaved lane, each with a fixed
+    // writer and an asynchronous read followed by a register, keeping the
+    // wide phosphor RAM out of the pixel palette path. No simultaneous
+    // write/read occurs in the view: publication finishes during the left bar.
+    wire [7:0] lane_q[0:23];
+    for (genvar r=0;r<3;r++) begin : cache_row_mem
+        for (genvar g=0;g<8;g++) begin : lane
+            logic [7:0] mem[0:63];
+            always_ff @(posedge clk)
+                if(bright_valid && bright_row==2'(r)) mem[bright_group]<=bright_q[g];
+            assign lane_q[r*8+g]=mem[read_x[8:3]];
+        end
+    end
     logic [7:0] above_q, core_q, below_q;
     logic [7:0] core_delay, core_previous, core_center;
     logic [7:0] vertical_q, vertical_previous, vertical_older, halo_q;
@@ -276,9 +340,9 @@ module scope_xy #(
     always_comb green_sum={1'b0,core_center}+{1'b0,settings[3]?halo_q>>2:8'd0};
     always_ff @(posedge clk) begin
         visible_pipe<={visible_pipe[2:0],request_pixel && usable && cache_ready};
-        above_q<=cache[0][read_x[2:0]][read_x[8:3]];
-        core_q <=cache[1][read_x[2:0]][read_x[8:3]];
-        below_q<=cache[2][read_x[2:0]][read_x[8:3]];
+        above_q<=lane_q[{2'd0,read_x[2:0]}];
+        core_q <=lane_q[{2'd1,read_x[2:0]}];
+        below_q<=lane_q[{2'd2,read_x[2:0]}];
         if(!request_pixel) begin above_q<=0; core_q<=0; below_q<=0; end
         vertical_q<=8'(({2'b0,above_q}+({2'b0,core_q}<<1)+{2'b0,below_q})>>2);
         vertical_previous<=vertical_q; vertical_older<=vertical_previous;

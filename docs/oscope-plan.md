@@ -1,10 +1,10 @@
 # First visualizer: O-Scope
 
 Scope implementation and acceptance plan, 2026-10-06. This document specifies
-the first implementation. The cycle ended with passing simulations and
-failed FPGA timing; see [oscope-handoff.md](oscope-handoff.md) for the terminal
-result and next steps. Hardware is unqualified. The qualified playback
-baseline is Tang-Phosphor `1941765` (core-log entry 78). External audio input
+the first implementation. Its first build failed FPGA timing (core-log
+entry 79); the corrected scope meets timing and is hardware-qualified
+(entry 81), and [oscope-handoff.md](oscope-handoff.md) records the timing
+corrections and qualification evidence. External audio input
 and Siglent testing remain deferred. The Tang canvas is 512x512 with eight-bit
 display brightness; the 256x256 MiSTer design remains the behavioral reference.
 
@@ -162,7 +162,7 @@ primitives: GW5AST-138K does not support read-before-write mode. Hardware is
 the default source branch; portable simulation requires
 `SCOPE_RAM_BEHAVIORAL`. Gowin does not automatically define `SYNTHESIS`.
 `tools/check_scope_ram.sh` compares the portable model with Gowin's installed
-primitive model, including all 128 blocks and both ports' two-cycle latency.
+primitive model, including all 128 blocks and both ports' three-cycle latency.
 
 Scanout prefetches three source rows during the left black bar and publishes
 its cache before visible pixels. Line writes stall on a simultaneous prefetch

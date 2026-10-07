@@ -11,7 +11,9 @@ module scope_ram_tb;
     wire [8:0] aq[0:7],bq[0:7];
     scope_phosphor_ram dut(clk,aa,ba,ar,br,we,data,aq,bq);
     function automatic [8:0] value(input integer addr, lane);
-        return 9'((addr*37)^(lane*73)^9'h101);
+        // The block index term keeps blocks distinct: addr*37 alone aliases
+        // every 2048-word block to the same 9-bit pattern.
+        return 9'((addr*37)^(lane*73)^((addr>>11)*29)^9'h101);
     endfunction
     initial begin
         repeat(5) @(negedge clk);
@@ -28,12 +30,17 @@ module scope_ram_tb;
             ar=1;br=1;
             @(negedge clk);ar=0;br=0;
             @(negedge clk);
+            // Data must not be visible before the third edge.
+            for(integer lane=0;lane<8;lane++)
+                if(aq[lane]===value(integer'(aa),lane) && bq[lane]===value(integer'(ba),lane) && blockn>0)
+                    $fatal(1,"RAM latency too short block %0d lane %0d",blockn,lane);
+            @(negedge clk);
             for(integer lane=0;lane<8;lane++) begin
                 if(aq[lane]!==value(integer'(aa),lane) || bq[lane]!==value(integer'(ba),lane))
                     $fatal(1,"RAM mapping/latency mismatch block %0d lane %0d: %h %h",blockn,lane,aq[lane],bq[lane]);
             end
         end
-        $display("PASS scope RAM: all 128 blocks, 9-bit lane data, both ports and two-cycle latency");
+        $display("PASS scope RAM: all 128 blocks, 9-bit lane data, both ports and three-cycle latency");
         $finish;
     end
 endmodule
