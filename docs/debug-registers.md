@@ -71,8 +71,8 @@ a mailbox in its result words (`software/ae350/include/ae350_request.h`):
 `0x4078` holds the byte offset, `0x407c` the length, and `0x4074` a sequence
 number the program bumps after writing them. The BL616 polls `0x4074` while
 the loader state at `0x4020` is RUN and answers each new sequence with one
-stream session of that byte range. The same words hold `mcause`, `mepc` and
-`mtval` after a trap.
+stream session of that byte range, or, for a length of 0, of the file's size
+as four bytes. The same words hold `mcause`, `mepc` and `mtval` after a trap.
 
 In the merged image the FPGA player is `pcm_sink`, a raw-PCM sink fed by the
 AE350, and several player registers read differently from the table above:

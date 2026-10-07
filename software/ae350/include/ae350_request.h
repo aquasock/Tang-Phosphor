@@ -8,7 +8,9 @@
  * the file it is serving: START, DATA words (four bytes, least significant
  * first, the last one zero-padded), and END carrying the byte count, which
  * is short of the length asked for when the range runs past the end of the
- * file.  One request is outstanding at a time.
+ * file.  A request of length 0 asks for the file's size instead, answered as
+ * a four-byte session holding it, least significant byte first.  One request
+ * is outstanding at a time.
  *
  * USER(13..15) are also where the boot ROM records a trap, which is harmless:
  * the BL616 serves requests only while the loader is in RUN.  The sequence

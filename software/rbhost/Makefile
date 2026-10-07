@@ -191,7 +191,8 @@ BENCH_NAME ?= bench
 # BENCH_PLAY=1 plays the decoded WAV through the FPGA player afterwards.
 BENCH_PLAY ?= 0
 # BENCH_STREAM=1 receives the input through the stream loader instead of
-# embedding it; the codec is still embedded.
+# embedding it, and BENCH_STREAM=2 requests it on demand through the
+# file-request mailbox; the codec is still embedded.
 BENCH_STREAM ?= 0
 # BENCH_UNIVERSAL=1 embeds every codec instead of BENCH_CODEC, so one image
 # decodes any streamed input.  Implied by bench-universal.
@@ -220,8 +221,16 @@ bench-universal: BENCH_STREAM := 1
 bench-universal: BENCH_PLAY := 1
 bench-universal: $(BENCH_DIR)/$(BENCH_NAME).tpi
 
+# bench-ondemand: the universal player reading its input on demand through
+# the file-request mailbox (BENCH_STREAM=2) and playing as it decodes; see
+# host/platform_ae350.c.  TinyTang serves its requests during playback.
+bench-ondemand: BENCH_UNIVERSAL := 1
+bench-ondemand: BENCH_STREAM := 2
+bench-ondemand: BENCH_PLAY := 1
+bench-ondemand: $(BENCH_DIR)/$(BENCH_NAME).tpi
+
 $(BENCH_DIR)/$(BENCH_NAME).S: $(CODECS) $(BENCH_INPUT) FORCE
-	@if [ -z "$(BENCH_INPUT)" ] && [ "$(BENCH_STREAM)" != "1" ]; then \
+	@if [ -z "$(BENCH_INPUT)" ] && [ "$(BENCH_STREAM)" = "0" ]; then \
 		echo "set BENCH_INPUT" >&2; exit 1; \
 	fi
 	@if [ "$(BENCH_UNIVERSAL)" = "0" ]; then \
@@ -306,4 +315,4 @@ check: all
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all bench check clean FORCE
+.PHONY: all bench bench-universal bench-ondemand check clean FORCE

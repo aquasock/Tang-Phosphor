@@ -2659,3 +2659,36 @@ Step 2 changes the resident player to read its input through the mailbox with re
 - User Test: PASS
 
 ---
+
+## 76 COMMIT Unreleased 2026-10-06T18:24:39-07:00
+
+#### Coming From:
+
+Unreleased bae67ec
+
+#### Purpose:
+
+Make the resident player read its input on demand through the file-request mailbox and play as it decodes, so a track starts after its first chunks instead of after the whole file has been sent and decoded.
+
+#### Outcome:
+
+`software/rbhost/host/platform_ae350.c` gained an on-demand input mode, selected by `BENCH_STREAM=2` and built by the new `make -C software/rbhost bench-ondemand` target, while `bench-universal` keeps the whole-file mode. The player first sends a request of length 0, which TinyTang answers with the file's size as a four-byte session, a convention now documented in `software/ae350/include/ae350_request.h` and `docs/debug-registers.md`. It then fills `INPUT_BASE` in 64 KiB chunks at the file's own offsets, requesting a chunk a read is waiting for first and otherwise the next missing chunk in order, draining each answer from the stream FIFO at most 256 entries at a time and asking again after two seconds of silence. `_read` waits only for the chunks it needs, `_fstat` now reports the size, and USER(13..15) are no longer cleared at start. With `BENCH_PLAY=1` the output WAV is written into the 256 MiB output buffer as a ring and its PCM is handed to the play stream whenever the stream reports room, never waiting on it, starting half a second in or when the output closes; every `_read` wait and `_write` services both input and output, playback finishes before the output CRC is computed so the CRC cannot starve it, and the CRC reads 0 once the ring has wrapped. The on-demand player is 865816 bytes with CRC-32 `c7a89035`, and the qualified whole-file player was rebuilt from `bae67ec`'s sources byte-identical at 863764 bytes and CRC-32 `ef1502ed`. On TinyTang's card the on-demand player replaced `/ae350/resident.tpi`, the qualified one was kept as `/ae350/resident-qualified.tpi`, and TinyTang firmware `3d86aea-dirty.34645d2`, recorded in TinyTang's log, served the requests during playback. On the entry 72 core the twelve-format sweep passed all thirteen plays with zero underruns and the rate switching both ways between 44.1 and 48 kHz, every sample count equal to entry 43's except FLAC, which now presents exactly 441000 samples where entry 43 recorded an unexplained 444240; the likely but unproven cause is that the whole-file path counted the input in whole words, padding the 131601-byte file by three bytes, where the on-demand path uses the exact size. The ten-second files started 2723 ms after the play, 8 ms after the 2715 ms player send. Entry 73's 3236120-byte `Fleetwood Mac - Landslide.mp3` started 2733 ms after the play against entry 73's 31 s, and played its full 3:19, 8796143 samples, with zero underruns. The user heard the sweep and the track play correctly and accepted the result. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 76 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Step 3 keeps the player resident between tracks, removing the roughly 2.7 s player send that is now nearly all of a track's start, and plays consecutive tracks without a gap by requesting the next track's first chunks before the current one ends; a sample-rate change between tracks needs boundary handling in `pcm_sink`, whose boundary outputs are tied to 0. The `/tang.ini` parser in TinyTang follows step 3, prompted by the user's report that the OLED shows garbage after a cold power-up before any socket declaration, which is consistent with the released PMOD pins floating with no pull while the panel misses a clean reset, though that cause is not yet confirmed. The resident player start failure of entries 69, 73 and 74 has not appeared with the on-demand player.
+
+#### Files Modified:
+
+- docs/debug-registers.md
+- software/ae350/include/ae350_request.h
+- software/rbhost/Makefile
+- software/rbhost/host/platform_ae350.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
