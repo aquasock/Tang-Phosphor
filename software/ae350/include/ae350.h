@@ -69,7 +69,7 @@
 #define AE350_STATE_CRC        0x85u
 #define AE350_STATE_CANCELLED  0x86u
 #define AE350_STATE_OVERFLOW   0x87u
-#define AE350_STATE_TRAP       0x88u   /* USER(11..15) = ra, sp, mcause, mepc, mtval */
+#define AE350_STATE_TRAP       0x88u   /* USER(13..15) = mcause, mepc, mtval */
 
 /*
  * Program image: this 32-byte header, then the payload, a flat binary

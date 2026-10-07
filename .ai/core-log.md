@@ -2590,3 +2590,40 @@ The start failure is flagged and left until it shows itself more clearly, at the
 - User Test: FAIL
 
 ---
+
+## 74 COMMIT Unreleased 2026-10-06T17:32:30-07:00
+
+#### Coming From:
+
+Unreleased d500bb7
+
+#### Purpose:
+
+Try the parked play-while-decoding player once against the normal format sweep from a cold boot, and when it failed, revert entry 73 entirely and requalify the entry 72 core and the qualified player.
+
+#### Outcome:
+
+The parked `software/rbhost/parked/0001-play-while-decoding.patch` was applied to `d500bb7` and built with `make -C software/rbhost bench-universal BENCH_NAME=resident`, giving an 863924-byte player with CRC-32 `6a9b37eb`, which went onto TinyTang's card as `/ae350/resident.tpi` on the entry 73 core. After the user power-cycled the Tang, TinyTang's `tools/phosphor_format_sweep.py` failed on its second file: `phosphor status` reported `/music/test.flac` sent in 3246 ms, 0 samples and the loader at `0x00000003`, the same start failure entry 73 recorded, so a power cycle alone does not clear it and entry 73's suggestion that the test setup was the whole cause does not hold. The user judged entry 73 not worth keeping, so `d500bb7`'s engineering changes were reverted: the boot ROM's trigger clearing, stack poisoning, frame watches and trap context in `software/ae350/boot/boot.c`, `software/ae350/boot/start.S` and `software/ae350/include/ae350.h`, the `busfault`, `triggers` and `watch` probe programs, and the parked patch and its README, all of which remain at `d500bb7`. The tree outside `.ai` is now identical to `90e386c`, and entry 73's log entry and reference records were kept as history, with the two records in `.ai/core-reference.md` corrected for the revert and the cold-boot failure. The player rebuilt from the reverted tree is byte-identical to the qualified one, 863764 bytes with CRC-32 `ef1502ed`. `MERGED_PLACE_OPTIONS="3" scripts/build-merged.sh` met timing with `clk_pixel` at 89.052 MHz and reproduced entry 72's image exactly, 5034698 bytes with MD5 `81de63b48ebf610f0d4db6b6b3973b0a`. That image, loaded from `phosphortang.bin.bak` after a second power cycle, and the qualified player passed the full sweep, all thirteen plays matching entry 43's sample counts with zero underruns and the rate switching both ways between 44.1 and 48 kHz. The verified rebuild was then installed as `/cores/console138k/phosphortang.bin`, so it and `.bak` are now the same entry 72 image. The OLED was dark at first only because the core was loaded with a bare `tangload` rather than through `phosphor.tdsh`, so nothing declared the sockets, and `phosphor poke 0xc0 0x2410` lit it. The user confirmed the OLED on and every track sounding good. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 74 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The user wants track load time reduced next. Entry 73 measured 13.34 s to send the player and a 3.2 MB MP3, and 17.92 s decoding the whole track before the first sample. Any approach that needs a rebuilt resident player meets the open start failure recorded in `.ai/core-reference.md`, so each proposal should say whether it needs a player rebuild and be qualified by the twelve-format sweep alone. Entry 73's placement 2 timing failure belonged to the reverted netlist, and the restored core is entry 72's, which met timing at placements 0 to 3. The `/tang.ini` parser in TinyTang and `build.tcl`'s divergence from the committed top remain open.
+
+#### Files Modified:
+
+- software/ae350/boot/boot.c
+- software/ae350/boot/start.S
+- software/ae350/include/ae350.h
+- software/ae350/programs/busfault/main.c
+- software/ae350/programs/triggers/main.c
+- software/ae350/programs/watch/main.c
+- software/rbhost/parked/0001-play-while-decoding.patch
+- software/rbhost/parked/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
