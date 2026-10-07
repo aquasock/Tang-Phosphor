@@ -563,3 +563,35 @@ Restore timing margin across seeds by computing the pixel request and `read_x` f
 - User Test: PASS
 
 ---
+
+## 82 COMMIT Unreleased 2026-10-07T07:59:02-07:00
+
+#### Coming From:
+
+Unreleased f33f53d
+
+#### Purpose:
+
+Restore O-Scope pixel-clock timing margin so that at least three of placements 0 to 3 meet timing, after entry 81 closed at placement 3 alone.
+
+#### Outcome:
+
+Two four-placement sweeps, each built from a clean worktree of `f33f53d` carrying only the scope changes, removed every scope path from the failing set. In `src/visualizers/scope_xy.sv`, `request_pixel` is now a register loaded from `cx` 274..993 one clock ahead, exact because `cy` changes only at the `cx` wrap, and `read_x` is the `source_x` register alone, the `cx==275` override having been redundant since `source_x` is cleared on every cycle outside the view; this removed entry 81's path from `cx` through the compare and read mux into the lane reads, but sweep A then failed every placement at 61.907 to 67.473 MHz on the top-level `resetn` feeding `clear_all`, `usable`, `b_read` and the draw and retirement hazard compares into `draw_x`, `sweeps` and the point FIFO, about 4.3 ns of it routing from the high-fanout reset. `clear_all` is now the registered `clear_q` alone, which already includes `!resetn`, and `usable` is a register loaded with the value its combinational definition takes on the next clock; `tests/scope_xy_tb.sv` now checks that equality on every clock, since a copy that simply registered the old expression one clock late passed the rest of the bench and fails the new check, and a copy with the lookahead one clock late failed the raster comparison at (280,0). The full suite passed. Sweep B met timing at placements 1 and 2 with pixel Fmax 82.563 and 76.910 MHz, zero setup and hold violations in every domain, and worst setup and hold slack +1.025 and +0.140 ns and +0.466 and +0.143 ns; placement 0 failed inside the Gowin DDR3 controller's `ui_clk` and on `debug_registers` read address into `debug_rdata` by -0.324 ns, and placement 3 on the loader FIFO's `wready_q` through `tangcore_io`'s stream drain into `stream_response_next_offset` by -1.987 ns, neither a scope path. Fixing placement 3 needed a change to `src/iosys/iosys_bl616.v`'s stream drain, which was proposed but not taken; the user accepted two passing placements and directed that the better of the two be used. Placement 1 uses 18017 logic including 17 RAM16, 15617 flip-flops, 269/340 BSRAM, 6/298 DSP, PRIMARY 8/8 and PLL 7/12; the shift from entry 81's 209 RAM16 and 257 BSRAM suggests the line cache now maps into BSRAM behind the registered `read_x`, which was not confirmed from the netlist. The placement 1 image, 5158912 bytes, MD5 `0d0e2b5c1df97bfb3a66e729bbfc4391`, SHA-256 `1c63387762443a3e90ec06c77b75c6421440ec5158b8d7cbdb8b7e947ea535d9`, is `/cores/console138k/phosphortang-oscope.bin`, with entry 81's image as `phosphortang-oscope.bin.bak`. On TinyTang firmware `fd2933e-dirty.d2b8b07` with the unchanged on-demand player, `/scripts/oscope.tdsh` loaded it as core 80 with ABI 1.10, `tools/oscope_check.py` passed all seven fixtures with exact sample counts, zero underruns, zero visual drops and exact MCLK counts, and `tools/i2s2_format_sweep.py` passed all thirteen plays with entry 76's sample counts and both rate transitions. The card now keeps the user's library in `/music` and the test corpora in `/music_oscope-test` and `/music_codec-test`, renamed to `/music` for a check and restored afterwards. The user accepted the display and sound. `docs/oscope-handoff.md` and the scope record in `.ai/core-reference.md` were updated. The required core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete staged `.ai` diff, confirmed that `.ai/core.md` is unchanged and that no settled entry was rewritten, and validated this entry as number 82 with 16 entries in the active log and exactly six sections.
+
+#### Next Steps:
+
+The scope now passes at two placements of four with no scope path failing, and the remaining failures are the DDR3 controller and `debug_rdata` at placement 0 and the `tangcore_io` stream drain at placement 3, the last fixable by deferring the drain bookkeeping one clock if more margin is wanted. The user intends each further visualizer, starting with the remaining two MiSTer-Phosphor visualizers, to be its own core sharing one platform, so the next structural step is extracting the platform top and a visualizer slot interface. The resident-player, RAM bridge and JTAG experiments in the working tree remain uncommitted and unqualified.
+
+#### Files Modified:
+
+- docs/oscope-handoff.md
+- src/visualizers/scope_xy.sv
+- tests/scope_xy_tb.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

@@ -28,6 +28,11 @@ module scope_xy_tb;
             $fatal(1,"Gowin cross-port read/write collision");
         if(dut.a_read && |dut.a_we) $fatal(1,"read-before-write requested");
     end
+    // The registered usable must equal its combinational definition on
+    // every clock, including the first cycle of each clear.
+    always @(posedge clk)
+        if(dut.usable!==(dut.enabled && dut.initializing===1'b0 && !dut.clear_all))
+            $fatal(1,"usable %b differs from its definition",dut.usable);
     task automatic sample(input integer il,ir);
         @(posedge clk); #0.2; audio_tick=1; present=1; l=16'(il); r=16'(ir);
         @(posedge clk); #0.2; audio_tick=0;

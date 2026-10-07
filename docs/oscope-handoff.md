@@ -1,7 +1,9 @@
 # O-Scope timing closure and qualification
 
 Result, 2026-10-07: the 512x512 stereo XY scope meets setup and hold timing at
-placement 3 and is hardware-qualified (core-log entry 81). Entry 79 recorded
+placement 3 and is hardware-qualified (core-log entry 81). The margin
+correction below then met timing at placements 1 and 2, and the placement 1
+image replaced it on the card (core-log entry 82). Entry 79 recorded
 the earlier timing failure that this document originally handed off; the
 behavior described in [oscope-plan.md](oscope-plan.md) and the ABI 1.10
 registers in [debug-registers.md](debug-registers.md) are unchanged.
@@ -60,27 +62,68 @@ is the margin correction still to be made. Every sweep was built from a clean
 worktree of `eb243a7` carrying only the scope changes, with Gowin EDA
 1.9.11.03 for GW5AST-LV138PG484AC1/I0 revision C.
 
+## Margin correction
+
+Two further sweeps, built from a clean worktree of `f33f53d` carrying only the
+scope changes, removed the remaining scope paths:
+
+- A. `request_pixel` is a register loaded from `cx` 274..993, one clock ahead;
+  `cy` cannot change between `cx==274` and `cx==995`. The `cx==275` override
+  of `read_x` was redundant, since `source_x` is cleared on every cycle outside
+  the view, so `read_x` is the `source_x` register. The `cx` path disappeared,
+  exposing the top-level `resetn` feeding `clear_all`, `usable`, `b_read`, the
+  draw and retirement hazard compares and `draw_x`, `sweeps` and the point
+  FIFO, with about 4.3 ns of routing from the high-fanout reset.
+- B. `clear_all` is the registered `clear_q` alone, which already includes
+  `!resetn`, and `usable` is a register loaded with the value its old
+  combinational definition takes on the next clock. `tests/scope_xy_tb.sv`
+  checks that equality on every clock; a copy that simply registered the old
+  expression, one clock late, passed the rest of the bench and fails this check.
+
+| Sweep | Pixel Fmax by placement 0/1/2/3 (MHz) | Pixel setup TNS 0/1/2/3 (ns) |
+|---|---|---|
+| A | 67.473 / 67.046 / 67.415 / 61.907 | -20.935 / -13.099 / -16.377 / -126.819 |
+| B | 72.506 / 82.563 / 76.910 / 64.702 | -0.324 / 0 / 0 / -21.545 |
+
+Sweep B placements 1 and 2 have zero setup and zero hold violations in every
+clock domain, with worst setup slack +1.025 and +0.466 ns and worst hold slack
++0.140 and +0.143 ns. No scope path fails at any placement. Placement 0 fails
+inside the Gowin DDR3 controller (`ui_clk`, -0.608 ns TNS over 2 endpoints) and
+on `debug_registers` read address into `debug_rdata` (-0.324 ns), and
+placement 3 on the loader FIFO's `wready_q` through `tangcore_io`'s stream
+drain into `stream_response_next_offset` (-1.987 ns). Placement 1 uses 18017
+logic including 17 RAM16, 15617 flip-flops, 269/340 BSRAM, 6/298 DSP, PRIMARY
+8/8, PLL 7/12 and LW 6/8; the move from 209 RAM16 and 257 BSRAM suggests
+Gowin now maps the line cache into BSRAM behind the registered `read_x`, which
+was not confirmed from the netlist.
+
 ## Hardware qualification
 
-The placement 3 image, 5283212 bytes, MD5 `75cbeb027133b6e123e116798ef1b560`,
-SHA-256 `817b35b1992319f00604731080f9009357b12997f83249fddc184e15928aa837`, is
+The entry 82 image, sweep B placement 1, 5158912 bytes, MD5
+`0d0e2b5c1df97bfb3a66e729bbfc4391`, SHA-256
+`1c63387762443a3e90ec06c77b75c6421440ec5158b8d7cbdb8b7e947ea535d9`, is
 `/cores/console138k/phosphortang-oscope.bin`, loaded by `/scripts/oscope.tdsh`
 (`tools/oscope.tdsh`), which declares the I2S2 in PMOD0 and enables medium
-trails with glow. The qualified playback image
+trails with glow. Entry 81's placement 3 image, 5283212 bytes, MD5
+`75cbeb027133b6e123e116798ef1b560`, is kept as
+`/cores/console138k/phosphortang-oscope.bin.bak`. The qualified playback image
 `/cores/console138k/phosphortang-i2s2-play.bin` is unchanged.
 
-The ABI read 1.10 and the scope status showed enabled, initialized and cache
-ready. `tools/oscope_check.py` passed all seven fixtures, each with its exact
-sample count (192000 at 48 kHz, 176400 at 44.1 kHz), zero underruns, zero
-visual drops, about 1233 retirement sweeps per play and exact MCLK counts of
-1228800 and 1128960 edges per 100 ms. `tools/i2s2_format_sweep.py` passed all
-thirteen plays with zero underruns and entry 76's sample counts, switching
-rate both ways. The user accepted the display and sound, including
-oscilloscope music resampled to 48 kHz.
+Both images were qualified the same way. The ABI read 1.10 and the scope
+status showed enabled, initialized and cache ready. `tools/oscope_check.py`
+passed all seven fixtures, each with its exact sample count (192000 at 48 kHz,
+176400 at 44.1 kHz), zero underruns, zero visual drops, about 1233 retirement
+sweeps per play and exact MCLK counts of 1228800 and 1128960 edges per 100 ms.
+`tools/i2s2_format_sweep.py` passed all thirteen plays with zero underruns and
+entry 76's sample counts, switching rate both ways. The user accepted the
+display and sound of each.
 
 The fixtures and twelve-format corpus are regenerated by
 `tools/make_scope_fixtures.py` and TinyTang's `tools/make_codec_corpus.sh`
-(which needs the original `test.wma` and `test.opus`) and live in `/music`.
+(which needs the original `test.wma` and `test.opus`). On the card they are
+kept in `/music_oscope-test` and `/music_codec-test` beside the user's library
+in `/music`; for a check, rename `/music` aside, rename the test folder to
+`/music`, and restore both afterwards.
 
 ## Preserved work
 

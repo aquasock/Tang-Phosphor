@@ -29,10 +29,19 @@ module scope_xy #(
     logic [14:0] clear_addr;
     // Registered clear: every request (disable, flush, mode change) arises
     // in the left bar or from a flush, so acting one clock later is unseen.
-    logic clear_q=1;
-    always_ff @(posedge clk) clear_q<=!resetn || !enabled || flush_q || mode_change;
-    wire clear_all = !resetn || clear_q;
-    wire usable = enabled && !initializing && !clear_all;
+    // Reset reaches the scope's control only through clear_q, so the top
+    // level resetn has no combinational path into the draw, retirement or
+    // prefetch logic; every register that needs it at once still resets on
+    // !resetn directly. usable is a register loaded with the value
+    // enabled && !initializing && !clear_all takes on the next clock: a clear
+    // in progress or requested implies !usable, and without one enabled does
+    // not change.
+    logic clear_q=1, usable=0;
+    wire clear_next = !resetn || !enabled || flush_q || mode_change;
+    always_ff @(posedge clk) clear_q<=clear_next;
+    wire clear_all = clear_q;
+    always_ff @(posedge clk)
+        usable<=!clear_next && !clear_all && !(initializing && !(&clear_addr));
     logic was_present;
     wire break_trace = audio_tick && !audio_present && was_present;
     wire queue_reset = clear_all || initializing || break_trace;
@@ -308,11 +317,16 @@ module scope_xy #(
         end
     end
 
+    // request_pixel is computed one clock ahead from cx 274..993, so no HDMI
+    // counter logic sits in front of the cache lane reads; cy cannot change
+    // between cx==274 and cx==995. source_x is cleared on every cycle outside
+    // the view, so it is already zero at cx==275 and is itself read_x.
     logic [8:0] source_x;
     logic [5:0] phase_x;
     wire [6:0] next_phase_x={1'b0,phase_x}+7'd32;
-    wire request_pixel=cx>=275 && cx<995 && cy<720;
-    wire [8:0] read_x=cx==275?9'd0:source_x;
+    logic request_pixel=0;
+    always_ff @(posedge clk) request_pixel<=cx>=274 && cx<994 && cy<720;
+    wire [8:0] read_x=source_x;
     always_ff @(posedge clk) begin
         if(!resetn || !request_pixel) begin source_x<=0; phase_x<=0; end
         else if(next_phase_x>=45) begin source_x<=read_x+1'b1; phase_x<=6'(next_phase_x-45); end
