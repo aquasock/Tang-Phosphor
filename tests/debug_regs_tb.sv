@@ -47,6 +47,7 @@ debug_regs dut (
     .enc_raw(4'd0), .enc_button(1'b0), .enc_switch(1'b0),
     .link_frames(32'd0), .link_bad_checksum(32'd0), .link_truncated(32'd0),
     .link_mods(8'd0), .link_key0(8'd0), .link_key1(8'd0),
+    .i2s2_mclk_count(32'd1_228_800), .i2s2_clock_status(3'd7),
     .pmod0_personality(pmod0_personality),
     .pmod1_personality(pmod1_personality),
     .pmod0_flipped(pmod0_flipped), .pmod1_flipped(pmod1_flipped),
@@ -114,6 +115,8 @@ initial begin
     expect_state("power-on", 4'd0, 4'd0, 1'b0, 1'b0, 1'b0, 1'b0);
     expect_read("register ABI", 32'h04, 32'h0001_0008);
     expect_read("cpu_mode at power-on", 32'ha8, 32'd0);
+    expect_read("I2S2 measured MCLK", 32'hf8, 32'd1_228_800);
+    expect_read("I2S2 clock status", 32'hfc, 32'd7);
 
     // The standard OLED and encoder declaration, as entry 64 wrote it.
     write_reg(32'hc0, 32'h0000_2410);

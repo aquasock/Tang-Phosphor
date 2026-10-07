@@ -43,10 +43,13 @@ module pmod_mirror_core #(
     // stays inside for the bring-up core, and the state comes out here so a
     // host that already has a map can place it.  Audio follows the same split.
     parameter bit   EXTERNAL_AUDIO    = 1'b0,
-    parameter bit   EXPOSE_STATE      = 1'b0
+    parameter bit   EXPOSE_STATE      = 1'b0,
+    parameter bit   I2S2_BACKEND       = 1'b0
 ) (
     input  logic       clk_pixel,
     input  logic       clk_pixel_x5,
+    input  logic       clk_i2s2_mclk,
+    input  logic       i2s2_clock_locked,
     input  logic       resetn,
     input  logic       uart_rx,
     output logic       uart_tx,
@@ -150,6 +153,7 @@ module pmod_mirror_core #(
     localparam [3:0] PERS_VGA_J1  = 4'd2;
     localparam [3:0] PERS_VGA_J2  = 4'd3;
     localparam [3:0] PERS_ENC     = 4'd4;   // rotary encoder, either socket
+    localparam [3:0] PERS_I2S2    = 4'd5;   // output-only stereo test tone
 
     localparam integer W = 96;
     localparam integer H = 64;
@@ -656,6 +660,22 @@ module pmod_mirror_core #(
     logic [7:0] p0_io_o, p0_io_oe, p0_io_i;
     logic [7:0] p1_io_o, p1_io_oe, p1_io_i;
 
+    wire [7:0] i2s2_lane_o, i2s2_lane_oe;
+    generate
+        if (I2S2_BACKEND) begin : g_i2s2
+            wire declared = pmod0_personality == PERS_I2S2 ||
+                            pmod1_personality == PERS_I2S2;
+            pmod_i2s2_tone tone (
+                .clk_mclk(clk_i2s2_mclk),
+                .enable(resetn && i2s2_clock_locked && declared),
+                .lane_o(i2s2_lane_o), .lane_oe(i2s2_lane_oe)
+            );
+        end else begin : g_no_i2s2
+            assign i2s2_lane_o = 8'h00;
+            assign i2s2_lane_oe = 8'h00;
+        end
+    endgenerate
+
     logic [7:0] vga_j1_o, vga_j1_oe, vga_j2_o, vga_j2_oe;
     logic [3:0] vga_r, vga_g, vga_b;
     logic       vga_hs, vga_vs;
@@ -690,6 +710,7 @@ module pmod_mirror_core #(
             PERS_OLEDRGB: begin p0_lane_o = oled_lane_o; p0_lane_oe = oled_lane_oe; end
             PERS_VGA_J1:  begin p0_lane_o = vga_j1_o;   p0_lane_oe = vga_j1_oe;   end
             PERS_VGA_J2:  begin p0_lane_o = vga_j2_o;   p0_lane_oe = vga_j2_oe;   end
+            PERS_I2S2:    begin p0_lane_o = i2s2_lane_o; p0_lane_oe = i2s2_lane_oe; end
             default:      begin p0_lane_o = 8'h00;      p0_lane_oe = 8'h00;       end
         endcase
 
@@ -697,6 +718,7 @@ module pmod_mirror_core #(
             PERS_OLEDRGB: begin p1_lane_o = oled_lane_o; p1_lane_oe = oled_lane_oe; end
             PERS_VGA_J1:  begin p1_lane_o = vga_j1_o;   p1_lane_oe = vga_j1_oe;   end
             PERS_VGA_J2:  begin p1_lane_o = vga_j2_o;   p1_lane_oe = vga_j2_oe;   end
+            PERS_I2S2:    begin p1_lane_o = i2s2_lane_o; p1_lane_oe = i2s2_lane_oe; end
             default:      begin p1_lane_o = 8'h00;      p1_lane_oe = 8'h00;       end
         endcase
     end

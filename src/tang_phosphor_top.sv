@@ -61,6 +61,24 @@ reg [15:0] reset_counter = 16'hffff;
 // reset of every player block across the die.
 reg resetn /* synthesis syn_maxfan = 32 */ = 1'b0;
 
+// Exact 48 kHz I2S2 diagnostic timebase. New PLL VCOs are 1200 and
+// 768 MHz (DS1239 table 3-18: 650..1300 MHz); final output is 12.288 MHz.
+wire clk_i2s2_ref, clk_i2s2_mclk;
+wire i2s2_ref_locked, i2s2_audio_locked;
+pll_i2s2_ref i2s2_reference_clock (
+    .clkin(sys_clk), .clkout0(clk_i2s2_ref), .lock(i2s2_ref_locked)
+);
+pll_i2s2_audio i2s2_audio_clock (
+    .clkin(clk_i2s2_ref), .clkout0(clk_i2s2_mclk), .lock(i2s2_audio_locked)
+);
+wire [31:0] i2s2_mclk_count;
+wire [2:0] i2s2_clock_status;
+i2s_clock_probe i2s2_clock_probe (
+    .clk_ref(clk_pixel), .clk_mclk(clk_i2s2_mclk), .resetn(resetn),
+    .pll_locked({i2s2_audio_locked, i2s2_ref_locked}),
+    .count(i2s2_mclk_count), .status(i2s2_clock_status)
+);
+
 always @(posedge clk_pixel) begin
     if (reset_counter != 0)
         reset_counter <= reset_counter - 1'b1;
@@ -378,10 +396,13 @@ pmod_mirror_core #(
     .HDMI_BACKEND   (1'b1),
     .TRANSPORT      (1'b0),
     .EXTERNAL_AUDIO (1'b1),
-    .EXPOSE_STATE   (1'b1)
+    .EXPOSE_STATE   (1'b1),
+    .I2S2_BACKEND   (1'b1)
 ) display (
     .clk_pixel          (clk_pixel),
     .clk_pixel_x5       (clk_pixel_x5),
+    .clk_i2s2_mclk       (clk_i2s2_mclk),
+    .i2s2_clock_locked   (i2s2_ref_locked && i2s2_audio_locked),
     .resetn             (resetn),
     .uart_rx            (1'b1),
     .uart_tx            (),
@@ -588,6 +609,8 @@ debug_regs debug_registers (
     .link_mods(link_mods),
     .link_key0(link_keys[0]),
     .link_key1(link_keys[1]),
+    .i2s2_mclk_count(i2s2_mclk_count),
+    .i2s2_clock_status(i2s2_clock_status),
     .pmod0_personality(display_pmod0_personality),
     .pmod1_personality(display_pmod1_personality),
     .pmod0_flipped(display_pmod0_flipped),

@@ -295,3 +295,33 @@ supported profile. Project-specific limits remain implementation limits.
 - Text: characters come from the host. `phosphor_ui_control` owns `text_memory`, a 256x32 block RAM the transport writes and which is double-buffered, so the character path and Tang-Control's protocol stay as they are. The host owns text; the FPGA owns glyphs.
 - Slice order, one cycle each: the contract first, a renderer that fills the store in order and honours the handshake while drawing a fixed frame derived from cell indices, which proves the 16x8 cell addressing before any glyph exists; then the 6x8 font and the text grid, with a test that renders known strings and checks the pixels; then content and layout from the state inputs already wired; then re-verification of both configurations, because panel and VGA need different seatings and different socket declarations and the encoder becomes the menu's control.
 - Slice 1, implemented: `src/ui/ui_menu_renderer.sv` replaces `ui_pattern_demo` in `pmod_mirror_core`; the demo is retained in the tree as the reference implementer of the contract but is no longer instantiated, and `tools/ui_mirror_check.py` now models the cell frame rather than the eight patterns. A frame writer that sampled `render_enable` on the cycle `render_done` is raised would start the next frame into the bank it just filled, because the swap has not yet lowered `render_enable`; the demo hid behind its dwell and the menu does not, so the renderer waits for the swap to acknowledge the pulse and complete before it begins a frame.
+
+
+---
+
+## Pmod I2S2 Audio and Clock Generation
+
+### Digilent Pmod I2S2 Revision A manual and schematic
+
+- Sources: User-provided `/home/vash/Downloads/Pmod I2S2 Reference Manual - Digilent Reference.pdf`; https://digilent.com/reference/pmod/pmodi2s2/reference-manual; https://digilent.com/reference/_media/reference/pmod/pmodi2s2/pmodi2s2_sch.pdf.
+- Authority: Vendor primary board documentation. Converter timing is governed by the Cirrus datasheets below where the manual contains errors.
+- Relevant rule: DAC MCLK, LRCK, SCLK and SDIN occupy Digilent pins 1–4; ADC MCLK, LRCK, SCLK and SDOUT occupy pins 7–10. JP1 selects only the ADC's clock master/slave mode and must be changed without power. Supply and logic levels must match; the Tang dock uses 3.3 V. The output jack has passive DAC coupling/filtering and no dedicated headphone amplifier.
+- Documentation corrections: The manual's ADC ratio `784×` conflicts with Cirrus's `768×`; the ADC master-mode paragraph's 4–54 kHz MCLK statement confuses sample rate with master clock frequency.
+- Tang-Phosphor use: Output-only personality 5 drives the DAC row and releases the ADC row, routed through the existing socket permutation. PMOD0 normal orientation and PMOD1 none are declared as `0xc0 = 0x50`. The first diagnostic is 48 kHz stereo tones; input capture and track playback are not implemented by this personality.
+
+### Cirrus CS4344 DAC and CS5343 ADC datasheets
+
+- Sources: https://statics.cirrus.com/pubs/proDatasheet/CS4344-45-48_F2.pdf (DS613F2); https://statics.cirrus.com/pubs/proDatasheet/CS5343-44_F5.pdf (DS687F5, marked Draft).
+- Authority: Converter manufacturer's primary timing and clock documentation; note the ADC document's draft marking before relying on it for future input qualification.
+- Relevant rule: CS4344 serial data is valid at rising SCLK edges, with its MSB delayed one serial-clock period after LRCK changes. MCLK, LRCK and SCLK must be synchronous. At 48 kHz, 256× MCLK is 12.288 MHz; an external 64× SCLK permits 32-bit channel slots carrying up to 24 significant bits. MCLK duty cycle is 45–55 percent. The ADC's documented slave-mode 768× ratio corrects the board manual's typo.
+- Tang-Phosphor use: Latch both PCM channels once per frame, change SDIN and LRCK on falling SCLK edges, serialize 16-bit samples in the high bits of a zero-padded 24-bit word and continue with zero padding to 32 bits. The diagnostic transmitter's reset release is synchronized to MCLK; clock loss or withdrawing the declaration releases the socket.
+
+### Gowin GW5AST-138 PLL bounds and divider algebra
+
+- Sources: https://cdn.gowinsemi.com.cn/DS1239E.pdf (DS1239-1.0.3E, table 3-18); installed Gowin EDA 1.9.11.03 `IDE/doc/EN/UG306-1.0.4E_Arora V Clock User Guide.pdf`, section 5.1.
+- Authority: Device-specific manufacturer limits and primary primitive documentation. These are not the limits of other GW5A variants.
+- Relevant rule: For internal feedback, PFD = CLKIN / IDIV, VCO = PFD × FBDIV × MDIV, and CLKOUT = VCO / ODIV. MDIV and output 0 support eighth-step fractions. GW5AST-138 specifies PFD 19–81.25 MHz and VCO 650–1300 MHz.
+- Tang-Phosphor use: The I2S2 diagnostic recipes generate 24 MHz from the 50 MHz board oscillator (VCO 1200 MHz) and nominal 12.288 MHz from 24 MHz with MDIV 32 and ODIV 62.5 (VCO 768 MHz). The new PLLs remain inside those limits. Gowin's automatic clock report shows the integer-divider value for the fractional output, so the diagnostic includes a counter measuring actual MCLK against 100 ms of the pixel clock at `0xf8`, with synchronized lock and measurement status at `0xfc`; hardware frequency must be verified rather than assumed from the recipe. This does not resolve the existing video PLLs' VCO warnings.
+
+- Hardware verification (2026-10-06T21:33:14-07:00): The placement-3 diagnostic loaded as core 80 with both sockets released (`0xc0 = 0`). Clock status `0xfc` read `7`, and three reads of `0xf8` all returned `0x0012c000`, exactly 1,228,800 MCLK edges per 100 ms. The measured master frequency matches nominal 12.288 MHz; the integer-only automatic clock report is not the hardware frequency. This verifies the clock count, not analog audio or jitter.
+- Output qualification (2026-10-06T21:37:53-07:00): After a cold restart with the I2S2 installed in PMOD0, JP1 at SLV, `tools/i2s2-tone.tdsh` loaded the diagnostic and declared `0xc0 = 0x50`; the lock/status and measured frequency stayed at `7` and `0x0012c000`. The user reported perfect stereo test output. This qualifies the 48 kHz output-only personality, not line input, track playback or measured analog performance.

@@ -23,6 +23,16 @@ mkdir "$iosys_output_dir" "$audio_output_dir" "$audio_policy_output_dir" \
     "$keylink_output_dir" "$desk_layer_output_dir"
 trap 'find "$output_dir" -depth -delete' EXIT
 
+verilator --binary --timing -Wno-fatal \
+    --top-module i2s_tx_tb --Mdir "$output_dir/i2s_tx" \
+    "$test_dir/i2s_tx_tb.sv" \
+    "$project_dir/src/audio/i2s_tx.sv" \
+    "$project_dir/src/audio/i2s_clock_probe.sv" \
+    "$project_dir/src/pmod/pmod_i2s2_tone.sv" \
+    "$project_dir/src/pmod/pmod_slot.sv" \
+    "$project_dir/src/pmod/pmod_io_buf.sv"
+"$output_dir/i2s_tx/Vi2s_tx_tb"
+
 verilator --binary --timing -Wno-fatal -DSIM \
     --top-module iosys_debug_tb --Mdir "$iosys_output_dir" \
     "$test_dir/iosys_debug_tb.sv" \
@@ -144,6 +154,8 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/pmod/pmod_oledrgb.sv" \
     "$project_dir/src/pmod/pmod_vga.sv" \
     "$project_dir/src/pmod/pmod_enc.sv" \
+    "$project_dir/src/pmod/pmod_i2s2_tone.sv" \
+    "$project_dir/src/audio/i2s_tx.sv" \
     "$project_dir/src/video/ui_vga_backend.sv" \
     "$project_dir/src/oled/oled_panel.sv" \
     "$project_dir/src/oled/oled_spi.sv" \

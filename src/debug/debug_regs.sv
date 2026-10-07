@@ -73,6 +73,8 @@ module debug_regs (
     input  [7:0]  link_mods,
     input  [7:0]  link_key0,
     input  [7:0]  link_key1,
+    input  [31:0] i2s2_mclk_count,
+    input  [2:0]  i2s2_clock_status,
     output reg [3:0] pmod0_personality,
     output reg [3:0] pmod1_personality,
     output reg       pmod0_flipped,
@@ -232,6 +234,8 @@ always @(posedge clk) begin
         5'd28: read_hi <= link_truncated;
         // Last accepted report: modifiers, then the first two keycodes.
         5'd29: read_hi <= {8'b0, link_mods, link_key0, link_key1};
+        5'd30: read_hi <= i2s2_mclk_count;
+        5'd31: read_hi <= {29'b0, i2s2_clock_status};
         default: read_hi <= 32'hdead_beef;
     endcase
 

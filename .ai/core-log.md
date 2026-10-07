@@ -2692,3 +2692,53 @@ Step 3 keeps the player resident between tracks, removing the roughly 2.7 s play
 - User Test: PASS
 
 ---
+
+## 77 COMMIT Unreleased 2026-10-06T21:37:53-07:00
+
+#### Coming From:
+
+Unreleased df24687
+
+#### Purpose:
+
+Qualify stereo analog output through a Digilent Pmod I2S2 with an exact 48 kHz master clock and independently checked test tones.
+
+#### Outcome:
+
+The merged core now supports output-only PMOD personality 5, routed through the existing socket permutation, with a 1 kHz left square wave and a 2 kHz right square wave at one-quarter full scale; the ADC row remains released, and normal player and HDMI audio remain on their existing timebase. Two revision-C PLL recipes produce 24 MHz from the 50 MHz oscillator at VCO 1200 MHz, then 12.288 MHz at VCO 768 MHz with the supported 62.5 output divider, inside DS1239's 650–1300 MHz limits. Gowin's automatic clock report instead shows the integer-divider frequency, so the added clock probe counts actual MCLK edges over 7,425,000 pixel clocks and publishes the count at `0xf8` and synchronized lock/measurement status at `0xfc`; on hardware status read 7 and repeated counts were exactly `0x0012c000`, confirming nominal 12.288 MHz. `i2s_tx` latches coherent stereo pairs, changes data at falling bit-clock edges and presents the I2S delay bit followed by 16 significant bits and zero padding in 32-bit channel slots. The full simulation suite passed, including serial decoding, clock measurement, tone periods, withdrawal, both sockets, orientation and clock loss; shifting the transmitter's MSB launch one bit made the serial bench fail, and the new register reads passed their focused bench. The diagnostic was built from committed `df24687` plus this cycle's changes, excluding the checkout's pre-existing player, bridge and JTAG experiments. The four-placement sweep met setup and hold timing at 0 and 3, with pixel Fmax 74.801 and 86.641 MHz, while 1 failed on the DDR3 controller clock domain and 2 on the existing HDMI packet path; placement 3 was deployed. PRIMARY clocks are now 8/8 and PLLs 7/12, so further audio clock additions must account for routing capacity. The 5,063,680-byte image, MD5 `458ff2611ef245b8acbad28a1a99984d`, SHA-256 `de2907e6098f419b256b79c974d8758a516a39c0a743f2112db23e9140dce52f`, was uploaded separately as `/cores/console138k/phosphortang-i2s2-tone.bin` alongside `/scripts/i2s2-tone.tdsh`, leaving the qualified playback image in place. After the user powered down, replaced the OLED and encoder with the I2S2 in PMOD0, set JP1 to SLV and powered up, the script loaded core 80 and declared `0xc0 = 0x50`; clock status and count remained correct, and the user reported perfect stereo output. The Cirrus converter datasheets and device-specific Gowin clock limits were added to the reference, including corrections to the Digilent manual's ADC ratio and MCLK units. The required core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete staged `.ai` diff, confirmed `.ai/core.md` unchanged and all settled entries retained, and validated this entry as number 77 of 100 with exactly six sections; pre-existing log trimming and other unrelated changes remain outside this commit.
+
+#### Next Steps:
+
+Connect normal PCM playback to the I2S2 after establishing one sample cadence shared by the player, HDMI and I2S, and add the 44.1 kHz clock path and muted rate transitions before qualifying the twelve-format sweep on analog output. The primary clock resources are full, so clock sharing or routing must be resolved within that design. Line input is deferred, and the OLED and encoder are on hold at the user's direction. The earlier resident/gapless player and JTAG work remains uncommitted and separate from this qualified output diagnostic.
+
+#### Files Modified:
+
+- build-merged.tcl
+- docs/debug-registers.md
+- docs/i2s2-bringup.md
+- src/audio/i2s_tx.sv
+- src/audio/i2s_clock_probe.sv
+- src/boards/console138k_merged.sdc
+- src/debug/debug_regs.sv
+- src/pll/pll_i2s2_ref.mod
+- src/pll/pll_i2s2_ref.v
+- src/pll/pll_i2s2_audio.mod
+- src/pll/pll_i2s2_audio.v
+- src/pmod/pmod_i2s2_tone.sv
+- src/pmod_mirror_core.sv
+- src/pmod_mirror_top.sv
+- src/tang_phosphor_top.sv
+- tests/debug_regs_tb.sv
+- tests/i2s_tx_tb.sv
+- tests/run.sh
+- tests/ui_mirror_tb.sv
+- tools/gen_i2s2_plls.sh
+- tools/i2s2-tone.tdsh
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

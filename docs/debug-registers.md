@@ -48,7 +48,7 @@ return `0xdeadbeef`; unknown writes have no effect.
 | `0x00a0` | R | Sample periods of silence inserted at gapless boundaries since reset; excludes paused periods |
 | `0x00a4` | R | Audible stream ID `[15:0]`: the transport session whose samples are being presented |
 | `0x00a8` | R/W | Stream routing (`cpu_mode`), merged core only: bit 0 clear feeds the BL616 stream to the FPGA player, set feeds it to the AE350 program loader and routes the player from the AE350's play stream; powers up clear. At `0x00c0`, bit 0, before ABI 1.8 |
-| `0x00c0` | R/W | Socket control: hold `[0]` freezes the renderer between frames, PMOD0 personality `[7:4]`, PMOD1 personality `[11:8]`, PMOD0 seated upside down `[12]`, PMOD1 `[13]`; reads add the renderer's frame selector at `[18:16]`. Personalities are `0` none, `1` OLEDrgb, `2` PmodVGA J1, `3` PmodVGA J2, `4` rotary encoder. Powers up with both sockets released |
+| `0x00c0` | R/W | Socket control: hold `[0]` freezes the renderer between frames, PMOD0 personality `[7:4]`, PMOD1 personality `[11:8]`, PMOD0 seated upside down `[12]`, PMOD1 `[13]`; reads add the renderer's frame selector at `[18:16]`. Personalities are `0` none, `1` OLEDrgb, `2` PmodVGA J1, `3` PmodVGA J2, `4` rotary encoder, `5` I2S2 48 kHz stereo diagnostic tones (merged core only; see `docs/i2s2-bringup.md`). Powers up with both sockets released |
 | `0x00c4` | R | Renderer source bank `[0]` |
 | `0x00c8` | R | Source frame signature |
 | `0x00cc` | R | HDMI transmitter frame signature |
@@ -62,6 +62,8 @@ return `0xdeadbeef`; unknown writes have no effect.
 | `0x00ec` | R | Keyboard link frames refused for a bad checksum |
 | `0x00f0` | R | Keyboard link frames abandoned part way |
 | `0x00f4` | R | Last keyboard report: modifiers `[23:16]`, first keycode `[15:8]`, second `[7:0]` |
+| `0x00f8` | R | I2S2 MCLK cycles over the latest 7,425,000 pixel clocks (100 ms nominally). Expected 1,228,800 for 12.288 MHz, with a few cycles of CDC quantization; independent of socket declaration |
+| `0x00fc` | R | I2S2 clock status: reference PLL locked `[0]`, audio PLL locked `[1]`, first measurement complete `[2]`; normal running value `7` |
 | `0x0100-0x021c` | W | Nine 32-byte ASCII text slots in the unpublished bank; each aligned word stores four bytes most-significant byte first |
 | `0x1000-0x310c` | W | One inactive 92x92 RGB332 artwork bank; each aligned word stores four pixels most-significant byte first |
 | `0x4000-0x43ff` | R/W | Merged core only: the AE350 subsystem's register view (loader, log ring, bridge counters and trace), reachable while `0x00a8` bit 0 is set |

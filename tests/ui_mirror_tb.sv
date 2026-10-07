@@ -330,12 +330,18 @@ module ui_mirror_tb;
         else                   core_resetn <= 1'b1;
     end
 
-    pmod_mirror_core #(.HDMI_BACKEND(1'b0), .TRANSPORT(1'b0)) core (
+    logic i2s_mclk = 0;
+    always #40.690104 i2s_mclk = ~i2s_mclk;
+    logic i2s_locked = 1;
+    pmod_mirror_core #(.HDMI_BACKEND(1'b0), .TRANSPORT(1'b0),
+                      .I2S2_BACKEND(1'b1)) core (
         .clk_pixel    (clk),
         .uart_rx      (1'b1),
         .uart_tx      (),
         .frame_tick_in(second_tick),
         .clk_pixel_x5 (clk),      // the TMDS serializers are not under test
+        .clk_i2s2_mclk (i2s_mclk),
+        .i2s2_clock_locked (i2s_locked),
         .resetn       (core_resetn),
         .pmod0_io     (io0),
         .pmod1_io     (io1),
@@ -575,6 +581,31 @@ module ui_mirror_tb;
                 $display("PASS source model: signature 0x%08x matches the host frame", exp);
             end
         end
+
+        // The I2S personality uses the same declaration and permutation as
+        // the video personalities. Neither socket drives the ADC row.
+        force core.pmod0_personality_r = 4'd5;
+        force core.pmod1_personality_r = 4'd0;
+        repeat (5) @(negedge i2s_mclk);
+        expect_eq("I2S2 PMOD0 DAC enables", core.p0_io_oe, 8'h55);
+        expect_eq("I2S2 PMOD1 released", core.p1_io_oe, 8'h00);
+        expect_eq("I2S2 PMOD0 MCLK", io0[0], i2s_mclk);
+        force core.pmod0_personality_r = 4'd0;
+        force core.pmod1_personality_r = 4'd5;
+        repeat (5) @(negedge i2s_mclk);
+        expect_eq("I2S2 PMOD0 released", core.p0_io_oe, 8'h00);
+        expect_eq("I2S2 PMOD1 DAC enables", core.p1_io_oe, 8'h55);
+        force core.pmod1_flipped_r = 1'b1;
+        #1;
+        expect_eq("I2S2 PMOD1 flipped DAC enables", core.p1_io_oe, 8'haa);
+        i2s_locked = 0;
+        #1;
+        expect_eq("I2S2 unlocked socket released", core.p1_io_oe, 8'h00);
+        force core.pmod1_personality_r = 4'd0;
+        #1;
+        expect_eq("I2S2 withdrawn socket released", core.p1_io_oe, 8'h00);
+        if (failures == 0)
+            $display("PASS I2S2 routing: both sockets, orientation, clock loss and withdrawal");
 
         if (failures != 0) begin
             $display("ui_mirror: %0d FAILURES", failures);

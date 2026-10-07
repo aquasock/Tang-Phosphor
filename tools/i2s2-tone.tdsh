@@ -1,0 +1,29 @@
+#!/bin/tdsh
+# I2S2 output-only diagnostic. PMOD0: I2S2, normal orientation. PMOD1: none.
+# This script must be run only with the I2S2 seated in PMOD0.
+CORE=/cores/console138k/phosphortang-i2s2-tone.bin
+if test -f "$CORE"
+    echo "i2s2: diagnostic image found"
+else
+    echo "i2s2: diagnostic image missing"
+    return 1
+endif
+tangload "$CORE"
+if $? != 0
+    echo "i2s2: FPGA load failed"
+    return 1
+endif
+fpga
+if $? != 0
+    echo "i2s2: FPGA link unavailable"
+    return 1
+endif
+phosphor poke 0xc0 0x50
+if $? != 0
+    echo "i2s2: socket declaration failed"
+    return 1
+endif
+phosphor peek 0xc0
+echo "i2s2: 48 kHz stereo test; left 1 kHz, right 2 kHz"
+echo "i2s2: phosphor poke 0xc0 0 releases both sockets"
+return 0
