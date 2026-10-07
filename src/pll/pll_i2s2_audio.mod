@@ -1,8 +1,10 @@
-# I2S2 diagnostic clock, generated for revision C by Gowin EDA 1.9.11.03.
+# I2S2 native-rate clock, generated for revision C by Gowin EDA 1.9.11.03.
 # PLL formulas: UG306 5.1. New VCOs: 1200 MHz and 768 MHz, respectively.
 # Reference: 50 * 24 / 50 = 24 MHz.
 # Audio: 24 * 32 / 62.5 = 12.288 MHz (256 * 48000 Hz).
-# A 62.5 output divider uses the PLL's supported eighth-step divider.
+# 44.1 kHz: 24 * 36.75 / 78.125 = 11.2896 MHz, VCO 882 MHz.
+# Dynamic selectors use 128 minus the integer and 7 minus the eighth fraction.
+# Update selectors only while RESET is asserted.
 -series GW5AST
 -device GW5AST-138
 -device_version C
@@ -17,7 +19,7 @@
 -ip_version 1.0
 -ssc false
 -clock_en false
--rst false
+-rst true
 -rst_pwd false
 -rst_i false
 -rst_o false
@@ -32,7 +34,7 @@
 -en_lock true
 -dyn_dpa_en false
 -clkout0_bypass false
--dyn_odiv0_sel false
+-dyn_odiv0_sel true
 -odiv0_sel 62
 -odiv0_frac_sel 4
 -dyn_dt0_sel false
@@ -49,6 +51,6 @@
 -en_clkout5 false
 -en_clkout6 false
 -en_clkfbout false
--dyn_mdiv_sel false
+-dyn_mdiv_sel true
 -mdiv_sel 32
 -mdiv_frac_sel 0

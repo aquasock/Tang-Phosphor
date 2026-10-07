@@ -6,11 +6,16 @@
 //Device: GW5AST-138
 //Device Version: C
 
-module pll_i2s2_audio (lock, clkout0, clkin);
+module pll_i2s2_audio (lock, clkout0, clkin, reset, mdsel, mdsel_frac, odsel0, odsel0_frac);
 
 output lock;
 output clkout0;
 input clkin;
+input reset;
+input [6:0] mdsel;
+input [2:0] mdsel_frac;
+input [6:0] odsel0;
+input [2:0] odsel0_frac;
 
 wire clkout1;
 wire clkout2;
@@ -37,16 +42,16 @@ PLL PLL_inst (
     .CLKFBOUT(clkfbout),
     .CLKIN(clkin),
     .CLKFB(gw_gnd),
-    .RESET(gw_gnd),
+    .RESET(reset),
     .PLLPWD(gw_gnd),
     .RESET_I(gw_gnd),
     .RESET_O(gw_gnd),
     .FBDSEL({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
     .IDSEL({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
-    .MDSEL({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
-    .MDSEL_FRAC({gw_gnd,gw_gnd,gw_gnd}),
-    .ODSEL0({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
-    .ODSEL0_FRAC({gw_gnd,gw_gnd,gw_gnd}),
+    .MDSEL(mdsel),
+    .MDSEL_FRAC(mdsel_frac),
+    .ODSEL0(odsel0),
+    .ODSEL0_FRAC(odsel0_frac),
     .ODSEL1({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
     .ODSEL2({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
     .ODSEL3({gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd,gw_gnd}),
@@ -156,8 +161,8 @@ defparam PLL_inst.LPF_CAP = 2'b00;
 defparam PLL_inst.SSC_EN = "FALSE";
 defparam PLL_inst.DYN_IDIV_SEL = "FALSE";
 defparam PLL_inst.DYN_FBDIV_SEL = "FALSE";
-defparam PLL_inst.DYN_MDIV_SEL = "FALSE";
-defparam PLL_inst.DYN_ODIV0_SEL = "FALSE";
+defparam PLL_inst.DYN_MDIV_SEL = "TRUE";
+defparam PLL_inst.DYN_ODIV0_SEL = "TRUE";
 defparam PLL_inst.DYN_ODIV1_SEL = "FALSE";
 defparam PLL_inst.DYN_ODIV2_SEL = "FALSE";
 defparam PLL_inst.DYN_ODIV3_SEL = "FALSE";

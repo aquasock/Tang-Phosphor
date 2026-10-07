@@ -44,6 +44,7 @@ localparam [15:0] CORE_ID = 16'h0050;
 wire clk27;
 wire clk_pixel;
 wire clk_pixel_x5;
+wire requested_audio_rate_48k;
 
 pll_27 clock_27mhz (
     .clkin(sys_clk),
@@ -65,18 +66,31 @@ reg resetn /* synthesis syn_maxfan = 32 */ = 1'b0;
 // 768 MHz (DS1239 table 3-18: 650..1300 MHz); final output is 12.288 MHz.
 wire clk_i2s2_ref, clk_i2s2_mclk;
 wire i2s2_ref_locked, i2s2_audio_locked;
+wire i2s2_pll_reset, i2s2_running, i2s2_ready, i2s2_active_48k;
+wire [6:0] i2s2_mdsel, i2s2_odsel;
+wire [2:0] i2s2_mdsel_frac, i2s2_odsel_frac;
 pll_i2s2_ref i2s2_reference_clock (
     .clkin(sys_clk), .clkout0(clk_i2s2_ref), .lock(i2s2_ref_locked)
 );
 pll_i2s2_audio i2s2_audio_clock (
-    .clkin(clk_i2s2_ref), .clkout0(clk_i2s2_mclk), .lock(i2s2_audio_locked)
+    .clkin(clk_i2s2_ref), .clkout0(clk_i2s2_mclk), .lock(i2s2_audio_locked),
+    .reset(i2s2_pll_reset), .mdsel(i2s2_mdsel), .mdsel_frac(i2s2_mdsel_frac),
+    .odsel0(i2s2_odsel), .odsel0_frac(i2s2_odsel_frac)
+);
+i2s_clock_control i2s2_rate_control (
+    .clk(clk_pixel), .resetn(resetn), .requested_48k(requested_audio_rate_48k),
+    .pll_locked({i2s2_audio_locked, i2s2_ref_locked}),
+    .pll_reset(i2s2_pll_reset), .mdsel(i2s2_mdsel), .mdsel_frac(i2s2_mdsel_frac),
+    .odsel(i2s2_odsel), .odsel_frac(i2s2_odsel_frac),
+    .active_48k(i2s2_active_48k), .running(i2s2_running), .ready(i2s2_ready)
 );
 wire [31:0] i2s2_mclk_count;
-wire [2:0] i2s2_clock_status;
+wire [2:0] i2s2_probe_status;
+wire [5:0] i2s2_clock_status = {!i2s2_ready, i2s2_ready, i2s2_active_48k, i2s2_probe_status};
 i2s_clock_probe i2s2_clock_probe (
     .clk_ref(clk_pixel), .clk_mclk(clk_i2s2_mclk), .resetn(resetn),
     .pll_locked({i2s2_audio_locked, i2s2_ref_locked}),
-    .count(i2s2_mclk_count), .status(i2s2_clock_status)
+    .count(i2s2_mclk_count), .status(i2s2_probe_status)
 );
 
 always @(posedge clk_pixel) begin
@@ -131,12 +145,12 @@ wire [15:0] hid2;
 wire frame_tick;
 wire clk_audio;
 wire sample_tick;
-wire requested_audio_rate_48k;
 wire [31:0] hdmi_audio_rate;
 wire hdmi_audio_rate_48k = hdmi_audio_rate == 32'd48_000;
-wire [15:0] tone_sample_word [1:0];
+wire [15:0] audio_source_word [1:0];
 wire [15:0] player_audio_left;
 wire [15:0] player_audio_right;
+wire pcm_sample_valid;
 wire playback_active;
 wire [15:0] audio_sample_word [1:0];
 
@@ -363,27 +377,35 @@ wire [31:0] boundary_gap_samples;
 audio_output_policy output_policy (
     .clk(clk_pixel),
     .resetn(resetn),
-    .stream_start(stream_start),
+    .stream_start(player_stream_start),
     .format_valid(playback_rate_valid),
     .sample_rate(playback_rate),
-    .playback_active(playback_active),
+    .playback_active(pcm_sample_valid),
     .player_left(player_audio_left),
     .player_right(player_audio_right),
-    .diagnostic_left(tone_sample_word[0]),
-    .diagnostic_right(tone_sample_word[1]),
+    .diagnostic_left(16'd0),
+    .diagnostic_right(16'd0),
     .rate_48k(requested_audio_rate_48k),
-    .output_left(audio_sample_word[0]),
-    .output_right(audio_sample_word[1])
+    .output_left(audio_source_word[0]),
+    .output_right(audio_source_word[1])
 );
 
-audio_test_source audio_timebase (
+wire [7:0] i2s2_play_lane_o, i2s2_play_lane_oe;
+assign hdmi_audio_rate = i2s2_active_48k ? 32'd48_000 : 32'd44_100;
+i2s_playback audio_timebase (
     .clk_pixel(clk_pixel),
+    .clk_mclk(clk_i2s2_mclk),
     .resetn(resetn),
-    .rate_48k(requested_audio_rate_48k),
+    .running(i2s2_running && i2s2_audio_locked && i2s2_ref_locked),
+    .ready(i2s2_ready),
+    .flush(player_stream_start || player_stream_cancel),
+    .paused(pause_requested),
+    .pcm_valid(pcm_sample_valid),
+    .pcm_left(audio_source_word[0]), .pcm_right(audio_source_word[1]),
     .clk_audio(clk_audio),
     .sample_tick(sample_tick),
-    .active_sample_rate(hdmi_audio_rate),
-    .audio_sample_word(tone_sample_word)
+    .hdmi_left(audio_sample_word[0]), .hdmi_right(audio_sample_word[1]),
+    .lane_o(i2s2_play_lane_o), .lane_oe(i2s2_play_lane_oe)
 );
 
 // The display stack, folded in whole.  This is the same module the socket
@@ -397,12 +419,15 @@ pmod_mirror_core #(
     .TRANSPORT      (1'b0),
     .EXTERNAL_AUDIO (1'b1),
     .EXPOSE_STATE   (1'b1),
-    .I2S2_BACKEND   (1'b1)
+    .I2S2_BACKEND   (1'b1),
+    .I2S2_PLAYBACK  (1'b1)
 ) display (
     .clk_pixel          (clk_pixel),
     .clk_pixel_x5       (clk_pixel_x5),
     .clk_i2s2_mclk       (clk_i2s2_mclk),
     .i2s2_clock_locked   (i2s2_ref_locked && i2s2_audio_locked),
+    .i2s2_play_lane_o    (i2s2_play_lane_o),
+    .i2s2_play_lane_oe   (i2s2_play_lane_oe),
     .resetn             (resetn),
     .uart_rx            (1'b1),
     .uart_tx            (),
@@ -509,6 +534,7 @@ pcm_sink audio_player (
     .sample_tick(sample_tick), .paused(pause_requested),
     .audio_left(player_audio_left),
     .audio_right(player_audio_right), .playback_active(playback_active),
+    .audio_valid(pcm_sample_valid),
     .player_state(player_state), .format_valid(audio_format_valid),
     .sample_rate(audio_sample_rate), .fifo_level(pcm_fifo_level),
     .samples_played(samples_played), .total_samples(total_samples),

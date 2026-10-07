@@ -1,0 +1,31 @@
+#!/bin/tdsh
+# Native PCM playback. PMOD0: I2S2, normal orientation. PMOD1: none.
+# Run only with the I2S2 seated in PMOD0; OLED and encoder remain on hold.
+CORE=/cores/console138k/phosphortang-i2s2-play.bin
+if test -f "$CORE"
+    echo "i2s2: playback image found"
+else
+    echo "i2s2: playback image missing"
+    return 1
+endif
+tangload "$CORE"
+if $? != 0
+    echo "i2s2: FPGA load failed"
+    return 1
+endif
+fpga
+if $? != 0
+    echo "i2s2: FPGA link unavailable"
+    return 1
+endif
+phosphor poke 0xc0 0x50
+if $? != 0
+    echo "i2s2: socket declaration failed"
+    return 1
+endif
+osd off
+phosphor peek 0xc0
+phosphor peek 0xfc
+echo "i2s2: ready for phosphor play /music/<track>"
+echo "i2s2: HDMI and Line Out share native 44.1/48 kHz PCM"
+return 0

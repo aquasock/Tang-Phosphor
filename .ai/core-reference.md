@@ -307,7 +307,7 @@ supported profile. Project-specific limits remain implementation limits.
 - Authority: Vendor primary board documentation. Converter timing is governed by the Cirrus datasheets below where the manual contains errors.
 - Relevant rule: DAC MCLK, LRCK, SCLK and SDIN occupy Digilent pins 1–4; ADC MCLK, LRCK, SCLK and SDOUT occupy pins 7–10. JP1 selects only the ADC's clock master/slave mode and must be changed without power. Supply and logic levels must match; the Tang dock uses 3.3 V. The output jack has passive DAC coupling/filtering and no dedicated headphone amplifier.
 - Documentation corrections: The manual's ADC ratio `784×` conflicts with Cirrus's `768×`; the ADC master-mode paragraph's 4–54 kHz MCLK statement confuses sample rate with master clock frequency.
-- Tang-Phosphor use: Output-only personality 5 drives the DAC row and releases the ADC row, routed through the existing socket permutation. PMOD0 normal orientation and PMOD1 none are declared as `0xc0 = 0x50`. The first diagnostic is 48 kHz stereo tones; input capture and track playback are not implemented by this personality.
+- Tang-Phosphor use: Output-only personality 5 drives the DAC row and releases the ADC row, routed through the existing socket permutation. PMOD0 normal orientation and PMOD1 none are declared as `0xc0 = 0x50`. The original diagnostic is 48 kHz stereo tones; ABI 1.9 connects normal 44.1/48 kHz PCM playback, with input capture still deferred.
 
 ### Cirrus CS4344 DAC and CS5343 ADC datasheets
 
@@ -325,3 +325,12 @@ supported profile. Project-specific limits remain implementation limits.
 
 - Hardware verification (2026-10-06T21:33:14-07:00): The placement-3 diagnostic loaded as core 80 with both sockets released (`0xc0 = 0`). Clock status `0xfc` read `7`, and three reads of `0xf8` all returned `0x0012c000`, exactly 1,228,800 MCLK edges per 100 ms. The measured master frequency matches nominal 12.288 MHz; the integer-only automatic clock report is not the hardware frequency. This verifies the clock count, not analog audio or jitter.
 - Output qualification (2026-10-06T21:37:53-07:00): After a cold restart with the I2S2 installed in PMOD0, JP1 at SLV, `tools/i2s2-tone.tdsh` loaded the diagnostic and declared `0xc0 = 0x50`; the lock/status and measured frequency stayed at `7` and `0x0012c000`. The user reported perfect stereo test output. This qualifies the 48 kHz output-only personality, not line input, track playback or measured analog performance.
+
+
+### Native playback clock switching and shared PCM cadence
+
+- Sources: Installed UG306-1.0.4E section 5.1; CS4344 DS613F2 sections 4.4 and 4.5 (sources above); `src/audio/i2s_clock_control.sv`, `src/audio/i2s_playback.sv` and `tests/i2s_playback_tb.sv`.
+- Authority: Manufacturer divider and DAC timing documentation, with simulation and board clock-count verification; no analog jitter measurement.
+- Relevant rule: Dynamic MDSEL/ODSEL0 integer fields encode `128 - divider integer`; fraction fields encode `7 - eighths`. CS4344 recommends at least ten zero frames before changing clock ratios or rates. Its power-up sequence includes VQ ramp and about 2000 sample periods before analog output begins.
+- Tang-Phosphor use: Reconfigure the existing audio PLL under reset. At 48 kHz, MDIV 32 and ODIV 62.5 give VCO 768 MHz and MCLK 12.288 MHz; encoded fields are MDSEL 96, MDSEL_FRAC 7, ODSEL0 66, ODSEL0_FRAC 3. At 44.1 kHz, MDIV 36.75 and ODIV 78.125 give VCO 882 MHz and MCLK 11.2896 MHz; encoded fields are 92, 1, 50, 6. Send zeros for 0.5 ms before reset, hold reset for 100 microseconds, wait for lock and send zeros for 300 ms before popping PCM. These are project timing choices, not maximum standard requirements. One frame cadence supplies the I2S pair and HDMI's identical emitted pair; HDMI ACR simulation checks N/CTS 6272/82500 at 44.1 kHz and 6144/74250 at 48 kHz.
+- Hardware qualification (2026-10-06T22:05:43-07:00): The user reported perfect WAV output. The twelve-format sweep and final WAV all completed with zero underruns; repeat Opus/WAV tests measured exactly 1228800 and 1128960 MCLK edges per 100 ms, with ABI 1.9 clock status `0x1f` and `0x17`. `tools/i2s2_format_sweep.py` repeats PCM count, underrun, rate and MCLK checks. See `docs/i2s2-bringup.md` for the deployed artifact and build evidence. Line input remains deferred.

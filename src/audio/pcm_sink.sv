@@ -25,6 +25,7 @@ module pcm_sink #(
     input  logic        paused,
     output logic [15:0] audio_left,
     output logic [15:0] audio_right,
+    output logic        audio_valid,
     output logic        playback_active,
     output logic [3:0]  player_state,
     output logic        format_valid,
@@ -152,6 +153,7 @@ module pcm_sink #(
 
     assign audio_left           = fifo_out[15:0];
     assign audio_right          = fifo_out[31:16];
+    assign audio_valid          = fifo_out_valid;
     assign player_state         = state;
     assign format_valid         = rate_valid;
     assign sample_rate          = rate;

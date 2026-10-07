@@ -52,6 +52,8 @@ module pmod_mirror_top (
         .clk_pixel_x5 (clk_pixel_x5),
         .clk_i2s2_mclk (1'b0),
         .i2s2_clock_locked (1'b0),
+        .i2s2_play_lane_o (8'd0),
+        .i2s2_play_lane_oe (8'd0),
         .resetn       (resetn),
         .uart_rx      (uart_rx),
         .uart_tx      (uart_tx),

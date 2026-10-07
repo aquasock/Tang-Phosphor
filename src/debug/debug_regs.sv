@@ -74,7 +74,7 @@ module debug_regs (
     input  [7:0]  link_key0,
     input  [7:0]  link_key1,
     input  [31:0] i2s2_mclk_count,
-    input  [2:0]  i2s2_clock_status,
+    input  [5:0]  i2s2_clock_status,
     output reg [3:0] pmod0_personality,
     output reg [3:0] pmod1_personality,
     output reg       pmod0_flipped,
@@ -170,7 +170,7 @@ always @(posedge clk) begin
     read_known_q <= read_known;
     case (read_index[4:0])
         5'd0: read_lo <= MAGIC;
-        5'd1: read_lo <= 32'h0001_0008; // register ABI 1.8
+        5'd1: read_lo <= 32'h0001_0009; // register ABI 1.9: I2S2 PCM playback
         5'd2: read_lo <= BUILD_DATE;
         5'd3: read_lo <= 32'h0000_00ff;
         5'd4: read_lo <= uptime_cycles;
@@ -235,7 +235,7 @@ always @(posedge clk) begin
         // Last accepted report: modifiers, then the first two keycodes.
         5'd29: read_hi <= {8'b0, link_mods, link_key0, link_key1};
         5'd30: read_hi <= i2s2_mclk_count;
-        5'd31: read_hi <= {29'b0, i2s2_clock_status};
+        5'd31: read_hi <= {26'b0, i2s2_clock_status};
         default: read_hi <= 32'hdead_beef;
     endcase
 

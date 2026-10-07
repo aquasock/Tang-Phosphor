@@ -44,12 +44,15 @@ module pmod_mirror_core #(
     // host that already has a map can place it.  Audio follows the same split.
     parameter bit   EXTERNAL_AUDIO    = 1'b0,
     parameter bit   EXPOSE_STATE      = 1'b0,
-    parameter bit   I2S2_BACKEND       = 1'b0
+    parameter bit   I2S2_BACKEND       = 1'b0,
+    parameter bit   I2S2_PLAYBACK      = 1'b0
 ) (
     input  logic       clk_pixel,
     input  logic       clk_pixel_x5,
     input  logic       clk_i2s2_mclk,
     input  logic       i2s2_clock_locked,
+    input  logic [7:0] i2s2_play_lane_o,
+    input  logic [7:0] i2s2_play_lane_oe,
     input  logic       resetn,
     input  logic       uart_rx,
     output logic       uart_tx,
@@ -662,7 +665,10 @@ module pmod_mirror_core #(
 
     wire [7:0] i2s2_lane_o, i2s2_lane_oe;
     generate
-        if (I2S2_BACKEND) begin : g_i2s2
+        if (I2S2_BACKEND && I2S2_PLAYBACK) begin : g_i2s2_playback
+            assign i2s2_lane_o = i2s2_play_lane_o;
+            assign i2s2_lane_oe = i2s2_play_lane_oe;
+        end else if (I2S2_BACKEND) begin : g_i2s2
             wire declared = pmod0_personality == PERS_I2S2 ||
                             pmod1_personality == PERS_I2S2;
             pmod_i2s2_tone tone (

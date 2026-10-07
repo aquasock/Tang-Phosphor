@@ -33,6 +33,17 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/pmod/pmod_io_buf.sv"
 "$output_dir/i2s_tx/Vi2s_tx_tb"
 
+verilator --binary --timing -Wno-fatal \
+    --top-module i2s_playback_tb --Mdir "$output_dir/i2s_playback" \
+    "$test_dir/i2s_playback_tb.sv" \
+    "$project_dir/src/audio/i2s_playback.sv" \
+    "$project_dir/src/audio/i2s_clock_control.sv" \
+    "$project_dir/src/hdmi/audio_clock_regeneration_packet.sv" \
+    "$project_dir/src/audio/i2s_tx.sv" \
+    "$project_dir/src/audio/pcm_sink.sv" \
+    "$project_dir/src/audio/pcm_sample_fifo.sv"
+"$output_dir/i2s_playback/Vi2s_playback_tb"
+
 verilator --binary --timing -Wno-fatal -DSIM \
     --top-module iosys_debug_tb --Mdir "$iosys_output_dir" \
     "$test_dir/iosys_debug_tb.sv" \

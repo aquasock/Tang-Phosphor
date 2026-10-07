@@ -342,6 +342,8 @@ module ui_mirror_tb;
         .clk_pixel_x5 (clk),      // the TMDS serializers are not under test
         .clk_i2s2_mclk (i2s_mclk),
         .i2s2_clock_locked (i2s_locked),
+        .i2s2_play_lane_o (8'd0),
+        .i2s2_play_lane_oe (8'd0),
         .resetn       (core_resetn),
         .pmod0_io     (io0),
         .pmod1_io     (io1),

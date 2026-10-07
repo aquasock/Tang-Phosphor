@@ -2742,3 +2742,51 @@ Connect normal PCM playback to the I2S2 after establishing one sample cadence sh
 - User Test: PASS
 
 ---
+
+## 78 COMMIT Unreleased 2026-10-06T22:05:43-07:00
+
+#### Coming From:
+
+Unreleased 17ce020
+
+#### Purpose:
+
+Play normal stereo PCM through the I2S2 at native 44.1 and 48 kHz using one sample cadence shared with HDMI.
+
+#### Outcome:
+
+The merged core now fetches coherent PCM pairs through a held-data toggle handshake, emits them through I2S and returns the same pair and frame pulse to HDMI; stream epochs reject canceled prefetched samples and pause stops FIFO consumption. The existing audio PLL switches under reset between 12.288 and 11.2896 MHz using supported fractional dividers, with 0.5 ms of zeros before switching and 300 ms of zeros after lock; no further PLL or primary clock route was added. ABI 1.9 adds active-rate, ready and settling bits to `0xfc`. The full simulation suite passed, including sample sequence, both rates, pause, cancellation and lock recovery, and a further HDMI ACR check passed N/CTS at both rates. The four-placement build used committed `17ce020` plus only this cycle's changes; placement 2 alone met setup and hold, with pixel Fmax 82.572 MHz and zero violated endpoints, while PRIMARY remains 8/8 and PLL 7/12. Its 5,095,424-byte image, SHA-256 `d72e5701d2484605e9166926f04b7121fa3e6e08d78b4e5aa5aa1f022efe16b4`, was deployed separately as `/cores/console138k/phosphortang-i2s2-play.bin`, with `/scripts/i2s2-play.tdsh` declaring PMOD0 personality 5 and leaving PMOD1 released. TinyTang firmware `fd2933e-dirty.d2b8b07` used the unchanged on-demand player; the user reported perfect WAV output. All twelve formats and the final WAV passed with zero underruns and entry 76's sample counts; repeat Opus/WAV checks measured exactly 1228800 and 1128960 MCLK edges per 100 ms, with status `0x1f` and `0x17`. `tools/i2s2_format_sweep.py` makes those checks repeatable, and `docs/i2s2-bringup.md` records the artifact and evidence. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete staged `.ai` diff, confirmed core.md unchanged and settled history retained, and validated entry 78 of 100 with exactly six sections; the pre-existing log trimming and player, bridge and JTAG work remain outside this commit.
+
+#### Next Steps:
+
+The I2S2 output playback cycle is complete. Line input is deferred and the OLED and encoder remain on hold. Resume the separate resident/gapless player work only in a subsequent approved cycle, using this shared cadence and accounting for the muted rate transition.
+
+#### Files Modified:
+
+- build-merged.tcl
+- docs/debug-registers.md
+- docs/i2s2-bringup.md
+- src/audio/i2s_clock_control.sv
+- src/audio/i2s_playback.sv
+- src/audio/pcm_sink.sv
+- src/debug/debug_regs.sv
+- src/pll/pll_i2s2_audio.mod
+- src/pll/pll_i2s2_audio.v
+- src/pmod_mirror_core.sv
+- src/pmod_mirror_top.sv
+- src/tang_phosphor_top.sv
+- tests/debug_regs_tb.sv
+- tests/i2s_playback_tb.sv
+- tests/pcm_sink_tb.sv
+- tests/run.sh
+- tests/ui_mirror_tb.sv
+- tools/i2s2-play.tdsh
+- tools/i2s2_format_sweep.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

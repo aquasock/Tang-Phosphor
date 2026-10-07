@@ -34,6 +34,7 @@ module pcm_sink_tb;
         .stream_ready(stream_ready), .play_rate(play_rate),
         .sample_tick(sample_tick), .paused(paused),
         .audio_left(audio_left), .audio_right(audio_right),
+        .audio_valid(),
         .playback_active(playback_active), .player_state(player_state),
         .format_valid(format_valid), .sample_rate(sample_rate),
         .fifo_level(fifo_level), .samples_played(samples_played),
