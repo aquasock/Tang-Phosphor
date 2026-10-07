@@ -12,6 +12,7 @@
 #include "ae350.h"
 
 extern char trap_entry[];
+uint32_t boot_call(uint32_t entry);
 
 static uint32_t runs;
 
@@ -139,16 +140,22 @@ void boot_main(void)
 		}
 
 		set_state(AE350_STATE_RUN);
+		/* One line per call, so a program called twice for one image --
+		 * control re-entering this loop -- shows in the log. */
+		ae350_puts("run\n");
 		__asm__ volatile ("fence rw, rw\n\tfence.i" ::: "memory");
-		AE350_REG(AE350_RESULT) = ((uint32_t (*)(void))header.entry)();
+		AE350_REG(AE350_RESULT) = boot_call(header.entry);
 		AE350_CSR_WRITE(mtvec, trap_entry);
 		++runs;
 		set_state(AE350_STATE_RETURNED);
 	}
 }
 
-void boot_trap(uint32_t cause, uint32_t pc, uint32_t value)
+void boot_trap(uint32_t cause, uint32_t pc, uint32_t value, uint32_t ra,
+	       uint32_t sp)
 {
+	AE350_REG(AE350_USER(11)) = ra;
+	AE350_REG(AE350_USER(12)) = sp;
 	AE350_REG(AE350_USER(13)) = cause;
 	AE350_REG(AE350_USER(14)) = pc;
 	AE350_REG(AE350_USER(15)) = value;

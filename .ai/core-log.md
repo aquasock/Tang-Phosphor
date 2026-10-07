@@ -2553,3 +2553,40 @@ The design now meets timing at every placement tried with at least +0.7 ns of se
 - User Test: PASS
 
 ---
+
+## 73 COMMIT Unreleased 2026-10-06T17:10:58-07:00
+
+#### Coming From:
+
+Unreleased 90e386c
+
+#### Purpose:
+
+Make songs start sooner by playing the resident AE350 player's decoded audio while it decodes, and, when rebuilt players stopped starting tracks, find out why before shipping one.
+
+#### Outcome:
+
+The delay was measured on a 3236120-byte MP3: 13.34 s to send the 863764-byte player and the file, then 17.92 s decoding the whole 199 s track into DDR3 before the first sample, because `software/rbhost/host/platform_ae350.c` receives, decodes and plays strictly in sequence and returns after each track, so TinyTang resends the player every song; a long track whose decode exceeds TinyTang's 30 s start timeout is reported as failed. The first of three planned cycles changes the player's output file layer to hand PCM to the play stream as the codec writes it, and when a build of it played, playback began as soon as the send finished; but rebuilt players repeatedly received the file and never decoded it -- the log stopping after `stream rx`, result word 7 holding the input size, the loader in RUN with no trap -- which is the failure entry 69 had worked around with padding. The investigation kept the player unchanged where it could and moved instrumentation into the boot ROM and small probe programs run through TinyTang in place of `resident.tpi`. `software/ae350/programs/busfault` showed a load from address 0 traps precisely (`mcause` 5, `mepc` the load, `mtval` 0) and that speculative fetches at 0 produce bridge ERRORs without trapping, so the address-0 ERRORs in failing and working runs are not the fault; `triggers` and `watch` showed the A25 has at least seven debug triggers whose chained address matches fire in M-mode only with `tcontrol.mte` set and report the exact instruction. `software/ae350/boot/start.S` and `boot.c` now clear triggers 0-5 at reset, enter programs through `boot_call`, which poisons the stack below the loader's frame with `0xbadbad00`, watches the loader's frames for loads and stores and boot ROM code for execution while the program runs, logs `run` per call, and records `ra` and `sp` in result words 11 and 12 on a trap (`software/ae350/include/ae350.h`). None of these fired on a failing run and the log showed one call per image, ruling out a read or write of the loader's frame, re-entry into the boot ROM, a second call, and stale stack values; a heap fill test was confounded by layout. Layout experiments then pinned `.data`, `.bss`, the entry stack and the data after the input slot to 64-byte boundaries, and showed the outcome follows absolute addresses with no padding rule, then that it is not fixed per build: the same images failed every run before a power cycle and played after one, and on the next boot the default streaming build failed the format sweep on its first three formats. The streaming change is therefore parked as `software/rbhost/parked/0001-play-while-decoding.patch` with a README, the layout experiments were reverted, and the qualified player (863764 bytes, CRC-32 `ef1502ed`) is back on the card as `/ae350/resident.tpi` and played to completion, while the open fault and the trigger facts are recorded in `.ai/core-reference.md`. The boot ROM change rebuilt the merged core: `MERGED_PLACE_OPTIONS="0 1 2 3"` met timing at placements 0, 1 and 3 with `clk_pixel` at 78.633, 76.248 and 80.036 MHz and failed at placement 2 at 69.934 MHz, worst setup -0.831 ns on `tangcore_io`'s receive path into the desk layer's colour latch and the bad-request counter, which this cycle did not touch; the placement 3 image, 5031936 bytes, MD5 `3d6de6d3195f30597ce0c14cfaff7d66`, CRC-32 `eb1935c2`, is `/cores/console138k/phosphortang.bin` on TinyTang's card with entry 72's image as `phosphortang.bin.bak`, and its boot ROM is byte-identical to this commit's. The user saw no track play from the streaming build, so the cycle's purpose is not met. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 73 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+The start failure is flagged and left until it shows itself more clearly, at the user's direction; when it is taken up, the untested leads are the RAM bridge's burst read path, DDR3 margin, and AE350 CPU debug through its JTAG port, which `src/ae350/ae350_soc.sv` ties off. Until then no rebuilt resident player ships, so faster starts, a resident player loop and gapless playback wait on it. Placement 2's `tangcore_io` receive path is the next `clk_pixel` target.
+
+#### Files Modified:
+
+- software/ae350/boot/boot.c
+- software/ae350/boot/start.S
+- software/ae350/include/ae350.h
+- software/ae350/programs/busfault/main.c
+- software/ae350/programs/triggers/main.c
+- software/ae350/programs/watch/main.c
+- software/rbhost/parked/0001-play-while-decoding.patch
+- software/rbhost/parked/README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---
