@@ -66,6 +66,14 @@ return `0xdeadbeef`; unknown writes have no effect.
 | `0x1000-0x310c` | W | One inactive 92x92 RGB332 artwork bank; each aligned word stores four pixels most-significant byte first |
 | `0x4000-0x43ff` | R/W | Merged core only: the AE350 subsystem's register view (loader, log ring, bridge counters and trace), reachable while `0x00a8` bit 0 is set |
 
+Inside the AE350 view, a running program asks the BL616 for file data through
+a mailbox in its result words (`software/ae350/include/ae350_request.h`):
+`0x4078` holds the byte offset, `0x407c` the length, and `0x4074` a sequence
+number the program bumps after writing them. The BL616 polls `0x4074` while
+the loader state at `0x4020` is RUN and answers each new sequence with one
+stream session of that byte range. The same words hold `mcause`, `mepc` and
+`mtval` after a trap.
+
 In the merged image the FPGA player is `pcm_sink`, a raw-PCM sink fed by the
 AE350, and several player registers read differently from the table above:
 `0x0064` fills to at most 2048 stereo samples; `0x006c` counts underruns since

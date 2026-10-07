@@ -2627,3 +2627,35 @@ The user wants track load time reduced next. Entry 73 measured 13.34 s to send t
 - User Test: PASS
 
 ---
+
+## 75 COMMIT Unreleased 2026-10-06T18:00:42-07:00
+
+#### Coming From:
+
+Unreleased c1af2db
+
+#### Purpose:
+
+Compare the AE350 setup with Tang-PSX's and give AE350 programs a way to request byte ranges of a file from the BL616 on demand, as Tang-PSX requests disc sectors, proved with a probe program before any player depends on it.
+
+#### Outcome:
+
+The user approved a three-step plan to replace sending each whole file before decoding with on-demand reads, playing while decoding and a resident gapless player, modelled on Tang-PSX's `disc_request` path, which reads only the sectors a game asks for over the same link, and informed by the BL616 CHD streaming in `rtissera/firmware-bl616` (`core/pcecd.cpp`, Apache-2.0), which decompresses CHD on the BL616 and streams sectors and CD audio over the UART with DMA overlap at about 2 Mbaud. The step 0 comparison changed no files. Tang-PSX writes back the whole data cache before calling a program where this boot ROM only executes `fence rw, rw` and `fence.i`, but Tang-PSX's JIT relies on that fence pair alone and its reference AE350-004 records that it is sufficient, so the difference is not a likely cause of the resident player start failure. This core's RAM bridge is its own SystemVerilog design rather than Tang-PSX's hardware-proven LiteX bridge; its randomized testbench covers BUSY, IDLE, out-of-range errors and both clock domains, and reading it found nothing, so it remains an open lead, as does this core keeping the loader's stack, which programs run on, in DDR3 where Tang-PSX keeps it in fabric RAM. The start failure is narrower than entry 73 recorded: a failing player stops after logging `stream rx` and before `rbhost.c` prints its `Codec:` line, so it stalls before or inside metadata parsing over the whole-file input, which the on-demand design replaces. For step 1, `software/ae350/include/ae350_request.h` defines a mailbox in USER(13..15), sequence, offset and length, which the BL616 reads at `0x4074` to `0x407c` and answers with one stream session per request, and provides inline request and receive helpers with a bus-clock timeout; `docs/debug-registers.md` documents it. The probe `software/ae350/programs/fileread`, 2552 bytes as a TPI, requests six ranges of the corpus `test.wav` and publishes each CRC-32 and byte count. TinyTang's new `phosphor run` command, recorded in TinyTang's log, loaded it on the entry 72 core and served the requests from the card. All six ranges arrived intact, the AE350's CRC equalling both the CRC TinyTang computed while sending and a CRC of a copy regenerated on the PC with TinyTang's `tools/make_codec_corpus.sh` commands: 44 bytes `8e6da437`, 65536 bytes `fa070481`, 100001 unaligned bytes `aeabcb44`, the last 1000 bytes `0fd0a46e`, a range running past the end correctly returning 10 bytes `3b14b2d1`, and the whole 1764044-byte file `0326bacf` in 5179 ms, about 340 KB/s, with a request of a few bytes taking about 10 ms in total. The probe returned `0x600d0000` with no failures and the loader returned to WAIT; the user accepted the result. The required `.ai` core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that `.ai/core.md` is unchanged, validated this entry as number 75 of 100 with exactly six sections, and confirmed that no settled history was rewritten.
+
+#### Next Steps:
+
+Step 2 changes the resident player to read its input through the mailbox with read-ahead instead of receiving the whole file first, and to play decoded audio as the codec produces it from a buffer in DDR3 that keeps `pcm_sink`'s 2048-sample FIFO fed, with TinyTang serving the requests during playback; it is qualified by the twelve-format sweep and measured by time to first sample against entry 73's 31 s for a 3.2 MB MP3. The player must stop clearing USER(13..15) at start, and its bridge counters in USER(10..12) stay where they are. Step 3, a resident player with gapless track changes, follows.
+
+#### Files Modified:
+
+- docs/debug-registers.md
+- software/ae350/include/ae350_request.h
+- software/ae350/programs/fileread/main.c
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
