@@ -48,6 +48,7 @@ debug_regs dut (
     .link_frames(32'd0), .link_bad_checksum(32'd0), .link_truncated(32'd0),
     .link_mods(8'd0), .link_key0(8'd0), .link_key1(8'd0),
     .i2s2_mclk_count(32'd1_228_800), .i2s2_clock_status(6'h1f),
+    .scope_control(), .scope_dropped(32'd0), .scope_status(32'd0), .scope_sweeps(32'd0),
     .pmod0_personality(pmod0_personality),
     .pmod1_personality(pmod1_personality),
     .pmod0_flipped(pmod0_flipped), .pmod1_flipped(pmod1_flipped),
@@ -113,8 +114,14 @@ initial begin
     @(negedge clk);
 
     expect_state("power-on", 4'd0, 4'd0, 1'b0, 1'b0, 1'b0, 1'b0);
-    expect_read("register ABI", 32'h04, 32'h0001_0009);
+    expect_read("register ABI", 32'h04, 32'h0001_000a);
     expect_read("cpu_mode at power-on", 32'ha8, 32'd0);
+    expect_read("scope powers up disabled", 32'hac, 32'd0);
+    write_reg(32'hac, 32'hb);
+    expect_read("scope control", 32'hac, 32'hb);
+    expect_read("scope drops", 32'hb0, 32'd0);
+    expect_read("scope status", 32'hb4, 32'd0);
+    expect_read("scope retire sweeps", 32'hb8, 32'd0);
     expect_read("I2S2 measured MCLK", 32'hf8, 32'd1_228_800);
     expect_read("I2S2 clock status", 32'hfc, 32'h1f);
 

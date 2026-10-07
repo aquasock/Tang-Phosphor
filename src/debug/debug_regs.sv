@@ -75,6 +75,8 @@ module debug_regs (
     input  [7:0]  link_key1,
     input  [31:0] i2s2_mclk_count,
     input  [5:0]  i2s2_clock_status,
+    output reg [3:0] scope_control,
+    input [31:0] scope_dropped, scope_status, scope_sweeps,
     output reg [3:0] pmod0_personality,
     output reg [3:0] pmod1_personality,
     output reg       pmod0_flipped,
@@ -117,6 +119,7 @@ always @(posedge clk) begin
         pmod1_flipped     <= 1'b0;
         render_hold       <= 1'b0;
         cpu_mode          <= 1'b0;
+        scope_control     <= 4'b0;
     end else begin
         uptime_cycles <= uptime_cycles + 1'b1;
         if (frame_tick)
@@ -136,6 +139,8 @@ always @(posedge clk) begin
                 end
                 else if (request_address == 32'h0000_00a8)
                     cpu_mode <= request_wdata[0];
+                else if (request_address == 32'h0000_00ac)
+                    scope_control <= request_wdata[3:0];
             end
         end
     end
@@ -170,7 +175,7 @@ always @(posedge clk) begin
     read_known_q <= read_known;
     case (read_index[4:0])
         5'd0: read_lo <= MAGIC;
-        5'd1: read_lo <= 32'h0001_0009; // register ABI 1.9: I2S2 PCM playback
+        5'd1: read_lo <= 32'h0001_000a; // register ABI 1.10: XY scope
         5'd2: read_lo <= BUILD_DATE;
         5'd3: read_lo <= 32'h0000_00ff;
         5'd4: read_lo <= uptime_cycles;
@@ -210,6 +215,10 @@ always @(posedge clk) begin
         5'd8: read_hi <= boundary_gap_samples;
         5'd9: read_hi <= {16'b0, audible_stream_id};
         5'd10: read_hi <= {31'b0, cpu_mode};
+        5'd11: read_hi <= {28'b0, scope_control};
+        5'd12: read_hi <= scope_dropped;
+        5'd13: read_hi <= scope_status;
+        5'd14: read_hi <= scope_sweeps;
         // Mirror block, word indices 48-57 (0xc0-0xe4).  Layouts match the
         // socket bring-up core bit for bit, so the checker's decoding carries
         // over: control packs the renderer's frame selector above the declaration, and the

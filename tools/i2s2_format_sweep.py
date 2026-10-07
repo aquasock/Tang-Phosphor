@@ -42,8 +42,8 @@ def main():
     failures = 0
     with serial.Serial(args.port, 115200, timeout=.3, write_timeout=30) as port:
         require_shell(port)
-        if peek(port, 4) != 0x10009:
-            raise RuntimeError("requires the I2S2 PCM playback image, ABI 1.9")
+        if peek(port, 4) not in (0x10009, 0x1000a):
+            raise RuntimeError("requires the I2S2 PCM playback image, ABI 1.9/1.10")
         for ext in plan:
             require_shell(port)
             out = run(port, f"phosphor play /music/test.{ext}", 60)

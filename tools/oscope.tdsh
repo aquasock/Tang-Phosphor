@@ -1,0 +1,35 @@
+#!/bin/tdsh
+# Stereo XY scope; installed I2S2 on PMOD0, PMOD1 released.
+CORE=/cores/console138k/phosphortang-oscope.bin
+if test -f "$CORE"
+    echo "oscope: image found"
+else
+    echo "oscope: image missing"
+    return 1
+endif
+tangload "$CORE"
+if $? != 0
+    echo "oscope: FPGA load failed"
+    return 1
+endif
+fpga
+if $? != 0
+    echo "oscope: FPGA link unavailable"
+    return 1
+endif
+phosphor poke 0xc0 0x50
+if $? != 0
+    echo "oscope: socket declaration failed"
+    return 1
+endif
+phosphor poke 0xac 0xb
+if $? != 0
+    echo "oscope: scope enable failed"
+    return 1
+endif
+osd off
+echo "oscope: 512x512 stereo XY, medium trails and glow"
+echo "oscope: phosphor play /music/<track>"
+echo "oscope: trails: poke 0xac 0x9 short, 0xb medium, 0xd long"
+echo "oscope: poke 0xac 0 disables scope; 0x3 keeps medium trails without glow"
+return 0

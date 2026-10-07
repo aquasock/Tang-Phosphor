@@ -151,6 +151,9 @@ wire [15:0] audio_source_word [1:0];
 wire [15:0] player_audio_left;
 wire [15:0] player_audio_right;
 wire pcm_sample_valid;
+wire emitted_sample_present;
+wire [3:0] scope_control;
+wire [31:0] scope_dropped, scope_status, scope_sweeps;
 wire playback_active;
 wire [15:0] audio_sample_word [1:0];
 
@@ -402,7 +405,7 @@ i2s_playback audio_timebase (
     .paused(pause_requested),
     .pcm_valid(pcm_sample_valid),
     .pcm_left(audio_source_word[0]), .pcm_right(audio_source_word[1]),
-    .clk_audio(clk_audio),
+    .clk_audio(clk_audio), .sample_present(emitted_sample_present),
     .sample_tick(sample_tick),
     .hdmi_left(audio_sample_word[0]), .hdmi_right(audio_sample_word[1]),
     .lane_o(i2s2_play_lane_o), .lane_oe(i2s2_play_lane_oe)
@@ -433,6 +436,12 @@ pmod_mirror_core #(
     .uart_tx            (),
     .frame_tick_in      (1'b0),
     .clk_audio_in       (clk_audio),
+    .i_scope_control    (scope_control),
+    .i_scope_flush      (player_stream_start || player_stream_cancel || !i2s2_ready),
+    .i_sample_present   (emitted_sample_present),
+    .o_scope_dropped    (scope_dropped),
+    .o_scope_status     (scope_status),
+    .o_scope_sweeps     (scope_sweeps),
     .audio_rate_48k_in  (hdmi_audio_rate_48k),
     .audio_sample_word_in (audio_sample_word),
     .pmod0_io           (pmod0_io),
@@ -635,6 +644,8 @@ debug_regs debug_registers (
     .link_mods(link_mods),
     .link_key0(link_keys[0]),
     .link_key1(link_keys[1]),
+    .scope_control(scope_control), .scope_dropped(scope_dropped),
+    .scope_status(scope_status), .scope_sweeps(scope_sweeps),
     .i2s2_mclk_count(i2s2_mclk_count),
     .i2s2_clock_status(i2s2_clock_status),
     .pmod0_personality(display_pmod0_personality),

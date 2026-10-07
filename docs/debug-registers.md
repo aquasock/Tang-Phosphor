@@ -7,7 +7,7 @@ return `0xdeadbeef`; unknown writes have no effect.
 | Address | Access | Meaning |
 |---:|:---:|---|
 | `0x0000` | R | Magic `0x54504830` (`TPH0`) |
-| `0x0004` | R | Register ABI, currently `0x00010009` (1.9) |
+| `0x0004` | R | Register ABI, currently `0x0001000a` (1.10) |
 | `0x0008` | R | Build date in packed hexadecimal (`0x20260927`) |
 | `0x000c` | R | Core capabilities: bit 0 debug bank, bit 1 stream transport, bit 2 WAV playback, bit 3 startup diagnostic tone, bit 4 FLAC playback, bit 5 native album UI/control, bit 6 RGB332 cover artwork, bit 7 gapless session append |
 | `0x0010` | R | Logic-clock cycles since reset, wrapping at 32 bits |
@@ -48,10 +48,14 @@ return `0xdeadbeef`; unknown writes have no effect.
 | `0x00a0` | R | Sample periods of silence inserted at gapless boundaries since reset; excludes paused periods |
 | `0x00a4` | R | Audible stream ID `[15:0]`: the transport session whose samples are being presented |
 | `0x00a8` | R/W | Stream routing (`cpu_mode`), merged core only: bit 0 clear feeds the BL616 stream to the FPGA player, set feeds it to the AE350 program loader and routes the player from the AE350's play stream; powers up clear. At `0x00c0`, bit 0, before ABI 1.8 |
+| `0x00ac` | R/W | O-Scope control: enable `[0]`, trail `[2:1]` (`0` short, `1` medium, `2` long, `3` very short), glow `[3]`; settings latch at a video frame boundary. Powers up disabled; compiled into the merged I2S2 playback backend |
+| `0x00b0` | R | Visual reconstruction points discarded when the O-Scope queue is full, cumulative since core reset; does not count or cause audio underruns |
+| `0x00b4` | R | O-Scope status: enabled `[0]`, initialized `[1]`, drawing `[2]`, prefetching `[3]`, scan-line cache ready `[4]`, queue occupancy `[16:8]`, latched control `[23:20]`, 240 Hz timestamp `[31:24]` |
+| `0x00b8` | R | Completed O-Scope timestamp retirement sweeps since core reset |
 | `0x00c0` | R/W | Socket control: hold `[0]` freezes the renderer between frames, PMOD0 personality `[7:4]`, PMOD1 personality `[11:8]`, PMOD0 seated upside down `[12]`, PMOD1 `[13]`; reads add the renderer's frame selector at `[18:16]`. Personalities are `0` none, `1` OLEDrgb, `2` PmodVGA J1, `3` PmodVGA J2, `4` rotary encoder, `5` I2S2 stereo PCM playback (merged core only; see `docs/i2s2-bringup.md`). Powers up with both sockets released |
 | `0x00c4` | R | Renderer source bank `[0]` |
 | `0x00c8` | R | Source frame signature |
-| `0x00cc` | R | HDMI transmitter frame signature |
+| `0x00cc` | R | HDMI picture signature (scope when enabled, otherwise menu; before desktop composition) |
 | `0x00d0` | R | Panel (PMOD OLED) frame signature |
 | `0x00d4` | R | Frames rendered |
 | `0x00d8` | R | Panel frames sent |

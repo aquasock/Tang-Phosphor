@@ -17,6 +17,7 @@ module i2s_playback (
     input logic [15:0] pcm_left, pcm_right,
     output logic sample_tick,
     output logic clk_audio,
+    output logic sample_present,
     output logic [15:0] hdmi_left, hdmi_right,
     output logic [7:0] lane_o, lane_oe
 );
@@ -36,7 +37,8 @@ module i2s_playback (
     end
 
     logic request_toggle, ack_toggle, frame_toggle;
-    logic [39:0] source_pair, emitted_pair;
+    logic [40:0] source_pair;
+    logic [32:0] emitted_pair;
     logic request_meta /* synthesis syn_srlstyle = "registers" */;
     logic request_sync /* synthesis syn_srlstyle = "registers" */;
     logic request_seen;
@@ -61,6 +63,7 @@ module i2s_playback (
             hdmi_left <= 0;
             hdmi_right <= 0;
             clk_audio <= 0;
+            sample_present <= 0;
         end else begin
             request_meta <= request_toggle;
             request_sync <= request_meta;
@@ -69,7 +72,7 @@ module i2s_playback (
             clk_audio <= 0;
             if (request_event) begin
                 request_seen <= request_sync;
-                source_pair <= {epoch_gray,
+                source_pair <= {ready && pcm_valid && !paused && !flush, epoch_gray,
                     ready && pcm_valid && !paused && !flush ? {pcm_right, pcm_left} : 32'd0};
                 ack_toggle <= request_sync;
             end
@@ -78,6 +81,7 @@ module i2s_playback (
                 clk_audio <= 1;
                 hdmi_left <= emitted_pair[15:0];
                 hdmi_right <= emitted_pair[31:16];
+                sample_present <= emitted_pair[32];
             end
         end
     end
@@ -87,9 +91,11 @@ module i2s_playback (
     logic ack_seen;
     logic [8:0] control_meta /* synthesis syn_srlstyle = "registers" */;
     logic [8:0] control_sync /* synthesis syn_srlstyle = "registers" */;
-    logic [39:0] pending_pair;
+    logic [40:0] pending_pair;
     logic pending_valid;
     wire frame_tick;
+    wire present = pending_valid && pending_pair[40] && control_sync[8] &&
+                   pending_pair[39:32] == control_sync[7:0];
     wire [31:0] play_pair = pending_valid && control_sync[8] &&
                             pending_pair[39:32] == control_sync[7:0]
                             ? pending_pair[31:0] : 32'd0;
@@ -114,7 +120,7 @@ module i2s_playback (
             control_sync <= control_meta;
             if (frame_tick) begin
                 request_toggle <= !request_toggle;
-                emitted_pair <= {control_sync[7:0], play_pair};
+                emitted_pair <= {present, play_pair};
                 frame_toggle <= !frame_toggle;
                 pending_valid <= 0;
             end

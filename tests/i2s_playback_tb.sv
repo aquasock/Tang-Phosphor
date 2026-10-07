@@ -56,15 +56,25 @@ module i2s_playback_tb;
         .error_code(), .detected_format(), .playback_rate_valid(), .playback_rate(),
         .audible_stream_id(), .boundary_count(), .boundary_gap_samples()
     );
-    wire clk_audio;
+    wire clk_audio, emitted_present;
+    wire [31:0] visual_drops, visual_status, visual_sweeps;
+    logic zero_test=0; integer tagged_zeros=0;
     wire [15:0] hdmi_left, hdmi_right;
     wire [7:0] lane_o, lane_oe;
     i2s_playback bridge (
         .clk_pixel(clk), .clk_mclk(mclk), .resetn(resetn),
         .running(running), .ready(ready), .flush(start || cancel),
         .paused(paused), .pcm_valid(pcm_valid), .pcm_left(pcm_left), .pcm_right(pcm_right),
-        .sample_tick(sample_tick), .clk_audio(clk_audio),
+        .sample_tick(sample_tick), .clk_audio(clk_audio), .sample_present(emitted_present),
         .hdmi_left(hdmi_left), .hdmi_right(hdmi_right), .lane_o(lane_o), .lane_oe(lane_oe)
+    );
+    // The observer runs alongside the physical output checks; its FIFO and
+    // drawing workload have no path back into PCM consumption.
+    scope_xy observer (
+        .clk(clk), .resetn(resetn), .control(4'hb), .flush(start || cancel || !ready),
+        .audio_tick(clk_audio), .audio_present(emitted_present),
+        .audio_left(hdmi_left), .audio_right(hdmi_right), .cx(11'd0), .cy(10'd0),
+        .enabled(), .rgb(), .dropped(visual_drops), .status(visual_status), .sweeps(visual_sweeps)
     );
     integer received = 0, frames = 0, base_value = 16'h8000;
     wire acr_wrap;
@@ -99,7 +109,12 @@ module i2s_playback_tb;
         old_rate = active_48k;
     end
     logic [31:0] hdmi_pair = 0;
-    always @(posedge clk_audio) hdmi_pair = {hdmi_right, hdmi_left};
+    always @(posedge clk_audio) begin
+        hdmi_pair = {hdmi_right, hdmi_left};
+        if (!zero_test && emitted_present != (hdmi_pair!=0))
+            $fatal(1,"emitted sample tag mismatches actual PCM/synthetic silence");
+        if (zero_test && emitted_present && hdmi_pair==0) tagged_zeros++;
+    end
     integer slot = -1;
     logic last_lrck = 0;
     logic [31:0] left_word = 0, right_word = 0;
@@ -212,6 +227,17 @@ module i2s_playback_tb;
         wait (ready);
         repeat (1000) @(negedge mclk);
         if (hdmi_pair != 0) $fatal(1, "lock recovery replayed old data");
+        // Genuine zero PCM must retain presence; pause/idle zero frames did
+        // not. The observer can distinguish them without altering audio.
+        zero_test=1;
+        @(negedge clk); start=1;
+        @(negedge clk); start=0;
+        for(integer i=0;i<32;i++) byte_send(0);
+        @(negedge clk); finish_stream=1;
+        @(negedge clk); finish_stream=0;
+        wait(samples==8);
+        repeat(1000) @(negedge mclk);
+        if(tagged_zeros!=8) $fatal(1,"genuine zero sample presence: %0d",tagged_zeros);
         if (frames < 256) $fatal(1, "insufficient frame coverage");
         if (acr_checks_44 < 2 || acr_checks_48 < 1) $fatal(1, "insufficient ACR coverage");
         $display("PASS i2s_playback: coherent PCM on both outputs, HDMI ACR, pause, cancellation, lock recovery and native rates both ways");

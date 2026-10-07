@@ -2,8 +2,9 @@
 
 ## MiSTer-Phosphor design reference
 
-Tang-Phosphor's bounded audio profile and album-screen presentation use the
-project's MiSTer implementation as a behavioral and visual reference:
+Tang-Phosphor's bounded audio profile, album-screen presentation and stereo
+XY O-Scope use the project's MiSTer implementation as a behavioral and visual
+reference:
 
 - Project: https://github.com/aquasock/MiSTer-Phosphor
 - Reference commit: `183b514ceb98afd373d2bd8d8b9425e1df74bd15`
@@ -11,6 +12,10 @@ project's MiSTer implementation as a behavioral and visual reference:
 
 The Tang implementation is newly written for TangCore's transport, Gowin
 memories, clocks, and HDMI path; no MiSTer RTL file is copied into this tree.
+The visual reconstruction filter uses the reference's four symmetric
+half-band coefficient pairs; the line engine, timestamp persistence, banked
+memory scheduling and glow shader are Tang-native implementations. See
+[docs/oscope-plan.md](docs/oscope-plan.md) for the referenced RTL files.
 
 ## TangCore Monitor Core
 

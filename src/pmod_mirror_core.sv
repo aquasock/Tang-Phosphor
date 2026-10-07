@@ -66,6 +66,10 @@ module pmod_mirror_core #(
     input  logic       audio_rate_48k_in,
     input  logic [15:0] audio_sample_word_in [1:0],
 
+    input logic [3:0] i_scope_control,
+    input logic i_scope_flush, i_sample_present,
+    output logic [31:0] o_scope_dropped, o_scope_status, o_scope_sweeps,
+
     // Socket declaration and renderer hold, used when EXPOSE_STATE is set.  A
     // host that keeps its own register map owns the bank, so the bank in here
     // never sees a write and these ports carry the configuration instead.  It
@@ -333,7 +337,10 @@ module pmod_mirror_core #(
     // The backend latches its own read bank at its frame boundary.
     generate
     if (HDMI_BACKEND) begin : g_hdmi
-        ui_hdmi_backend hdmi_backend (
+        ui_hdmi_backend #(.SCOPE_BACKEND(I2S2_PLAYBACK)) hdmi_backend (
+            .scope_control(i_scope_control), .scope_flush(i_scope_flush),
+            .sample_present(i_sample_present), .scope_dropped(o_scope_dropped),
+            .scope_status(o_scope_status), .scope_sweeps(o_scope_sweeps),
             .clk_pixel      (clk_pixel),
             .clk_pixel_x5   (clk_pixel_x5),
             .resetn         (resetn),
@@ -364,6 +371,7 @@ module pmod_mirror_core #(
             .tmds           (tmds)
         );
     end else begin : g_no_hdmi
+        assign o_scope_dropped=0; assign o_scope_status=0; assign o_scope_sweeps=0;
         assign hdmi_src_x      = 7'd0;
         assign hdmi_px         = 16'h0000;
         assign hdmi_frame_tick = 1'b0;

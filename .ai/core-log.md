@@ -2790,3 +2790,58 @@ The I2S2 output playback cycle is complete. Line input is deferred and the OLED 
 - User Test: PASS
 
 ---
+
+## 79 COMMIT Unreleased 2026-10-06T23:42:36-07:00
+
+#### Coming From:
+
+Unreleased 1941765
+
+#### Purpose:
+
+Implement the approved 512x512 stereo XY O-Scope with selectable persistence and glow, and preserve its terminal timing failure for agent handoff.
+
+#### Outcome:
+
+The merged I2S2 backend now observes the shared emitted PCM pair with a genuine-sample presence tag, reconstructs the visual stream at 2x, queues connected XY lines and derives eight-bit display brightness from a nine-bit valid/timestamp plane; the 720x720 HDMI square, selectable trails and glow precede desktop composition, and ABI 1.10 adds scope controls and diagnostics at `0xac` through `0xb8`. The full regression suite passed, including independent full-raster comparison, overload discontinuities, timestamp wrap, shared I2S/HDMI audio at both native rates and real zero-PCM tagging; the RAM wrapper also passed against Gowin's DPX9B primitive model. The isolated build used committed `1941765` plus scope changes only, excluding earlier player/bridge/JTAG experiments. Gowin did not define `SYNTHESIS`, so the first attempts selected unsupported inferred read-before-write RAM; the final wrapper defaults to explicit normal-write DPX9B, with `SCOPE_RAM_BEHAVIORAL` for portable benches. Placements 0 and 1 completed but failed the 74.25 MHz pixel constraint at 43.082 and 46.961 MHz, with setup TNS -79565.688 and -67710.695 ns. The critical path is timestamp brightness conversion into the fabric-register line cache; final resources are 24352 logic, 27596 FF, 257/340 BSRAM, 6/298 DSP, PRIMARY 8/8 and PLL 7/12. At the user's direction, placements 2 and 3 were terminated while routing and are assumed failed for handoff, with no measured final timing verdict. The proposed brightness pipeline and explicit lane-cache rewrite were not implemented. Six 48 kHz shape WAVs and a 44.1 kHz circle were uploaded, but no scope image or launcher was deployed and no hardware or user test ran. `docs/oscope-handoff.md` records the evidence and recovery actions; qualified playback remains entry 78. The core-syntax audit re-read core.md and core-syntax.md, inspected the complete staged .ai diff, confirmed core.md unchanged and settled committed history retained, and validated entry 79 of 100 with exactly six sections; pre-existing local log trimming and unrelated work remain outside this commit.
+
+#### Next Steps:
+
+Resume only when the user requests it. Pipeline the age, trail ramp, quadratic brightness and cache-publication path while carrying matching row/group tags and valid strobes, and split the scan-line caches into explicit fixed-row/lane memories to improve Gowin inference and fanout. Verify the resulting raster timing and memory mapping, rerun affected simulations and required regression checks after source changes, then rebuild from a clean scope checkout excluding the preserved experiments. Deploy only an image meeting setup and hold timing, run the fixture and twelve-format tools, and obtain hardware acceptance before qualifying the visualizer. Keep the existing I2S2 playback image, firmware and on-demand player; OLED, encoder, line input and Siglent measurements remain deferred.
+
+#### Files Modified:
+
+- THIRD_PARTY.md
+- build-merged.tcl
+- docs/debug-registers.md
+- docs/oscope-plan.md
+- docs/oscope-handoff.md
+- src/audio/i2s_playback.sv
+- src/debug/debug_regs.sv
+- src/pmod_mirror_core.sv
+- src/pmod_mirror_top.sv
+- src/tang_phosphor_top.sv
+- src/video/ui_hdmi_backend.sv
+- src/visualizers/scope_phosphor_ram.sv
+- src/visualizers/scope_reconstruct.sv
+- src/visualizers/scope_xy.sv
+- tests/debug_regs_tb.sv
+- tests/i2s_playback_tb.sv
+- tests/run.sh
+- tests/ui_mirror_tb.sv
+- tests/scope_ram_tb.sv
+- tests/scope_reconstruct_tb.sv
+- tests/scope_xy_tb.sv
+- tools/check_scope_ram.sh
+- tools/i2s2_format_sweep.py
+- tools/make_scope_fixtures.py
+- tools/oscope.tdsh
+- tools/oscope_check.py
+
+#### Status:
+
+- Build: FAIL
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

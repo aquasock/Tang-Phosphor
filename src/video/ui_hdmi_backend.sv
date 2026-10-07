@@ -13,7 +13,7 @@
 // let it change part way through a frame and tear.  Latching here costs one
 // frame of latency on an update and removes tearing entirely.
 
-module ui_hdmi_backend (
+module ui_hdmi_backend #(parameter bit SCOPE_BACKEND = 1'b0) (
     input  logic        clk_pixel,
     input  logic        clk_pixel_x5,
     input  logic        resetn,
@@ -22,6 +22,10 @@ module ui_hdmi_backend (
     input  logic        clk_audio,
     input  logic        audio_rate_48k,
     input  logic [15:0] audio_sample_word [1:0],
+
+    input logic [3:0] scope_control,
+    input logic scope_flush, sample_present,
+    output logic [31:0] scope_dropped, scope_status, scope_sweeps,
 
     // The bank the outputs are reading, and the one this backend latched at
     // its own frame boundary, which the store read must use.
@@ -104,6 +108,22 @@ module ui_hdmi_backend (
         .emitted_px (scan_px)
     );
 
+    wire [23:0] scope_rgb;
+    wire scope_enabled;
+    generate if (SCOPE_BACKEND) begin : g_scope
+        scope_xy scope (
+            .clk(clk_pixel), .resetn(resetn), .control(scope_control),
+            .flush(scope_flush), .audio_tick(clk_audio), .audio_present(sample_present),
+            .audio_left(audio_sample_word[0]), .audio_right(audio_sample_word[1]),
+            .cx(cx), .cy(cy), .enabled(scope_enabled), .rgb(scope_rgb),
+            .dropped(scope_dropped), .status(scope_status), .sweeps(scope_sweeps)
+        );
+    end else begin : g_no_scope
+        assign scope_rgb=0; assign scope_enabled=0;
+        assign scope_dropped=0; assign scope_status=0; assign scope_sweeps=0;
+    end endgenerate
+    wire [23:0] selected_picture = scope_enabled ? scope_rgb : picture_rgb;
+
     ui_desk_layer desk (
         .clk          (clk_pixel),
         .cx           (cx),
@@ -118,13 +138,13 @@ module ui_hdmi_backend (
         .wbg          (desk_bg),
         .overlay      (desk_overlay),
         .layer_on     (desk_on),
-        .picture_rgb  (picture_rgb),
+        .picture_rgb  (selected_picture),
         .rgb          (rgb)
     );
 
     // The visible window is 1280x720; the raster runs 1650x750 including
     // blanking, and blanking is not part of the picture.
-    assign emitted_px     = scan_px;
+    assign emitted_px     = scope_enabled ? {scope_rgb[23:19],scope_rgb[15:10],scope_rgb[7:3]} : scan_px;
     assign emitted_strobe = (cx < 11'd1280) && (cy < 10'd720);
     // The cycle after the last visible pixel of a frame: no strobe, so the
     // checksum can publish without merging a coincident pixel.

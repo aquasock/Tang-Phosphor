@@ -33,10 +33,27 @@ verilator --binary --timing -Wno-fatal \
     "$project_dir/src/pmod/pmod_io_buf.sv"
 "$output_dir/i2s_tx/Vi2s_tx_tb"
 
-verilator --binary --timing -Wno-fatal \
+verilator --binary --timing -Wno-fatal --top-module scope_reconstruct_tb \
+    --Mdir "$output_dir/scope_reconstruct" "$test_dir/scope_reconstruct_tb.sv" \
+    "$project_dir/src/visualizers/scope_reconstruct.sv"
+"$output_dir/scope_reconstruct/Vscope_reconstruct_tb"
+
+mkdir -p "$project_dir/build/oscope-session"
+verilator --binary --timing -Wno-fatal -DSCOPE_RAM_BEHAVIORAL --top-module scope_xy_tb \
+    --Mdir "$output_dir/scope_xy" "$test_dir/scope_xy_tb.sv" \
+    "$project_dir/src/visualizers/scope_xy.sv" \
+    "$project_dir/src/visualizers/scope_phosphor_ram.sv" \
+    "$project_dir/src/visualizers/scope_reconstruct.sv" \
+    "$project_dir/src/audio/pcm_sample_fifo.sv"
+(cd "$project_dir" && "$output_dir/scope_xy/Vscope_xy_tb")
+
+verilator --binary --timing -Wno-fatal -DSCOPE_RAM_BEHAVIORAL \
     --top-module i2s_playback_tb --Mdir "$output_dir/i2s_playback" \
     "$test_dir/i2s_playback_tb.sv" \
     "$project_dir/src/audio/i2s_playback.sv" \
+    "$project_dir/src/visualizers/scope_xy.sv" \
+    "$project_dir/src/visualizers/scope_phosphor_ram.sv" \
+    "$project_dir/src/visualizers/scope_reconstruct.sv" \
     "$project_dir/src/audio/i2s_clock_control.sv" \
     "$project_dir/src/hdmi/audio_clock_regeneration_packet.sv" \
     "$project_dir/src/audio/i2s_tx.sv" \
