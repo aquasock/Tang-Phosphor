@@ -1,6 +1,12 @@
 // Tang-Phosphor bring-up top level for the Tang Console 138K.
 
-module tang_phosphor_top (
+module tang_phosphor_top #(
+    // Debug builds only: PMOD0 carries the AE350's debug JTAG instead of a
+    // personality -- pin 1 TCK, 2 TMS, 3 TDI, 4 TDO, 7 TRST (pulled up; a
+    // jumper to pin 11 grounds it) -- for an external probe (OpenOCD;
+    // core-log entry 77).  The socket is otherwise released.
+    parameter bit AE350_JTAG_PMOD0 = 1'b0
+) (
     input        sys_clk,
 
     // PMOD sockets.  Driven by the display stack: what each socket does is a
@@ -422,6 +428,7 @@ pmod_mirror_core #(
     .TRANSPORT      (1'b0),
     .EXTERNAL_AUDIO (1'b1),
     .EXPOSE_STATE   (1'b1),
+    .RELEASE_PMOD0  (AE350_JTAG_PMOD0),
     .I2S2_BACKEND   (1'b1),
     .I2S2_PLAYBACK  (1'b1)
 ) display (
@@ -691,6 +698,25 @@ always @(posedge clk_pixel)
     debug_rdata_q <= in_ae350_window ? ae350_debug_rdata : player_debug_rdata;
 assign debug_rdata = debug_rdata_q;
 
+// The AE350's debug JTAG: on PMOD0 in a debug build (Digilent pins 1-4 are
+// Sipeed IO0, IO2, IO4 and IO6), otherwise held idle.
+logic ae350_jtag_trst, ae350_jtag_tck, ae350_jtag_tms, ae350_jtag_tdi;
+logic ae350_jtag_tdo, ae350_jtag_tdo_oe;
+generate
+    if (AE350_JTAG_PMOD0) begin : g_ae350_jtag
+        assign ae350_jtag_trst = pmod0_io[1];
+        assign ae350_jtag_tck = pmod0_io[0];
+        assign ae350_jtag_tms = pmod0_io[2];
+        assign ae350_jtag_tdi = pmod0_io[4];
+        assign pmod0_io[6]    = ae350_jtag_tdo_oe ? ae350_jtag_tdo : 1'bz;
+    end else begin : g_ae350_jtag_idle
+        assign ae350_jtag_trst = 1'b1;
+        assign ae350_jtag_tck = 1'b1;
+        assign ae350_jtag_tms = 1'b1;
+        assign ae350_jtag_tdi = 1'b0;
+    end
+endgenerate
+
 ae350_subsystem cpu_subsystem (
     .clk           (sys_clk),
     .tclk          (clk_pixel),
@@ -727,7 +753,13 @@ ae350_subsystem cpu_subsystem (
     .debug_write   (debug_write),
     .debug_address (debug_address),
     .debug_wdata   (debug_wdata),
-    .debug_rdata   (ae350_debug_rdata)
+    .debug_rdata   (ae350_debug_rdata),
+    .jtag_trst     (ae350_jtag_trst),
+    .jtag_tck      (ae350_jtag_tck),
+    .jtag_tms      (ae350_jtag_tms),
+    .jtag_tdi      (ae350_jtag_tdi),
+    .jtag_tdo      (ae350_jtag_tdo),
+    .jtag_tdo_oe   (ae350_jtag_tdo_oe)
 );
 
 endmodule

@@ -6,8 +6,12 @@
 // faster cclk (100 MHz class), exercising both the slow->fast command FIFO
 // and the fast->slow response FIFO, plus the reset that clears both FIFOs.
 // A pipelined AHB-Lite master issues WRAP4/INCR4/INCR8/undefined-length
-// bursts with BUSY and IDLE cycles, narrow single transfers, and addresses
-// outside DDR3; a Gowin native-port model stalls cmd_ready and wr_data_rdy at
+// bursts with BUSY and IDLE cycles, narrow single transfers, addresses
+// outside DDR3, and redirected bursts -- a NONSEQ beat on one line whose SEQ
+// beats continue a wrapping burst on another, the sequence the AE350's RAM port
+// was traced issuing on hardware (Tang-Phosphor core-log entry 77), which a
+// bridge that predicts SEQ beats without their address serves from the wrong
+// line; a Gowin native-port model stalls cmd_ready and wr_data_rdy at
 // random and returns reads in order after a random latency.  Addresses are
 // confined to a few lines so reads constantly follow writes to the same line.
 `timescale 1ns/1ps
@@ -210,6 +214,17 @@ module ae350_ram_bridge_tb #(
         end
     endtask
 
+    // A NONSEQ beat at `first`, then the rest of a WRAP4 burst on another
+    // line, continuing from the lane after `first`'s, as SEQ beats.
+    task automatic gen_redirected(input logic write, input logic [31:0] first,
+                                  input logic [31:0] other_line);
+        slots.push_back(make(2'b10, first, write, 3'd3, 3'b010));
+        for (int i = 1; i < 4; i++) begin
+            logic [31:0] a = {other_line[31:5], 5'(first[4:0] + 8 * i)};
+            slots.push_back(make(2'b11, a, write, 3'd3, 3'b010));
+        end
+    endtask
+
     task automatic generate_slots();
         while (slots.size() < SLOTS) begin
             int kind = $urandom % 12;
@@ -228,6 +243,8 @@ module ae350_ram_bridge_tb #(
                     a = a & ~((32'd1 << size) - 1);
                     slots.push_back(make(2'b10, a, write, size, 3'b000));
                 end
+                10: gen_redirected(write, line + 32'(8 * ($urandom % 4)),
+                                   line_address());                           // redirected burst
                 9: begin                                                             // outside DDR3
                     logic [31:0] a = ($urandom % 2) ? 32'h0000_1000 : 32'h8000_0040;
                     slots.push_back(make(2'b10, a, write, 3'd2, 3'b000));

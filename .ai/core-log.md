@@ -595,3 +595,48 @@ The scope now passes at two placements of four with no scope path failing, and t
 - User Test: PASS
 
 ---
+
+## 83 COMMIT Unreleased 2026-10-10T13:27:30-07:00
+
+#### Coming From:
+
+Unreleased 7cf9ede
+
+#### Purpose:
+
+Commit and record the AE350 experiment work that has sat in the working tree since 2026-10-06 without ever being logged, and the one-line core.md standard it was carried under.
+
+#### Outcome:
+
+Four experiments and one standards line are committed, and all four experiments are logged as **deferred and unqualified** rather than as results, which is what they are: each document says in its own words that it was written on 2026-10-06 between core-log entries 76 and 79 and never logged, and none has been built, flashed or exercised in this state. The first is the RAM bridge burst prediction fix in `src/ae350/ae350_ram_bridge.sv` and `tests/ae350_ram_bridge_tb.sv`. The bridge serves the AE350's AHB RAM port and, to run the rest of a cache-line burst without wait states, predicts whether a SEQ beat can complete from registered burst state plus `HTRANS` and `HWRITE`, serving a predicted read from the line buffer at the next lane without looking at `HADDR`; the experiment's comments record the AE350's RAM port issuing a NONSEQ beat on one line followed by SEQ beats on a different line, which if real means those beats are served from the wrong line -- wrong data with no error -- and would fit the resident player start failure of entries 69, 73 and 74, which came and went across power cycles and depended on image layout. The change records the line of the last accepted transfer and predicts a SEQ beat only within that line, and the bench gains a redirected-burst case; it remains a hypothesis, its comments cite a bus trace whose evidence is not in the repository, and the added address compare must be checked against the bus clock. The second is the AE350 debug JTAG experiment: `AE350_JTAG_PMOD0` in `src/tang_phosphor_top.sv`, `RELEASE_PMOD0` in `src/pmod_mirror_core.sv`, the debug ports carried through `src/ae350/ae350_soc.sv` and `src/ae350/ae350_subsystem.sv` and tied off in `src/ae350/ae350_ddr3_top.sv`, plus `tools/openocd-ae350.cfg` driving a Raspberry Pi Pico 2 running lonehog/JTAGprobe as a CMSIS-DAP v2 adapter, so the A25's debug module can be reached on PMOD0 while TinyTang reprograms the FPGA. Its own open point is that the default build must be unchanged by it and has not been checked against a committed image, and that TRST's polarity is undocumented. The third is two probe programs, `software/ae350/programs/chainload` and `wbrace`: how an image must be committed to memory before it is run, across three commit modes, and whether a cache-line fill through the bridge can return DDR3 contents from before a write-back issued just ahead of it. The fourth is the resident gapless player in `software/rbhost/host/platform_ae350.c` and `rbhost.c`, step 3 of the plan approved in entry 75, which adds the file-request mailbox with QUERY_NEXT and QUERY_POLL, a magic word and track counters, and `rbhost_reset()`; its document is explicit that **the qualified player remains entry 76's on-demand image and must not be replaced by a build of this work until it is qualified**, which bounds what committing the source can affect. The four documents are added under `docs/`, and their status lines were corrected in this commit because publishing them made their own words false: each said it was uncommitted, and each now says it is unqualified, was written on 2026-10-06 and is committed and logged as deferred in this entry. The standards line is `.ai/core.md`, whose colibri paragraph is brought to the wording the sibling projects carry -- CERN's colibri via the colibri-sv port, ideas and conventions only, approval before adapting anything -- and it is recorded here because a restricted file moved, not because this cycle edited it. Nothing was built, flashed, deployed or tested: committing changes what is stored and not what runs, the card is untouched, and the qualified player image is unchanged. `third_party/rockbox` remains a dirty submodule and was deliberately not moved by this commit. The required core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai` diff, confirmed that settled history is intact and that the only `.ai` changes are the user's one-line standards edit and this appended entry, and validated the four-field header, six canonical sections, prose in Outcome and Next Steps, an allowed Status set, and numbering as this log's highest entry plus one, which is its own convention. No part of Tang-Build, TinyTang or Tang-Phosphor was found to use intellectual property beyond what `THIRD_PARTY.md` records.
+
+#### Next Steps:
+
+Qualify or abandon these before anything is built on them, and take them in the order their own documents give. The bridge fix comes first, because it is the one that could explain a real failure: run its bench in this state, check the added address compare against the bus clock at the macro's AHB outputs, and only then build and place it, watching the timing report. The JTAG experiment needs its default build checked against a committed image, since its own document says the default path is intended to be unchanged and has not been verified. The resident player stays behind the qualified on-demand image of entry 76 and is not to be loaded until it is qualified. Two things about the repository state should be settled at the same time: `third_party/rockbox` is dirty and needs to be committed, pinned or reverted, and the active log keeps a numbering that runs to 82 rather than from one, which the project's checker would flag as it flags the sibling project's -- the correction is a mechanical renumber and the syntax rules allow it only as a declared mechanical fix. Nothing here reopens the resident player start failure as solved: the bridge burst prediction remains a hypothesis with its evidence outside the repository, and the way to settle it is the bench and then the board.
+
+#### Files Modified:
+
+- docs/experiment-ae350-jtag.md
+- docs/experiment-ae350-probes.md
+- docs/experiment-ram-bridge-burst.md
+- docs/experiment-resident-player.md
+- software/ae350/programs/chainload/main.c
+- software/ae350/programs/wbrace/main.c
+- software/rbhost/host/platform_ae350.c
+- software/rbhost/host/rbhost.c
+- src/ae350/ae350_ddr3_top.sv
+- src/ae350/ae350_ram_bridge.sv
+- src/ae350/ae350_soc.sv
+- src/ae350/ae350_subsystem.sv
+- src/pmod_mirror_core.sv
+- src/tang_phosphor_top.sv
+- tests/ae350_ram_bridge_tb.sv
+- tools/openocd-ae350.cfg
+
+#### Status:
+
+- Build: NOT RUN
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

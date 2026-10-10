@@ -10,14 +10,14 @@
  * be compared with the same decode under qemu-riscv32.  stdout and stderr
  * go to the log ring.
  *
- * An image built with BENCH_STREAM=2 (make bench-ondemand) embeds no input
- * and receives none whole: it asks the BL616 for the input's size and then
- * for its bytes, chunk by chunk, through the file-request mailbox
- * (ae350_request.h), the chunks a read needs first and the rest in order in
- * the background.  With BENCH_PLAY=1 it also plays the output as the codec
- * writes it, from a ring in the output buffer, starting once half a second
- * is buffered, so a track starts after its first chunks rather than after
- * the whole file has been sent and decoded.
+ * An image built with BENCH_STREAM=2 (make bench-ondemand) is a resident
+ * player: it embeds no input and never returns, but asks the BL616 for one
+ * track after another and reads each on demand, chunk by chunk, through the
+ * file-request mailbox (ae350_request.h).  With BENCH_PLAY=1 it also plays
+ * the output as the codec writes it, from a ring in the output buffer, and
+ * keeps the play stream open between tracks of the same rate, so a track
+ * starts after its first chunks and the next follows without a gap.  See
+ * "On-demand input and the resident player" below.
  *
  * Result registers:
  *   USER(0)      rbhost exit status
@@ -47,6 +47,7 @@
 extern int errno;
 
 int main(int argc, char **argv);
+void rbhost_reset(void);
 
 struct bench_file {
     const char *name;
@@ -110,30 +111,56 @@ static int exit_status;
 extern const uint32_t bench_play;
 
 /*
- * On-demand input (bench_stream == 2).  The input is requested in CHUNK_BYTES
- * pieces into INPUT_BASE at the file's own offsets: a chunk a read is waiting
- * for first, otherwise the next missing chunk in order, so the whole file
- * arrives in the background while the codec works and seeks back cost
- * nothing.  One request is outstanding at a time; its answer is drained from
- * the stream FIFO a little at a time by service_input(), which every wait and
- * every output write calls, so playback is fed while data arrives.
+ * On-demand input and the resident player (bench_stream == 2).
+ *
+ * The player does not return after a track.  It asks the BL616 for its next
+ * track with a request of length 0 (QUERY_NEXT), which is answered with the
+ * track's size, 0 while nothing is queued, or ANSWER_STOP, and then requests
+ * the track's bytes in CHUNK_BYTES pieces into INPUT_BASE at the file's own
+ * offsets: a chunk a read is waiting for first, otherwise the next missing
+ * chunk in order, so the whole file arrives in the background while the codec
+ * works and seeks back cost nothing.  While a track decodes it also asks
+ * every 100 ms whether to stop it (QUERY_POLL).  One request is outstanding
+ * at a time, and its answer is drained from the stream FIFO a little at a
+ * time by service(), which every wait and every output write calls, so
+ * playback is fed while data arrives.  A stop longjmps out of the codec.
+ *
+ * Its state is published in the result words: USER(0) RESIDENT_MAGIC,
+ * USER(1) tracks begun, USER(2) tracks finished, USER(3) the samples and
+ * USER(4) the decode status of the latest finished track (TRACK_ABORTED for
+ * one stopped part way).  A track is finished once all of it has been handed
+ * to the FPGA player.
  */
 #define CHUNK_BYTES   (64u << 10)
 #define MAX_CHUNKS    (INPUT_LIMIT / CHUNK_BYTES)
 #define DRAIN_BUDGET  256u                      /* stream entries per call */
 #define REQUEST_RETRY (2u * AE350_TIME_HZ)      /* silence before asking again */
+#define POLL_TICKS    (AE350_TIME_HZ / 10u)
+#define IDLE_TICKS    (AE350_TIME_HZ / 20u)     /* between QUERY_NEXTs when idle */
+
+#define QUERY_NEXT     1u
+#define QUERY_POLL     2u
+#define ANSWER_STOP    0xffffffffu
+#define RESIDENT_MAGIC 0x52455331u              /* "RES1" */
+#define TRACK_ABORTED  0xffffffffu
 
 static uint8_t chunk_ready[MAX_CHUNKS];
 static uint32_t input_chunks;
 static uint32_t prefetch_chunk;
 static int32_t demand_chunk = -1;
 static uint32_t input_requests;
+static int decoding;            /* inside main(), where a stop may longjmp */
+static int stop_requested;
+static uint32_t last_poll;      /* AE350_TIME_LOW at the latest QUERY_POLL */
 static struct {
     int active;
     int started;
+    int query;                  /* answering a length-0 request */
+    uint32_t opcode;
     uint32_t chunk;
     uint32_t received;
-    uint32_t heard;   /* AE350_TIME_LOW at the request or its latest entry */
+    uint32_t answer;
+    uint32_t heard;             /* AE350_TIME_LOW at the request or its latest entry */
 } rx;
 
 static void service_output(void);
@@ -145,57 +172,104 @@ static uint32_t chunk_length(uint32_t chunk)
                                                    : CHUNK_BYTES;
 }
 
-static void request_chunk(uint32_t chunk)
+static void begin_request(void)
 {
     rx.active = 1;
     rx.started = 0;
-    rx.chunk = chunk;
     rx.received = 0;
     rx.heard = AE350_REG(AE350_TIME_LOW);
+}
+
+static void request_chunk(uint32_t chunk)
+{
+    begin_request();
+    rx.query = 0;
+    rx.chunk = chunk;
     ae350_request(chunk * CHUNK_BYTES, chunk_length(chunk));
     ++input_requests;
 }
 
-static void service_input(void)
+static void request_query(uint32_t opcode)
 {
-    if (!input_chunks)
-        return;
-    if (rx.active) {
-        for (uint32_t n = 0; n < DRAIN_BUDGET && rx.active; ++n) {
-            uint32_t status = AE350_REG(AE350_STREAM_STATUS);
-            if (!(status & 1u)) {
-                /* An answer that never comes is asked for again. */
-                if (AE350_REG(AE350_TIME_LOW) - rx.heard > REQUEST_RETRY)
-                    request_chunk(rx.chunk);
-                return;
-            }
-            uint32_t tag = (status >> 1) & 3u;
-            uint32_t data = AE350_REG(AE350_STREAM_DATA);
-            AE350_REG(AE350_STREAM_POP) = 0;
-            rx.heard = AE350_REG(AE350_TIME_LOW);
-            if (tag == AE350_TAG_START) {
-                rx.started = 1;
-                rx.received = 0;
-            } else if (!rx.started) {
-                continue;
-            } else if (tag == AE350_TAG_DATA) {
+    begin_request();
+    rx.query = 1;
+    rx.opcode = opcode;
+    rx.answer = 0;
+    ae350_request(opcode, 0);
+}
+
+static void reissue(void)
+{
+    if (rx.query)
+        request_query(rx.opcode);
+    else
+        request_chunk(rx.chunk);
+}
+
+/* Drain the outstanding answer until it is complete or nothing is waiting. */
+static void drain_answer(void)
+{
+    for (uint32_t n = 0; n < DRAIN_BUDGET; ++n) {
+        uint32_t status = AE350_REG(AE350_STREAM_STATUS);
+        if (!(status & 1u)) {
+            /* An answer that never comes is asked for again. */
+            if (AE350_REG(AE350_TIME_LOW) - rx.heard > REQUEST_RETRY)
+                reissue();
+            return;
+        }
+        uint32_t tag = (status >> 1) & 3u;
+        uint32_t data = AE350_REG(AE350_STREAM_DATA);
+        AE350_REG(AE350_STREAM_POP) = 0;
+        rx.heard = AE350_REG(AE350_TIME_LOW);
+        if (tag == AE350_TAG_START) {
+            rx.started = 1;
+            rx.received = 0;
+        } else if (!rx.started) {
+            continue;
+        } else if (tag == AE350_TAG_DATA) {
+            if (rx.query) {
+                if (rx.received == 0)
+                    rx.answer = data;
+            } else if (rx.received < CHUNK_BYTES) {
                 /* Chunks start word-aligned; only the file's last chunk ends
                  * in a padded word, inside its own CHUNK_BYTES slot. */
-                if (rx.received < CHUNK_BYTES)
-                    *(uint32_t *)(INPUT_BASE + rx.chunk * CHUNK_BYTES + rx.received) = data;
-                rx.received += 4u;
-            } else {
-                /* A short END or a CANCEL leaves the chunk to be asked for
-                 * again. */
-                if (tag == AE350_TAG_END && data == chunk_length(rx.chunk))
-                    chunk_ready[rx.chunk] = 1;
-                rx.active = 0;
+                *(uint32_t *)(INPUT_BASE + rx.chunk * CHUNK_BYTES + rx.received) = data;
             }
+            rx.received += 4u;
+        } else if (rx.query) {
+            if (tag == AE350_TAG_END && data == 4u) {
+                rx.active = 0;
+                if (rx.opcode == QUERY_POLL && rx.answer == 1u)
+                    stop_requested = 1;
+            } else {
+                reissue();
+            }
+            return;
+        } else {
+            /* A short END or a CANCEL leaves the chunk to be asked for
+             * again. */
+            if (tag == AE350_TAG_END && data == chunk_length(rx.chunk))
+                chunk_ready[rx.chunk] = 1;
+            rx.active = 0;
+            return;
         }
+    }
+}
+
+static void service_input(void)
+{
+    if (rx.active) {
+        drain_answer();
         if (rx.active)
             return;
     }
-
+    if (decoding && AE350_REG(AE350_TIME_LOW) - last_poll > POLL_TICKS) {
+        last_poll = AE350_REG(AE350_TIME_LOW);
+        request_query(QUERY_POLL);
+        return;
+    }
+    if (!input_chunks)
+        return;
     uint32_t chunk;
     if (demand_chunk >= 0 && !chunk_ready[demand_chunk]) {
         chunk = (uint32_t)demand_chunk;
@@ -209,140 +283,178 @@ static void service_input(void)
     request_chunk(chunk);
 }
 
+static void service(void)
+{
+    service_input();
+    service_output();
+    if (decoding && stop_requested)
+        longjmp(exit_context, 2);
+}
+
 static void wait_for_chunk(uint32_t chunk)
 {
     demand_chunk = (int32_t)chunk;
-    while (!chunk_ready[chunk]) {
-        service_input();
-        service_output();
-    }
+    while (!chunk_ready[chunk])
+        service();
     demand_chunk = -1;
 }
 
-/*
- * Ask for the input's size (a request of length 0) and its first chunk, and
- * register it as the streamed input.  Returns the size, or 0 when the BL616
- * does not answer or the file is empty or too large.
- */
-static uint32_t request_input(void)
+/* Ask a length-0 question, playing out meanwhile, and return the answer.
+ * Used only between tracks, so a played-out stream is ended while waiting. */
+static void end_stream_if_played(void);
+
+static uint32_t ask(uint32_t opcode)
 {
-    uint8_t answer[8];
-
-    ae350_request(0, 0);
-    int32_t got = ae350_request_receive(answer, sizeof(answer), 10u * AE350_TIME_HZ);
-    if (got != 4)
-        return 0;
-    uint32_t size = (uint32_t)answer[0] | (uint32_t)answer[1] << 8 |
-                    (uint32_t)answer[2] << 16 | (uint32_t)answer[3] << 24;
-    if (size == 0 || size > INPUT_LIMIT)
-        return 0;
-    input_stream_size = size;
-    input_chunks = (size + CHUNK_BYTES - 1u) / CHUNK_BYTES;
-    wait_for_chunk(0);
-
-    const char *ext = probe_input_extension(INPUT_BASE);
-    strcpy(stream_input_name, "input.");
-    strcat(stream_input_name, ext);
-    stream_file.name = stream_input_name;
-    stream_file.data = INPUT_BASE;
-    stream_file.size = size;
-    ae350_puts("request size ");
-    ae350_put_decimal(size);
-    ae350_puts("\n");
-    return size;
+    while (rx.active) {
+        drain_answer();
+        service_output();
+        end_stream_if_played();
+    }
+    request_query(opcode);
+    while (rx.active) {
+        drain_answer();
+        service_output();
+        end_stream_if_played();
+    }
+    return rx.answer;
 }
 
 /*
- * Live playback (bench_stream == 2 with bench_play).  The output file is
- * written into OUTPUT_BASE as a ring of OUTPUT_LIMIT bytes, and the PCM past
- * its 0x2e-byte WAV header is handed to the FPGA player as the play stream
- * has room, without ever waiting on it, so the input keeps being served while
- * the player is full.  The header's rate is read when playback starts, half
- * a second in or when the output closes; header fixups written by lseek at
- * close are behind the play position and never played.
+ * Live playback (with bench_play).  Each track's output WAV keeps its
+ * 0x2e-byte header in track_header and appends its PCM to one stream of
+ * positions, held in OUTPUT_BASE as a ring of OUTPUT_LIMIT bytes; the PCM is
+ * handed to the FPGA player whenever the play stream has room, never waiting
+ * on it, so input keeps being served while the player is full.  The play
+ * stream opens half a second in, or at once for a track shorter than that,
+ * at the track's rate, and stays open while the next track has the same
+ * rate, so tracks follow each other without a gap.  A track at another rate
+ * waits for the stream to play out and end, and opens a new one.  Positions
+ * are 64-bit so a stream never wraps them.
  */
 #define WAV_HEADER_BYTES 0x2eu
 #define OUTPUT_MASK      (OUTPUT_LIMIT - 1u)
 #define PLAY_PREBUFFER   (44100u * 4u / 2u)
 #define WRITE_HEADROOM   (1u << 20)
+#define MAX_BOUNDARIES   16u    /* tracks decoded but not yet all handed over */
 
-static uint32_t play_position;
-static int play_started;
+static uint8_t track_header[WAV_HEADER_BYTES];
+static uint32_t track_rate;     /* the current track's, once its PCM begins */
+static uint64_t track_base;     /* stream position of its first PCM byte */
+static uint64_t pcm_written;    /* stream bytes written ... */
+static uint64_t play_position;  /* ... and handed to the player */
+static uint32_t stream_rate;    /* the open play stream's rate; 0 for none */
 static int output_closed;
+static uint32_t tracks_begun;
+static uint32_t tracks_finished;
+static struct {
+    uint64_t end;
+    uint32_t samples;
+    uint32_t status;
+} boundaries[MAX_BOUNDARIES];
+static uint32_t boundary_count;
 
 static int live_play(void)
 {
     return bench_play && bench_stream == 2u;
 }
 
-static uint32_t output_byte(uint32_t position)
+static uint32_t ring_byte(uint64_t position)
 {
-    return OUTPUT_BASE[position & OUTPUT_MASK];
+    return OUTPUT_BASE[(uint32_t)position & OUTPUT_MASK];
 }
 
-static void play_start(void)
+static void publish_finished(uint32_t samples, uint32_t status)
 {
-    uint32_t rate = output_byte(0x18) | output_byte(0x19) << 8 |
-                    output_byte(0x1a) << 16 | output_byte(0x1b) << 24;
-    AE350_REG(AE350_PLAY_RATE) = rate;
-    AE350_REG(AE350_PLAY_CTRL) = 1u;
-    play_position = WAV_HEADER_BYTES;
-    play_started = 1;
+    ++tracks_finished;
+    AE350_REG(AE350_USER(3)) = samples;
+    AE350_REG(AE350_USER(4)) = status;
+    AE350_REG(AE350_USER(2)) = tracks_finished;
 }
 
 static void service_output(void)
 {
     if (!live_play())
         return;
-    if (!play_started) {
-        if (output_size <= WAV_HEADER_BYTES ||
-            (!output_closed && output_size < WAV_HEADER_BYTES + PLAY_PREBUFFER))
+    if (!stream_rate) {
+        if (!track_rate || pcm_written == play_position ||
+            (!output_closed && pcm_written - play_position < PLAY_PREBUFFER))
             return;
-        play_start();
+        AE350_REG(AE350_PLAY_RATE) = track_rate;
+        AE350_REG(AE350_PLAY_CTRL) = 1u;
+        stream_rate = track_rate;
     }
-    while (play_position + 4u <= output_size && (AE350_REG(AE350_PLAY_CTRL) & 1u)) {
-        uint32_t p = play_position;
-        AE350_REG(AE350_PLAY_DATA) = output_byte(p) | output_byte(p + 1u) << 8 |
-                                     output_byte(p + 2u) << 16 | output_byte(p + 3u) << 24;
+    while (play_position + 4u <= pcm_written && (AE350_REG(AE350_PLAY_CTRL) & 1u)) {
+        uint64_t p = play_position;
+        AE350_REG(AE350_PLAY_DATA) = ring_byte(p) | ring_byte(p + 1u) << 8 |
+                                     ring_byte(p + 2u) << 16 | ring_byte(p + 3u) << 24;
         play_position = p + 4u;
     }
+    while (boundary_count && play_position >= boundaries[0].end) {
+        publish_finished(boundaries[0].samples, boundaries[0].status);
+        --boundary_count;
+        for (uint32_t i = 0; i < boundary_count; ++i)
+            boundaries[i] = boundaries[i + 1u];
+    }
 }
 
-/* Play the rest of the output and end the stream, after the codec is done. */
-static void play_finish(void)
+/* End the play stream once everything written has been handed over. */
+static void end_stream_if_played(void)
 {
-    output_closed = 1;
-    service_output();
-    if (!play_started)
-        return;
-    while (play_position + 4u <= output_size)
-        service_output();
-    for (; play_position < output_size; ++play_position)
-        AE350_REG(AE350_PLAY_BYTE) = output_byte(play_position);
-    AE350_REG(AE350_PLAY_CTRL) = 2u;
+    if (stream_rate && play_position + 4u > pcm_written && !boundary_count) {
+        AE350_REG(AE350_PLAY_CTRL) = 2u;
+        stream_rate = 0;
+    }
 }
 
-/* Append to the play ring, keeping clear of PCM not yet played. */
-static void write_ring(uint32_t position, const void *buffer, size_t count)
+/* Drop the stream and everything queued for it, for a stop.  Tracks whose
+ * audio is dropped still finish, aborted and in order, so the finished count
+ * always catches up with the count begun. */
+static void play_cancel(void)
+{
+    if (stream_rate)
+        AE350_REG(AE350_PLAY_CTRL) = 4u;
+    stream_rate = 0;
+    pcm_written = play_position = track_base = 0;
+    for (uint32_t i = 0; i < boundary_count; ++i)
+        publish_finished(boundaries[i].samples, TRACK_ABORTED);
+    boundary_count = 0;
+}
+
+/* The output file's bytes: the header to track_header, the PCM to the ring
+ * at its stream position, keeping clear of PCM not yet played. */
+static void write_output(uint32_t position, const void *buffer, size_t count)
 {
     const uint8_t *p = buffer;
 
-    /* A header fixup after the ring has wrapped would land on PCM. */
-    if (position < WAV_HEADER_BYTES && output_size > OUTPUT_LIMIT - WRITE_HEADROOM)
+    for (; count && position < WAV_HEADER_BYTES; --count)
+        track_header[position++] = *p++;
+    if (!count)
         return;
-    while (play_started &&
-           position + count > play_position + OUTPUT_LIMIT - WRITE_HEADROOM) {
-        service_input();
-        service_output();
+    if (!track_rate) {
+        uint32_t rate = (uint32_t)track_header[0x18] | (uint32_t)track_header[0x19] << 8 |
+                        (uint32_t)track_header[0x1a] << 16 | (uint32_t)track_header[0x1b] << 24;
+        if (stream_rate && rate != stream_rate) {
+            while (play_position + 4u <= pcm_written)
+                service();
+            AE350_REG(AE350_PLAY_CTRL) = 2u;
+            stream_rate = 0;
+        }
+        track_rate = rate;
     }
-    while (count) {
-        uint32_t at = position & OUTPUT_MASK;
-        uint32_t run = OUTPUT_LIMIT - at < count ? OUTPUT_LIMIT - at : (uint32_t)count;
-        memcpy(OUTPUT_BASE + at, p, run);
+    uint64_t at = track_base + (position - WAV_HEADER_BYTES);
+    while (stream_rate && at + count > play_position + OUTPUT_LIMIT - WRITE_HEADROOM)
+        service();
+    for (uint64_t end = at + count; at < end;) {
+        uint32_t offset = (uint32_t)at & OUTPUT_MASK;
+        uint32_t run = OUTPUT_LIMIT - offset;
+        if (run > end - at)
+            run = (uint32_t)(end - at);
+        memcpy(OUTPUT_BASE + offset, p, run);
         p += run;
-        position += run;
-        count -= run;
+        at += run;
     }
+    if (at > pcm_written)
+        pcm_written = at;
 }
 
 int _open(const char *path, int flags, int mode)
@@ -431,7 +543,7 @@ int _write(int fd, const void *buffer, size_t count)
         return -1;
     uint32_t position = files[fd].position;
     if (live_play()) {
-        write_ring(position, buffer, count);
+        write_output(position, buffer, count);
     } else {
         if (count > OUTPUT_LIMIT - position) {
             errno = ENOSPC;
@@ -442,8 +554,8 @@ int _write(int fd, const void *buffer, size_t count)
     files[fd].position = position + count;
     if (files[fd].position > output_size)
         output_size = files[fd].position;
-    service_input();
-    service_output();
+    if (bench_stream == 2u)
+        service();
     return (int)count;
 }
 
@@ -610,17 +722,102 @@ static void play_output(void)
     AE350_REG(AE350_PLAY_CTRL) = 2u;
 }
 
+/* Wait for the next track, playing out what is queued and ending the play
+ * stream once it has all been handed over; a stop drops it.  Returns the
+ * track's size. */
+static uint32_t wait_for_track(void)
+{
+    /* A track is taken only when its end can be recorded. */
+    while (boundary_count == MAX_BOUNDARIES)
+        service_output();
+    for (;;) {
+        if (stop_requested) {
+            stop_requested = 0;
+            play_cancel();
+        }
+        uint32_t answer = ask(QUERY_NEXT);
+        if (answer == ANSWER_STOP) {
+            play_cancel();
+            continue;
+        }
+        if (answer && answer <= INPUT_LIMIT)
+            return answer;
+        uint32_t start = AE350_REG(AE350_TIME_LOW);
+        while (AE350_REG(AE350_TIME_LOW) - start < IDLE_TICKS) {
+            service_output();
+            end_stream_if_played();
+        }
+    }
+}
+
+/* Decode one track of `size` bytes into the play stream. */
+static void run_track(uint32_t size)
+{
+    memset(chunk_ready, 0, sizeof(chunk_ready));
+    input_stream_size = size;
+    input_chunks = (size + CHUNK_BYTES - 1u) / CHUNK_BYTES;
+    prefetch_chunk = 0;
+    demand_chunk = -1;
+    for (int fd = 3; fd < MAX_FILES; ++fd)
+        files[fd].open = 0;
+    output_size = 0;
+    output_closed = 0;
+    track_base = pcm_written;
+    track_rate = 0;
+    stop_requested = 0;
+    exit_status = 0;
+    rbhost_reset();
+    AE350_REG(AE350_USER(1)) = ++tracks_begun;
+    last_poll = AE350_REG(AE350_TIME_LOW);
+
+    if (setjmp(exit_context) == 0) {
+        decoding = 1;
+        wait_for_chunk(0);
+        strcpy(stream_input_name, "input.");
+        strcat(stream_input_name, probe_input_extension(INPUT_BASE));
+        stream_file.name = stream_input_name;
+        stream_file.data = INPUT_BASE;
+        stream_file.size = size;
+        char *argv[] = {"rbhost", "codecs", stream_input_name, "output.wav", NULL};
+        exit_status = main(4, argv);
+    }
+    decoding = 0;
+    input_chunks = 0;
+    if (stop_requested) {
+        stop_requested = 0;
+        play_cancel();
+        publish_finished(0, TRACK_ABORTED);
+        ae350_puts("track stopped\n");
+        return;
+    }
+    output_closed = 1;
+    boundaries[boundary_count].end = pcm_written;   /* a slot is free: wait_for_track */
+    boundaries[boundary_count].samples = (uint32_t)((pcm_written - track_base) / 4u);
+    boundaries[boundary_count].status = (uint32_t)exit_status;
+    ++boundary_count;
+    ae350_puts("requests ");
+    ae350_put_decimal(input_requests);
+    ae350_puts("\n");
+}
+
+/* The resident player: one track after another, until the AE350 is restarted. */
+static __attribute__((noreturn)) void resident_main(void)
+{
+    for (int i = 0; i < 13; ++i)
+        AE350_REG(AE350_USER(i)) = 0;
+    AE350_REG(AE350_USER(0)) = RESIDENT_MAGIC;
+    ae350_puts("resident\n");
+    for (;;)
+        run_track(wait_for_track());
+}
+
 /* Called by crt0_ae350.S after .bss is cleared. */
 uint32_t ae350_main(void)
 {
     uint32_t input_size = 0;
 
     if (bench_stream == 2u) {
-        input_size = request_input();
-        if (!input_size) {
-            ae350_puts("request failed\n");
-            return 0xbad00001u;
-        }
+        resident_main();
     } else if (bench_stream) {
         input_size = receive_stream_file();
     } else {
@@ -646,11 +843,6 @@ uint32_t ae350_main(void)
 
     if (setjmp(exit_context) == 0)
         exit_status = main(4, argv);
-    /* Live playback has the rest of the track to play out; finish it before
-     * the CRC below, which would otherwise starve the player.  Every sample
-     * the codec produced is played, whatever its exit status (see below). */
-    if (live_play())
-        play_finish();
 
     cycles = ae350_cycles() - cycles;
     instructions = ae350_instructions() - instructions;
@@ -668,12 +860,7 @@ uint32_t ae350_main(void)
     /* The codec's status is nonzero for a trailing error even when the whole
      * track decoded (Opus reports "codec error" after a complete decode), so
      * gate playback on samples actually produced rather than on exit_status. */
-    if (live_play()) {
-        ae350_puts("requests ");
-        ae350_put_decimal(input_requests);
-        ae350_puts("\n");
-    } else if (bench_play && output_size > 0x2e) {
+    if (bench_play && output_size > 0x2e)
         play_output();
-    }
     return 0x600d0000u | ((uint32_t)exit_status & 0xffffu);
 }

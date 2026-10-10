@@ -83,7 +83,13 @@ module ae350_ddr3_top (
         .debug_write   (debug_write),
         .debug_address (debug_address),
         .debug_wdata   (debug_wdata),
-        .debug_rdata   (debug_rdata)
+        .debug_rdata   (debug_rdata),
+        .jtag_trst     (1'b1),
+        .jtag_tck      (1'b1),
+        .jtag_tms      (1'b1),
+        .jtag_tdi      (1'b0),
+        .jtag_tdo      (),
+        .jtag_tdo_oe   ()
     );
 
     // CORE_ID 0x0353 tags this image; Tang-Control reports its low byte.

@@ -79,7 +79,16 @@ module ae350_subsystem (
     input  logic        debug_write,
     input  logic [31:0] debug_address,
     input  logic [31:0] debug_wdata,
-    output logic [31:0] debug_rdata
+    output logic [31:0] debug_rdata,
+
+    // The A25's debug JTAG, straight to the macro (ae350_soc); tie TCK, TMS
+    // and TRST high and TDI low when it is not brought out.
+    input  logic        jtag_trst,
+    input  logic        jtag_tck,
+    input  logic        jtag_tms,
+    input  logic        jtag_tdi,
+    output logic        jtag_tdo,
+    output logic        jtag_tdo_oe
 );
 
     // ------------------------------------------------------------------
@@ -293,7 +302,13 @@ module ae350_subsystem (
         .ram_hwdata  (ram_hwdata),
         .ram_hrdata  (ram_hrdata),
         .ram_hready  (ram_hready),
-        .ram_hresp   (ram_hresp)
+        .ram_hresp   (ram_hresp),
+        .jtag_trst   (jtag_trst),
+        .jtag_tck    (jtag_tck),
+        .jtag_tms    (jtag_tms),
+        .jtag_tdi    (jtag_tdi),
+        .jtag_tdo    (jtag_tdo),
+        .jtag_tdo_oe (jtag_tdo_oe)
     );
 
     ae350_boot_rom boot_rom (

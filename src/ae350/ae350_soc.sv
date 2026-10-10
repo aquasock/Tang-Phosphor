@@ -37,7 +37,17 @@ module ae350_soc (
     output wire  [63:0] ram_hwdata,
     input  wire  [63:0] ram_hrdata,
     input  wire         ram_hready,
-    input  wire         ram_hresp
+    input  wire         ram_hresp,
+
+    // The A25's debug JTAG (RISC-V debug module behind the macro's TAP).
+    // Tie TCK, TMS and TRST high and TDI low when it is not brought out;
+    // TRST's polarity is not documented here (core-log entry 77).
+    input  wire         jtag_trst,
+    input  wire         jtag_tck,
+    input  wire         jtag_tms,
+    input  wire         jtag_tdi,
+    output wire         jtag_tdo,
+    output wire         jtag_tdo_oe
 );
 
 AE350_SOC cpu (
@@ -47,7 +57,7 @@ AE350_SOC cpu (
     .DDR_CLK(bus_clk),
     .AHB_CLK(bus_clk),
     .APB_CLK(bus_clk),
-    .DBG_TCK(1'b1),
+    .DBG_TCK(jtag_tck),
     .RTC_CLK(bus_clk),
     .CORE_CE(1'b1),
     .AXI_CE(1'b1),
@@ -141,11 +151,11 @@ AE350_SOC cpu (
     .DDR_HWDATA(ram_hwdata),
     .DDR_HWRITE(ram_hwrite),
 
-    .TMS_IN(1'b1),
-    .TRST_IN(1'b1),
-    .TDI_IN(1'b0),
-    .TDO_OUT(),
-    .TDO_OE(),
+    .TMS_IN(jtag_tms),
+    .TRST_IN(jtag_trst),
+    .TDI_IN(jtag_tdi),
+    .TDO_OUT(jtag_tdo),
+    .TDO_OE(jtag_tdo_oe),
 
     .SPI2_HOLDN_IN(1'b0),
     .SPI2_WPN_IN(1'b0),

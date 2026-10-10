@@ -44,6 +44,9 @@ module pmod_mirror_core #(
     // host that already has a map can place it.  Audio follows the same split.
     parameter bit   EXTERNAL_AUDIO    = 1'b0,
     parameter bit   EXPOSE_STATE      = 1'b0,
+    // Leave PMOD0 undriven whatever is declared, for a top that uses the
+    // socket's pins itself (tang_phosphor_top's AE350_JTAG_PMOD0).
+    parameter bit   RELEASE_PMOD0     = 1'b0,
     parameter bit   I2S2_BACKEND       = 1'b0,
     parameter bit   I2S2_PLAYBACK      = 1'b0
 ) (
@@ -747,12 +750,18 @@ module pmod_mirror_core #(
         .io_i    (p0_io_i)
     );
 
-    pmod_io_buf p0_buf (
-        .o  (p0_io_o),
-        .oe (p0_io_oe),
-        .i  (p0_io_i),
-        .io (pmod0_io)
-    );
+    generate
+        if (RELEASE_PMOD0) begin : g_p0_released
+            assign p0_io_i = '0;
+        end else begin : g_p0_buf
+            pmod_io_buf p0_buf (
+                .o  (p0_io_o),
+                .oe (p0_io_oe),
+                .i  (p0_io_i),
+                .io (pmod0_io)
+            );
+        end
+    endgenerate
 
     // No PMOD1 personality exists yet, so the socket stays released.  The
     // parameter is kept so a future personality slots in here unchanged.

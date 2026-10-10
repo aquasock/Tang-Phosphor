@@ -450,13 +450,37 @@ static struct codec_api ci = {
     panicf,
 };
 
+/* Make the next main() start as the first one did, for a player that decodes
+ * one track after another (platform_ae350.c); called before every main(). */
+void rbhost_reset(void)
+{
+    static struct codec_api initial;
+    static bool saved;
+    if (!saved) {
+        initial = ci;
+        saved = true;
+    } else {
+        ci = initial;
+    }
+    input_fd = -1;
+    output_fd = -1;
+    header_written = false;
+    num_output_samples = 0;
+}
+
 static int decode_file(const char *codec_dir, const char *input_fn)
 {
-    dsp_init();
-
-    memset(&global_settings, 0, sizeof(global_settings));
-    global_settings.timestretch_enabled = true;
-    dsp_timestretch_enable(true);
+    /* Once, as Rockbox does at boot: the DSP keeps its stages, and the
+     * timestretch buffers are allocated when it is first enabled.  Each
+     * track resets the DSP below. */
+    static bool dsp_ready;
+    if (!dsp_ready) {
+        dsp_init();
+        memset(&global_settings, 0, sizeof(global_settings));
+        global_settings.timestretch_enabled = true;
+        dsp_timestretch_enable(true);
+        dsp_ready = true;
+    }
 
     input_fd = open(input_fn, O_RDONLY);
     if (input_fd < 0) {

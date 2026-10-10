@@ -5,9 +5,9 @@
 // ae350_ram_link.  This module is the half that sits beside the AE350 macro;
 // the link carries its line commands across the die to the controller.
 //
-// The bridge runs on the controller's user clock, which also clocks the
-// AE350 buses, so a cache miss crosses no clock domain.  One 256-bit native
-// word is exactly one 32-byte A25 cache line.
+// The bridge runs on bus_clk, the AE350 bus clock; ae350_ram_link carries its
+// commands into the controller's user-clock domain and the read lines back.
+// One 256-bit native word is exactly one 32-byte A25 cache line.
 //
 // Timing: the AE350 macro's AHB outputs arrive after about 4 ns of routing,
 // and its inputs need about 5 ns of setup (Tang-PSX core-reference
@@ -16,17 +16,21 @@
 // phase is captured as it is accepted and evaluated from registers in the
 // next cycle, with HREADY low.  Beats that continue a burst are the
 // exception: whether a SEQ beat can complete without waiting is predicted
-// from registered burst state plus HTRANS and HWRITE, so the rest of a
-// cache-line burst runs with no wait states.  A predicted beat always reads
-// the next lane of the line (p_beat + 1, which also covers a WRAP4 wrap), so
-// its data does not depend on HADDR.
+// from registered burst state plus HTRANS, HWRITE and HADDR, so the rest of a
+// cache-line burst runs with no wait states.  A beat is predicted only when
+// its address is the next lane of the line the burst is on (p_line, p_beat +
+// 1, which also covers a WRAP4 wrap).  The AE350's RAM port has been traced
+// issuing a NONSEQ beat on one line followed by SEQ beats on another
+// (core-log entry 77); predicting those from burst state alone served them
+// from the wrong line, so a SEQ beat whose address does not follow is
+// evaluated as a new transfer instead.
 //
 // Reads: a read that is not a predicted continuation issues one native read
 // and waits for it; the line is kept in rbuf and the rest of the burst is
 // served from it.  Continuation is decided from the burst state (HTRANS
-// SEQ, the burst type, and the previous beat's position in the line), never
-// by comparing addresses, and rbuf is only used within the burst that
-// fetched it, so it never holds stale data.
+// SEQ, the burst type, the previous beat's position in the line) and the
+// beat's address, and rbuf is only used for beats on the line it holds, so
+// it never serves stale or foreign data.
 //
 // Writes: beats are merged into wbuf with byte enables and written with one
 // native command when the burst ends, is known to be complete, or leaves the
@@ -121,6 +125,7 @@ module ae350_ram_bridge (
     // Last accepted transfer, for burst continuation.
     logic        p_write;
     logic        p_error;
+    logic [24:0] p_line;
     logic [1:0]  p_beat;
     logic [2:0]  p_burst;
     logic [4:0]  p_count;
@@ -159,13 +164,15 @@ module ae350_ram_bridge (
     logic         t_armed;
     logic         t_frozen;
 
-    // Prediction for a SEQ beat, from registered state and two macro bits.
+    // Prediction for a SEQ beat, from registered state and the beat's
+    // address: the next lane of the same line.
+    wire p_next   = haddr[29:5] == p_line && haddr[4:3] == p_beat + 2'd1;
     wire p_cont   = !p_error && (p_burst == HBURST_WRAP4 || p_beat != 2'd3);
     wire p_last   = p_burst == HBURST_SINGLE || p_count + 5'd1 == burst_beats(p_burst);
     wire rd_ok    = p_cont && !p_write && rbuf_ok;
     wire wr_ok    = p_cont && p_write && wbuf_open;
     wire accept   = hready && htrans[1];
-    wire predict  = htrans == HTRANS_SEQ && (hwrite ? wr_ok : rd_ok);
+    wire predict  = htrans == HTRANS_SEQ && p_next && (hwrite ? wr_ok : rd_ok);
     wire complete = hready && c_valid;
     wire c_last   = c_burst == HBURST_SINGLE || c_count == burst_beats(c_burst);
 
@@ -254,6 +261,7 @@ module ae350_ram_bridge (
         if (accept) begin
             p_write <= hwrite;
             p_error <= haddr[31:30] != 2'b01;
+            p_line  <= haddr[29:5];
             p_beat  <= haddr[4:3];
             p_burst <= hburst;
             p_count <= htrans == HTRANS_SEQ ? p_count + 5'd1 : 5'd1;
@@ -327,6 +335,7 @@ module ae350_ram_bridge (
             c_merge     <= 1'b0;
             p_write     <= 1'b0;
             p_error     <= 1'b1;
+            p_line      <= '0;
             p_beat      <= 2'd0;
             p_burst     <= HBURST_SINGLE;
             p_count     <= 5'd0;

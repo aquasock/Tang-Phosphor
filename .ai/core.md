@@ -22,7 +22,7 @@ Tang-Phosphor is a re-implementation of the MiSTer-Phosphor project by aquasock 
 
 - Respect all standard licensing and attribution conventions.
 
-- Use the local cloned repository of the MIT "colibri" project as a "good-practices" reference when designing or modifying FPGA logic. 
+- Use CERN's colibri library (CERN-OHL-W-2.0), via the colibri-sv SystemVerilog port, as a good-practice reference when designing or modifying FPGA logic. Take ideas and conventions only: do not copy, translate or closely port its modules. If adapting a module is ever justified, stop and get user approval first, then follow CERN-OHL-W-2.0 and record it in THIRD_PARTY.md.
 
 ---
 
