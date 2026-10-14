@@ -51,11 +51,22 @@ lanes. Socket `5` exists only when the I2S2 backend is compiled in; it is enable
 core, not the older mirror-only bring-up core.
 
 Power the board off before changing modules or JP1. Remove the OLED and
-encoder, set I2S2 JP1 to SLV, and seat the module in the OLED's former PMOD0
-socket with module pin 1 aligned to socket pin 1. JP1 affects only the ADC;
-SLV is the intended setting for later input work. Connect Line Out to powered
-speakers or an amplifier, starting with low volume. The board has no dedicated
-headphone amplifier.
+encoder, set I2S2 JP1 to SLV, and seat the module with module pin 1 aligned to
+socket pin 1. JP1 affects only the ADC; SLV is the intended setting for later
+input work. Connect Line Out to powered speakers or an amplifier, starting with
+low volume. The board has no dedicated headphone amplifier.
+
+Personality `5` is available on either socket, so the placement is free but the
+declaration is not: the socket the module is seated in is the one that must be
+declared. This bring-up used the OLED's former PMOD0 socket and declared
+`0xc0 = 0x50`; on the TinyNES release card the module sits in **PMOD1**, next to
+the HDMI port, and is declared `0xc0 = 0x500`, because PMOD0 there carries the
+Wii Classic Controllers -- the NES core reads those four I2C buses from fixed
+pins, per its `ae350_soc.cst`, so a socket declared as I2S2 takes those pins away
+from the pads. Both arrangements have been played on hardware. Declare one
+socket with the module seated in the other and the serializer still runs while
+the Line Out stays silent, because the clock probe at `0xf8` and `0xfc` measures
+the clock and not the lanes.
 
 Keep the diagnostic image separate from the qualified playback image:
 
@@ -72,7 +83,8 @@ tdsh run /scripts/i2s2-tone.tdsh
 ```
 
 The script loads the diagnostic image and declares `0xc0 = 0x50`: PMOD0
-personality 5, normal orientation, PMOD1 released. Left should be the lower
+personality 5, normal orientation, PMOD1 released, so it expects the module in
+PMOD0 -- adjust the poke for any other seating. Left should be the lower
 tone and right the higher tone. `phosphor poke 0xc0 0` releases both sockets.
 Do not run the existing `phosphor.tdsh` for this test: its default declaration
 selects the OLED and encoder.

@@ -640,3 +640,34 @@ Qualify or abandon these before anything is built on them, and take them in the 
 - User Test: NOT RUN
 
 ---
+
+## 84 COMMIT Unreleased 2026-10-13T22:59:58-07:00
+
+#### Coming From:
+
+Unreleased 331bccd
+
+#### Purpose:
+
+Correct the I2S2 documentation and play script so they say which socket the module is seated in rather than assuming the bring-up's PMOD0.
+
+#### Outcome:
+
+Both the socket section of `docs/i2s2-bringup.md` and `tools/i2s2-play.tdsh` treated PMOD0 as the I2S2's socket rather than as one choice among two, which cost a debugging detour while the TinyNES release card was being validated: the module played only silence while the core drove released pins, and neither the clock probe at `0xf8` nor the status at `0xfc` could show it, because that counter measures the clock and not the lanes. The document now states the rule -- personality `5` is available on either socket, so the declaration has to name the one the module is seated in -- and records both qualified arrangements: this bring-up's OLED-former PMOD0 socket at `0xc0 = 0x50`, and the release card's PMOD1, next to the HDMI port, at `0xc0 = 0x500`, where PMOD0 carries the Wii Classic Controllers that the NES core reads from fixed pins per its `ae350_soc.cst`, so a socket declared as I2S2 takes those pins away from the pads. The tone section's `0xc0 = 0x50` description now says which seating it expects, and the history it records was left as history. The play script's header comment said "Run only with the I2S2 seated in PMOD0" and it poked `0x50` unconditionally; it now defaults to the release card's PMOD1 and takes `SOCKET=0` in the session for the PMOD0 seating, since `tdsh run` passes no arguments and the established way to parameterise one of these scripts is an inherited session variable, as `FILE` is. No build or hardware run was performed in this cycle: the correction records what the release-validation cycle established on hardware, where the module on PMOD1 played a FLAC to 441000 samples at 44.1 kHz with zero underruns while `0xc0 = 0x500` was declared. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and no settled log entry was rewritten, and validated this entry's six sections, sequential number, prose, Status values and the log's 100-entry limit. TinyTang's `tools/check_core_log.py` could not serve as that check: it requires an active log's numbering to begin at `1`, while this log's entries run 67 to 83, so it fails every entry already present and would say nothing about this one; this entry was instead validated against the template and the ordering rules by inspection. That mismatch is recorded rather than fixed, because it is a property of this repository's log and not of this cycle.
+
+#### Next Steps:
+
+`tools/i2s2_format_sweep.py` follows whichever declaration `i2s2-play.tdsh` makes, so a sweep on the release card now expects the module on PMOD1 and needs `SOCKET=0` only for the older PMOD0 seating; that should be confirmed on hardware the next time the twelve-format corpus is run. The bring-up's own images, `phosphortang-i2s2-tone.bin` and `phosphortang-i2s2-play.bin`, are not the TinyNES release card's `phosphortang.bin`, so nothing here changes what that card loads. One loose end in project control is worth a look: this active log's numbering runs 67 to 83 while `.ai/core-syntax.md` says an active log's entries begin at `1` and that a rollover adds a handoff numbered `1`, so either an archived log is missing or the numbering convention needs recording; resolving it is what would let TinyTang's `check_core_log.py` gate this repository too.
+
+#### Files Modified:
+
+- docs/i2s2-bringup.md
+- tools/i2s2-play.tdsh
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---

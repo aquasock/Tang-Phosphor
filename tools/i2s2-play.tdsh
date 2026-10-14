@@ -1,6 +1,14 @@
 #!/bin/tdsh
-# Native PCM playback. PMOD0: I2S2, normal orientation. PMOD1: none.
-# Run only with the I2S2 seated in PMOD0; OLED and encoder remain on hold.
+# Native PCM playback.  Personality 5 is available on either socket, so the
+# declaration has to name the socket the module is actually seated in.  PMOD1,
+# next to the HDMI port, is the default: that is the arrangement the TinyNES
+# release card ships, where the Wii Classic Controllers own PMOD0.  Set SOCKET=0
+# for the OLED's former PMOD0 socket instead.  Declaring the other socket drives
+# released pins and the Line Out stays silent.  OLED and encoder remain on hold.
+#
+#   tdsh run /scripts/i2s2-play.tdsh              # module seated in PMOD1
+#   SOCKET=0; tdsh run /scripts/i2s2-play.tdsh    # module seated in PMOD0
+
 CORE=/cores/console138k/phosphortang-i2s2-play.bin
 if test -f "$CORE"
     echo "i2s2: playback image found"
@@ -18,7 +26,11 @@ if $? != 0
     echo "i2s2: FPGA link unavailable"
     return 1
 endif
-phosphor poke 0xc0 0x50
+if "$SOCKET" = "0"
+    phosphor poke 0xc0 0x50
+else
+    phosphor poke 0xc0 0x500
+endif
 if $? != 0
     echo "i2s2: socket declaration failed"
     return 1
